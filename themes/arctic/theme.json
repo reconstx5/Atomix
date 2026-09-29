@@ -1,0 +1,8 @@
+{
+  "name": "Arctic",
+  "description": "The default. Clean and flat over big artwork, a condensed typeface and a text menu across the top — inspired by the Arctic family of Kodi skins.",
+  "author": "NodeFlix",
+  "layout": "top",
+  "colorScheme": "dark",
+  "preview": { "background": "#121314", "surface": "#2b2c2e", "accent": "#1c95cf" }
+}

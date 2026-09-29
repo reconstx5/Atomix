@@ -1,0 +1,8 @@
+{
+  "name": "Arctic Side",
+  "description": "The Arctic look with the menu down the left and white, pill-shaped highlights — made for a TV and a remote.",
+  "author": "NodeFlix",
+  "layout": "side",
+  "colorScheme": "dark",
+  "preview": { "background": "#141516", "surface": "#2e2f31", "accent": "#e8e8e8" }
+}

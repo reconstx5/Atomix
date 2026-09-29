@@ -1,0 +1,54 @@
+# NodeFlix with Docker Compose.
+#
+#   Local / LAN:  docker compose up -d            → http://<this-machine>:8787
+#   VPS + HTTPS:  set NODEFLIX_DOMAIN in .env, then
+#                 docker compose --profile https up -d
+#
+# See docs/DEPLOY.md for the full walkthrough.
+services:
+  nodeflix:
+    build: .
+    image: nodeflix:latest
+    container_name: nodeflix
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-Pacific/Auckland}
+      # Set to true when running behind the Caddy proxy below (or any reverse proxy)
+      - NODEFLIX_TRUST_PROXY=${NODEFLIX_TRUST_PROXY:-false}
+      # Optional: pre-fill the TMDB key (can also be set in Settings → Server)
+      - TMDB_API_KEY=${TMDB_API_KEY:-}
+    ports:
+      # With the https profile you can remove this, so only Caddy is reachable.
+      - "${NODEFLIX_PORT:-8787}:8787"
+    volumes:
+      - ./data:/data                      # database, artwork cache, plugin data
+      - ${MEDIA_MOVIES:-./media/movies}:/media/movies:ro
+      - ${MEDIA_TV:-./media/tv}:/media/tv:ro
+      - ${MEDIA_MUSIC:-./media/music}:/media/music:ro
+      # Your own plugins/themes (optional):
+      # - ./plugins:/app/plugins
+      # - ./themes:/app/themes
+    # Hardware transcoding (Intel/AMD, Linux): uncomment, then pick VAAPI in Settings → Server
+    # devices:
+    #   - /dev/dri:/dev/dri
+
+  caddy:
+    image: caddy:2
+    container_name: nodeflix-caddy
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on: [nodeflix]
+    environment:
+      - NODEFLIX_DOMAIN=${NODEFLIX_DOMAIN:?Set NODEFLIX_DOMAIN in .env, e.g. media.example.com}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

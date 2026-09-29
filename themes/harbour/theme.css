@@ -1,0 +1,25 @@
+/* Harbour — living-room layout with a side menu and larger artwork. */
+:root {
+  color-scheme: dark;
+  --bg: #0a1624;
+  --bg-2: #0e1c2e;
+  --surface: #132338;
+  --surface-2: #1b3150;
+  --border: rgba(160, 200, 255, 0.12);
+  --text: #eaf3ff;
+  --text-dim: #9fb4cc;
+  --accent: #2fb8f0;
+  --accent-text: #04121c;
+  --danger: #ff6b7a;
+  --success: #45d49a;
+  --radius: 6px;
+  --radius-lg: 10px;
+  --poster-w: 188px;
+  --nav-bg: linear-gradient(180deg, #0c1a2b 0%, #081321 100%);
+  --shadow: 0 14px 36px rgba(0, 6, 16, 0.6);
+  --font: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+  --font-display: var(--font);
+}
+body { font-size: 1.05rem; }
+.nav-link[aria-current="page"] { box-shadow: inset 4px 0 0 var(--accent); }
+.card:focus-visible, .card:hover { transform: scale(1.06); }

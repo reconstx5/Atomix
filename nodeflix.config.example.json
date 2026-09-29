@@ -1,0 +1,10 @@
+{
+  "host": "0.0.0.0",
+  "port": 8787,
+  "dataDir": "./data",
+  "ffmpegPath": "ffmpeg",
+  "ffprobePath": "ffprobe",
+  "trustProxy": false,
+  "sessionDays": 30,
+  "logLevel": "info"
+}

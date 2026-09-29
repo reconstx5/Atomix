@@ -1,0 +1,18 @@
+{
+  "id": "opensubtitles",
+  "name": "OpenSubtitles",
+  "version": "1.0.0",
+  "description": "Finds and downloads missing subtitles from OpenSubtitles.com — from the player's subtitle menu, or automatically for new titles.",
+  "author": "NodeFlix",
+  "homepage": "https://www.opensubtitles.com",
+  "main": "index.js",
+  "enabledByDefault": false,
+  "settings": [
+    { "key": "apiKey", "label": "API key", "type": "password", "default": "", "help": "Free: sign in at opensubtitles.com, open your profile → API consumers → create one." },
+    { "key": "username", "label": "OpenSubtitles username (optional)", "type": "text", "default": "", "help": "Without an account you can download 5 subtitles a day; signing in raises that limit." },
+    { "key": "password", "label": "OpenSubtitles password (optional)", "type": "password", "default": "" },
+    { "key": "languages", "label": "Languages", "type": "text", "default": "en", "help": "Comma-separated codes, e.g. en,mi,fr. Used for automatic downloads and as the default search." },
+    { "key": "autoDownload", "label": "Automatically download subtitles for newly added titles", "type": "boolean", "default": false },
+    { "key": "preferHearingImpaired", "label": "Prefer hearing-impaired (SDH) subtitles for automatic downloads", "type": "boolean", "default": false }
+  ]
+}

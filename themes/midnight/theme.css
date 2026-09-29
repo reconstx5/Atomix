@@ -1,0 +1,22 @@
+/* Midnight — default NodeFlix theme. Copy this folder to make your own. */
+:root {
+  color-scheme: dark;
+  --bg: #0c0e13;
+  --bg-2: #12151c;
+  --surface: #191d27;
+  --surface-2: #232937;
+  --border: rgba(255, 255, 255, 0.08);
+  --text: #eef1f6;
+  --text-dim: #a3abba;
+  --accent: #ff6b3d;
+  --accent-text: #160b06;
+  --danger: #ff5c6c;
+  --success: #3ecf8e;
+  --radius: 10px;
+  --radius-lg: 16px;
+  --poster-w: 164px;
+  --nav-bg: rgba(12, 14, 19, 0.78);
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: var(--font);
+}

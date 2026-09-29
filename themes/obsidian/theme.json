@@ -1,0 +1,8 @@
+{
+  "name": "Obsidian",
+  "description": "True black for OLED TVs and phones, with a violet accent.",
+  "author": "NodeFlix",
+  "layout": "top",
+  "colorScheme": "dark",
+  "preview": { "background": "#000000", "surface": "#111114", "accent": "#a78bfa" }
+}

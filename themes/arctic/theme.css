@@ -1,0 +1,213 @@
+/* Arctic — NodeFlix's default look.
+
+   Built on the structure of the Arctic Kodi skins (Arctic: Zephyr – Reloaded, Arctic Horizon 2):
+   artwork filling the screen, a spotlight over rows of posters, a plain text menu and a clock.
+   Original stylesheet — no skin code or artwork is copied.
+
+   The one bold idea: the room takes its light from the film. Each title's artwork sets --tint
+   (worked out in public/js/tint.js), and that colour lights the glow behind the page, the focus
+   halo, progress bars and the main button — like a TV that washes the wall behind it in the
+   colours of what's on. Everything else stays quiet: graphite, frost-white type, no decoration.
+
+   Palette  Graphite #17191c · Slate #22262b · Frost #eef1f4 · Mist #a3aab3
+            Glacier #7cc7e8 (the light when a title has no colour) · Signal #f2b84b (ratings only)
+   Type     League Gothic for titles (when there's no clear logo), Roboto Condensed for everything else.
+            Scale from 1.05rem in steps of 1.25: 0.84 / 1.05 / 1.31 / 1.64 / 2.05rem, titles 3.6–7.2rem. */
+:root {
+  color-scheme: dark;
+  --bg: #17191c;
+  --bg-2: #1c1f23;
+  --surface: #22262b;
+  --surface-2: #2c3137;
+  --border: rgba(238, 241, 244, 0.09);
+  --text: #eef1f4;
+  --text-dim: #a3aab3;
+  --tint-default: #7cc7e8;
+  --accent: var(--tint);
+  --accent-text: #0e1013;
+  --signal: #f2b84b;
+  --danger: #ff6b78;
+  --success: #4fd1a0;
+  --radius: 6px;
+  --radius-lg: 12px;
+  --poster-w: 156px;
+  --nav-bg: transparent;
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --font: "Roboto Condensed", "Arial Narrow", "Segoe UI", system-ui, sans-serif;
+  --font-title: "League Gothic", "Arial Narrow", Impact, sans-serif;
+  --font-display: var(--font);
+  --header-h: 76px;
+  --panel: rgba(23, 25, 28, 0.84);
+  --focus: #f7f9fb;
+  --focus-text: #0e1013;
+  --halo: color-mix(in srgb, var(--tint) 50%, transparent);
+  --backdrop-dim: 24%;
+}
+body { font-size: 1.05rem; letter-spacing: 0.01em; }
+h1 { font-size: 2.05rem; font-weight: 700; }
+h2 { font-size: 1.64rem; font-weight: 700; }
+h3 { font-size: 1.31rem; }
+
+/* The light from the screen: a wide, soft glow of the current title's colour. */
+.backdrop::after {
+  background:
+    radial-gradient(90% 75% at 8% 100%, color-mix(in srgb, var(--tint) 20%, transparent), transparent 70%),
+    linear-gradient(90deg, var(--bg) 0%, color-mix(in srgb, var(--bg) 84%, transparent) 28%, color-mix(in srgb, var(--bg) 50%, transparent) 55%, transparent 88%),
+    linear-gradient(0deg, var(--bg) 0%, color-mix(in srgb, var(--bg) 85%, transparent) 30%, transparent 62%),
+    color-mix(in srgb, var(--bg) var(--backdrop-dim), transparent);
+}
+
+/* Focus you can see from the couch: a frost ring with a halo in the title's colour. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible { outline-color: var(--focus); }
+
+/* ---------- Header: no bar, just shade over the artwork ---------- */
+body[data-layout="top"] .app-header {
+  background: linear-gradient(180deg, rgba(10, 11, 13, 0.8) 0%, rgba(10, 11, 13, 0.35) 65%, transparent 100%);
+  backdrop-filter: none; -webkit-backdrop-filter: none; border-bottom: 0; transition: background-color 0.25s;
+}
+html.scrolled body[data-layout="top"] .app-header { background-color: rgba(23, 25, 28, 0.95); }
+.brand { font-weight: 700; font-size: 1.25rem; letter-spacing: 0.01em; --logo-a: var(--tint); --logo-b: color-mix(in srgb, var(--tint) 55%, #ffffff); }
+body[data-layout="top"] .nav-links .nav-link .icon { display: none; }
+.nav-link { position: relative; border-radius: 999px; padding: 8px 16px; font-size: 1.1rem; font-weight: 600; color: var(--text-dim); }
+.nav-link:hover { background: rgba(238, 241, 244, 0.1); color: var(--text); }
+.nav-link:focus-visible { background: var(--focus); color: var(--focus-text); outline: none; box-shadow: 0 0 0 4px var(--halo); }
+.nav-link[aria-current="page"] { background: transparent; color: var(--text); }
+.nav-link[aria-current="page"]::after {
+  content: ""; position: absolute; left: 50%; bottom: 0; width: 20px; height: 3px; margin-left: -10px; border-radius: 3px; background: var(--tint);
+}
+.nav-link[aria-current="page"]:focus-visible { background: var(--focus); color: var(--focus-text); }
+.nav-tools .nav-link { padding: 8px 10px; }
+.nav-profile .avatar { border-radius: 50%; }
+.nav-clock { padding-left: 14px; }
+.nav-clock-time { font-size: 1.31rem; font-weight: 600; }
+
+/* ---------- Buttons: pills; the main one carries the title's colour ---------- */
+.btn { border-radius: 999px; font-weight: 700; font-size: 1rem; --btn-bg: rgba(238, 241, 244, 0.12); transition: background-color 0.2s, color 0.2s, transform 0.15s var(--ease), box-shadow 0.2s; }
+.btn:hover { background: rgba(238, 241, 244, 0.2); }
+.btn-primary { --btn-bg: var(--tint); --btn-fg: var(--accent-text); }
+.btn-primary:hover { background: color-mix(in srgb, var(--tint) 82%, white); }
+.btn-ghost { --btn-bg: transparent; border-color: rgba(238, 241, 244, 0.2); }
+.btn:focus-visible, html.kbd .btn:focus-visible {
+  background: var(--focus); color: var(--focus-text); border-color: var(--focus); outline: none;
+  box-shadow: 0 0 0 4px var(--halo); transform: scale(1.05);
+}
+.btn-danger:focus-visible { background: var(--danger); color: #fff; }
+
+/* ---------- Text details ---------- */
+.eyebrow { text-transform: none; letter-spacing: 0; font-size: 1.05rem; font-weight: 600; color: var(--text-dim); margin-bottom: 0.3em; }
+.eyebrow a { color: var(--text); text-decoration: none; }
+.eyebrow a:hover { text-decoration: underline; }
+.meta-line { gap: 6px 20px; font-weight: 600; font-size: 1.05rem; color: var(--text); }
+.meta-line .rating { color: var(--signal); }
+.chip, .meta-line .chip {
+  background: transparent; border: 1px solid rgba(238, 241, 244, 0.4); border-radius: 4px;
+  padding: 0 7px; font-size: 0.84rem; font-weight: 700; color: var(--text);
+}
+.ends-at { color: var(--text-dim); }
+.genres .chip { border-color: rgba(238, 241, 244, 0.22); font-weight: 600; }
+.media-flags li { border-color: rgba(238, 241, 244, 0.3); font-size: 0.84rem; }
+
+/* ---------- Rows ("widgets") and cards ---------- */
+.row-title { font-size: 1.2rem; font-weight: 600; color: var(--text-dim); transition: color 0.2s; }
+.row-title-link { color: inherit; }
+.row-title-link:hover, .row-title-link:focus-visible { color: var(--text); }
+/* The row you're in lights up, so you always know where you are with a remote. */
+.row:focus-within .row-title { color: var(--text); }
+.row .row-title { position: relative; }
+.row:focus-within .row-title::before {
+  content: ""; position: absolute; left: calc(var(--gutter) - 14px); top: 50%; width: 4px; height: 1em; margin-top: -0.5em; border-radius: 2px; background: var(--tint);
+}
+.art, .card-art { border-radius: var(--radius); }
+.art::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); pointer-events: none; }
+.card-art { transition: transform 0.25s var(--ease), box-shadow 0.25s; }
+.card:hover .card-art, .card:focus-visible .card-art { transform: scale(1.05); box-shadow: 0 0 0 3px var(--focus), 0 0 34px 4px var(--halo), 0 14px 30px rgba(0, 0, 0, 0.55); }
+html.kbd .card:focus-visible .card-art { transform: scale(1.07); }
+.card-title { font-weight: 700; font-size: 1rem; }
+.card-sub { font-size: 0.84rem; }
+.card-play { background: rgba(0, 0, 0, 0.55); backdrop-filter: none; }
+.badge { border-radius: 4px; }
+.badge-watched { color: var(--tint); }
+.progress { left: 0; right: 0; bottom: 0; height: 4px; border-radius: 0 0 var(--radius) var(--radius); background: rgba(0, 0, 0, 0.55); }
+.progress span { background: var(--tint); }
+.row-prev { background: linear-gradient(90deg, rgba(23, 25, 28, 0.85), transparent); }
+.row-next { background: linear-gradient(270deg, rgba(23, 25, 28, 0.85), transparent); }
+/* Continue-watching cards keep their words on the picture. */
+.landscape-card .card-art { box-shadow: none; }
+
+/* ---------- Spotlight: the title card ---------- */
+.spot-title {
+  font-family: var(--font-title); font-weight: 400; font-size: clamp(3.6rem, 2.4rem + 4.2vw, 7.2rem);
+  line-height: 0.92; letter-spacing: 0.005em; margin: 0 0 14px; text-shadow: 0 2px 24px rgba(0, 0, 0, 0.4);
+}
+.spot-inner.has-logo .spot-title.is-episode { font-family: var(--font); font-weight: 700; line-height: 1.1; letter-spacing: 0; }
+.spot-genres { color: var(--text-dim); }
+.spot-overview { color: color-mix(in srgb, var(--text) 86%, transparent); line-height: 1.55; max-width: 38rem; }
+.spot-overview, .spot-meta, .spot-genres, .detail-info .overview { text-shadow: 0 1px 8px rgba(0, 0, 0, 0.55); }
+
+/* ---------- Pages, panels and dialogs ---------- */
+.page-head h1, .detail-title, .picker-page h1 { font-family: var(--font-title); font-weight: 400; letter-spacing: 0.005em; line-height: 0.95; }
+.page-head h1 { font-size: clamp(2.8rem, 2rem + 2vw, 4rem); }
+.detail-info .detail-title { font-size: clamp(3rem, 2rem + 3.6vw, 6rem); margin-bottom: 12px; }
+.detail-info h1:not(.detail-title) { font-weight: 700; }
+.panel { background: var(--panel); border: 1px solid var(--border); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+.panel .panel { background: rgba(238, 241, 244, 0.04); }
+.dialog { background: rgba(28, 31, 35, 0.97); border: 1px solid rgba(238, 241, 244, 0.1); }
+.dialog::backdrop { background: rgba(0, 0, 0, 0.62); }
+.settings-tab { border-radius: 999px; padding: 10px 16px; }
+.settings-tab[aria-current="page"] { background: rgba(238, 241, 244, 0.1); box-shadow: none; }
+.settings-tab[aria-current="page"] .icon { color: var(--tint); }
+.settings-tab:focus-visible { background: var(--focus); color: var(--focus-text); outline: none; box-shadow: 0 0 0 4px var(--halo); }
+.season-tab { border-radius: 999px; border-color: rgba(238, 241, 244, 0.2); }
+.season-tab:focus-visible { background: var(--focus); color: var(--focus-text); outline: none; box-shadow: 0 0 0 4px var(--halo); }
+.episode:hover, .episode:focus-within { background: rgba(238, 241, 244, 0.06); }
+.search-box { background: var(--panel); border-color: rgba(238, 241, 244, 0.14); backdrop-filter: blur(14px); }
+.search-box:focus-within { box-shadow: 0 0 0 3px var(--focus), 0 0 0 7px var(--halo); }
+.search-section h2, .detail-section > h2 { font-size: 1.2rem; font-weight: 600; color: var(--text-dim); }
+.search-section h2 .muted { opacity: 0.7; }
+.toast { border-radius: 999px; padding: 12px 22px; }
+input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="color"])), select, textarea { background: rgba(0, 0, 0, 0.35); }
+.detail-poster .art { box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55); }
+.addon-tile { background: var(--panel); backdrop-filter: blur(14px); }
+.theme-card[aria-checked="true"] { border-color: var(--tint); }
+
+/* ---------- Who's watching / sign-in: lit by the default glacier light ---------- */
+.picker-page, .auth-page { background: radial-gradient(70% 60% at 50% 110%, color-mix(in srgb, var(--tint) 22%, transparent), transparent 70%), var(--bg); }
+.picker-page h1 { font-size: clamp(3.4rem, 2.4rem + 3vw, 5.6rem); }
+.picker-profile .avatar { border-radius: 50%; }
+.picker-profile:hover .avatar, .picker-profile:focus-visible .avatar { box-shadow: 0 0 0 4px var(--bg), 0 0 0 7px var(--focus), 0 0 40px 6px var(--halo); }
+
+/* ---------- Music ---------- */
+.track-row:hover, .track-row:focus-within { background: rgba(238, 241, 244, 0.06); }
+.track-row.is-current .track-title { color: var(--tint); }
+.track-eq i { background: var(--tint); }
+.mini { background: rgba(20, 22, 25, 0.9); border-top: 1px solid rgba(238, 241, 244, 0.07); }
+.mini-seek-range::-webkit-slider-runnable-track { background: linear-gradient(90deg, var(--tint) var(--pct, 0%), rgba(238, 241, 244, 0.22) var(--pct, 0%)); }
+.mini-seek-range::-moz-range-progress, .mini-line span { background: var(--tint); }
+.mbtn:focus-visible { outline: none; background: var(--focus); color: var(--focus-text); box-shadow: 0 0 0 4px var(--halo); }
+.mbtn-play { background: var(--focus); color: var(--focus-text); }
+.mbtn[aria-pressed="true"] { color: var(--tint); }
+.queue-row:hover, .queue-row:focus-within { background: rgba(238, 241, 244, 0.07); }
+.queue-row.is-current strong { color: var(--tint); }
+
+/* ---------- Player on-screen display ---------- */
+.player-title h1 { font-family: var(--font-title); font-weight: 400; font-size: clamp(1.8rem, 1.3rem + 1.4vw, 2.8rem); line-height: 1; letter-spacing: 0.01em; }
+.player-controls { background: linear-gradient(0deg, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.55) 55%, transparent 100%); }
+.seekbar::-webkit-slider-runnable-track { background: linear-gradient(90deg, var(--tint) var(--pct, 0%), rgba(255, 255, 255, 0.22) var(--pct, 0%)); }
+.seekbar::-moz-range-progress { background: var(--tint); }
+.pbtn { border-radius: 50%; }
+.pbtn:focus-visible { background: var(--focus); color: var(--focus-text); outline: none; box-shadow: 0 0 0 4px var(--halo); }
+.player-menu { border-radius: var(--radius-lg); }
+.mode-badge { border-color: var(--tint); color: var(--tint); }
+
+/* ---------- Phones ---------- */
+@media (max-width: 720px) {
+  body { --header-h: 56px; }
+  body[data-layout] .app-header { background: rgba(23, 25, 28, 0.97); }
+  body[data-layout] .nav-links { background: rgba(23, 25, 28, 0.98); }
+  body[data-layout] .nav-links .nav-link .icon { display: block; }
+  body[data-layout] .nav-links .nav-link { border-radius: 12px; font-size: 0.72rem; }
+  .nav-link[aria-current="page"]::after { display: none; }
+  .nav-link[aria-current="page"] .icon { color: var(--tint); }
+  .spot-title { font-size: clamp(3rem, 2rem + 6vw, 4.4rem); }
+  .row:focus-within .row-title::before { display: none; }
+}

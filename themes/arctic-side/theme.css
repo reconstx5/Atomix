@@ -1,0 +1,31 @@
+/* Arctic Side — the Arctic look with the menu down the left, like the side-menu home of
+   Arctic Horizon 2. Monochrome: white pills mark the focus and the main buttons. */
+@import url("../arctic/theme.css");
+
+:root {
+  --accent: #e8e8e8;
+  --accent-text: #111213;
+  --side-w: 248px;
+  --backdrop-dim: 18%;
+}
+
+body[data-layout="side"] .app-header {
+  background: linear-gradient(90deg, rgba(8, 8, 9, 0.93) 0%, rgba(8, 8, 9, 0.8) 72%, rgba(8, 8, 9, 0) 100%);
+  border-right: 0; padding: 30px 18px 24px;
+}
+body[data-layout="side"] .brand { padding: 4px 14px 14px; }
+body[data-layout="side"] .nav-link { font-size: 1.14rem; padding: 12px 18px; gap: 14px; border-radius: 999px; }
+body[data-layout="side"] .nav-link .icon { opacity: 0.85; }
+body[data-layout="side"] .nav-link[aria-current="page"] { background: rgba(255, 255, 255, 0.1); }
+body[data-layout="side"] .nav-link[aria-current="page"]::after { left: 6px; top: 50%; bottom: auto; width: 4px; height: 18px; margin: -9px 0 0; }
+body[data-layout="side"] .nav-link:focus-visible { background: var(--focus); color: var(--focus-text); }
+/* Monochrome: the main buttons are white pills; the title's colour only lights the glow and focus halo. */
+.btn-primary { --btn-bg: var(--accent); }
+.btn-primary:hover { background: #ffffff; }
+.btn-primary:focus-visible { box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px var(--focus); }
+.track-row.is-current .track-title, .queue-row.is-current strong { color: var(--text); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
+
+@media (max-width: 1100px) and (min-width: 721px) {
+  body[data-layout="side"] { --side-w: 84px; }
+  body[data-layout="side"] .nav-link { padding: 12px; }
+}

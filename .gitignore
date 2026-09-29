@@ -1,0 +1,7 @@
+data/
+node_modules/
+.env
+nodeflix.config.json
+*.log
+.DS_Store
+Thumbs.db

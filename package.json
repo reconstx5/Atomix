@@ -1,0 +1,17 @@
+{
+  "name": "nodeflix",
+  "version": "0.5.0",
+  "description": "A self-hosted, customisable media hub. Run it on your own PC or on a VPS as your own streaming site.",
+  "type": "module",
+  "private": true,
+  "main": "server.js",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "dev": "node --watch --disable-warning=ExperimentalWarning server.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
+    "reset-password": "node --disable-warning=ExperimentalWarning scripts/reset-password.js"
+  }
+}

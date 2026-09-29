@@ -1,0 +1,8 @@
+{
+  "name": "Daylight",
+  "description": "A clean light theme for bright rooms and daytime browsing.",
+  "author": "NodeFlix",
+  "layout": "top",
+  "colorScheme": "light",
+  "preview": { "background": "#f4f5f8", "surface": "#ffffff", "accent": "#2457e6" }
+}

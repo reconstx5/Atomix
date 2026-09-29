@@ -1,0 +1,30 @@
+{
+  "id": "internet-archive",
+  "name": "Internet Archive",
+  "version": "1.0.0",
+  "description": "Browse and stream public-domain films, cartoons and classic TV from archive.org. An example of a Kodi-style video add-on.",
+  "author": "NodeFlix",
+  "homepage": "https://archive.org/details/movies",
+  "main": "index.js",
+  "settings": [
+    {
+      "key": "collections",
+      "label": "Collections (one per line: Label = collection id)",
+      "type": "textarea",
+      "default": "Feature Films = feature_films\nFilm Noir = Film_Noir\nSci-Fi & Horror = SciFi_Horror\nSilent Films = silent_films\nAnimation & Cartoons = animationandcartoons\nClassic TV = classic_tv"
+    },
+    { "key": "pageSize", "label": "Items per page", "type": "number", "default": 48 },
+    {
+      "key": "sort",
+      "label": "Sort by",
+      "type": "select",
+      "default": "downloads desc",
+      "options": [
+        { "value": "downloads desc", "label": "Most popular" },
+        { "value": "addeddate desc", "label": "Recently added" },
+        { "value": "titleSorter asc", "label": "Title" },
+        { "value": "year asc", "label": "Oldest first" }
+      ]
+    }
+  ]
+}

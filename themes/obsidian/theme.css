@@ -1,0 +1,22 @@
+/* Obsidian — pure black background for OLED screens. */
+:root {
+  color-scheme: dark;
+  --bg: #000000;
+  --bg-2: #070708;
+  --surface: #111114;
+  --surface-2: #1c1c22;
+  --border: rgba(255, 255, 255, 0.09);
+  --text: #f4f4f6;
+  --text-dim: #a1a1ad;
+  --accent: #a78bfa;
+  --accent-text: #120a24;
+  --danger: #ff6680;
+  --success: #4ade80;
+  --radius: 14px;
+  --radius-lg: 20px;
+  --poster-w: 160px;
+  --nav-bg: rgba(0, 0, 0, 0.8);
+  --shadow: 0 12px 30px rgba(0, 0, 0, 0.8);
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: var(--font);
+}

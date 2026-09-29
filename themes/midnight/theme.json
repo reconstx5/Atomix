@@ -1,0 +1,8 @@
+{
+  "name": "Midnight",
+  "description": "The original NodeFlix look: dark and cinematic with an ember accent and a top menu.",
+  "author": "NodeFlix",
+  "layout": "top",
+  "colorScheme": "dark",
+  "preview": { "background": "#0c0e13", "surface": "#191d27", "accent": "#ff6b3d" }
+}
