@@ -1,0 +1,219 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-09T00:00:00Z",
+  "title": "Design System: Atomix",
+  "extensions": {
+    "colorMeta": {
+      "tint-ice": {
+        "role": "primary",
+        "displayName": "Ice (fallback Artwork Tint)",
+        "canonical": "#8fe9ff",
+        "tonalRamp": ["oklch(15% 0.04 215)", "oklch(27% 0.06 215)", "oklch(39% 0.08 215)", "oklch(51% 0.09 215)", "oklch(63% 0.1 215)", "oklch(75% 0.1 215)", "oklch(88% 0.09 215)", "oklch(95% 0.04 215)"]
+      },
+      "deep-space": {
+        "role": "neutral",
+        "displayName": "Deep Space",
+        "canonical": "#05050c",
+        "tonalRamp": ["oklch(12% 0.015 285)", "oklch(18% 0.02 285)", "oklch(26% 0.025 285)", "oklch(38% 0.025 285)", "oklch(52% 0.02 285)", "oklch(68% 0.015 285)", "oklch(84% 0.01 285)", "oklch(95% 0.005 285)"]
+      },
+      "deep-space-inset": { "role": "neutral", "displayName": "Deep Space Inset", "canonical": "#0b0b16" },
+      "page-shade": { "role": "neutral", "displayName": "Page Shade", "canonical": "rgba(4, 4, 14, 0.92)" },
+      "text": { "role": "neutral", "displayName": "White", "canonical": "#ffffff" },
+      "text-soft": { "role": "neutral", "displayName": "Soft White", "canonical": "rgba(255, 255, 255, 0.86)" },
+      "text-dim": { "role": "neutral", "displayName": "Dim White", "canonical": "rgba(255, 255, 255, 0.66)" },
+      "selection-white": { "role": "neutral", "displayName": "Selection White", "canonical": "#ffffff" },
+      "selection-ink": { "role": "neutral", "displayName": "Selection Ink", "canonical": "#0b0b16" },
+      "glass-clear": { "role": "neutral", "displayName": "Clear Glass", "canonical": "rgba(255, 255, 255, 0.14)" },
+      "glass-strong": { "role": "neutral", "displayName": "Strong Glass", "canonical": "rgba(255, 255, 255, 0.22)" },
+      "glass-edge": { "role": "neutral", "displayName": "Glass Edge", "canonical": "rgba(255, 255, 255, 0.24)" },
+      "glass-tinted": { "role": "neutral", "displayName": "Tinted Glass", "canonical": "rgba(28, 28, 42, 0.58)" },
+      "glass-panel": { "role": "neutral", "displayName": "Panel Glass", "canonical": "rgba(20, 20, 34, 0.62)" },
+      "glass-solid": { "role": "neutral", "displayName": "Solid Glass", "canonical": "rgba(24, 24, 36, 0.94)" },
+      "danger-coral": {
+        "role": "tertiary",
+        "displayName": "Coral",
+        "canonical": "#ff7a86",
+        "tonalRamp": ["oklch(15% 0.05 18)", "oklch(27% 0.09 18)", "oklch(39% 0.13 18)", "oklch(51% 0.16 18)", "oklch(63% 0.17 18)", "oklch(73% 0.16 18)", "oklch(85% 0.09 18)", "oklch(95% 0.03 18)"]
+      },
+      "success-mint": {
+        "role": "tertiary",
+        "displayName": "Mint",
+        "canonical": "#62e3ae",
+        "tonalRamp": ["oklch(15% 0.04 165)", "oklch(27% 0.07 165)", "oklch(39% 0.09 165)", "oklch(51% 0.11 165)", "oklch(63% 0.13 165)", "oklch(75% 0.14 165)", "oklch(83% 0.13 165)", "oklch(95% 0.04 165)"]
+      },
+      "rating-gold": {
+        "role": "tertiary",
+        "displayName": "Gold",
+        "canonical": "#ffd166",
+        "tonalRamp": ["oklch(15% 0.03 88)", "oklch(27% 0.06 88)", "oklch(39% 0.08 88)", "oklch(51% 0.1 88)", "oklch(63% 0.12 88)", "oklch(75% 0.13 88)", "oklch(88% 0.13 88)", "oklch(95% 0.05 88)"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "The Home spotlight title; detail-page titles use the same treatment at 100 × --px." },
+      "headline": { "displayName": "Headline", "purpose": "Page titles (h1)." },
+      "title": { "displayName": "Title", "purpose": "Row and section headings (h2)." },
+      "body": { "displayName": "Body", "purpose": "Descriptions, buttons, menu and list items." },
+      "label": { "displayName": "Label", "purpose": "Field labels, meta lines, eyebrows." },
+      "caption": { "displayName": "Caption", "purpose": "Card subtitles, hints, chips." }
+    },
+    "shadows": [
+      { "name": "shadow", "value": "0 calc(14 * var(--px, 1px)) calc(30 * var(--px, 1px)) rgba(0, 0, 0, 0.45)", "purpose": "Card rest: under every card's artwork." },
+      { "name": "lift", "value": "0 calc(20 * var(--px, 1px)) calc(44 * var(--px, 1px)) rgba(0, 0, 0, 0.55)", "purpose": "Added to a hovered or focused card or button." },
+      { "name": "glass-shadow", "value": "0 calc(24 * var(--px, 1px)) calc(60 * var(--px, 1px)) rgba(0, 0, 0, 0.55)", "purpose": "Under the floating menu." },
+      { "name": "glass-deep", "value": "0 calc(30 * var(--px, 1px)) calc(80 * var(--px, 1px)) rgba(0, 0, 0, 0.6)", "purpose": "Under dialogs, the player bar and the Up next card." },
+      { "name": "glass-edge", "value": "inset 0 0 0 1px rgba(255, 255, 255, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.22)", "purpose": "The inner line and top highlight that define floating glass." },
+      { "name": "ring", "value": "0 0 0 calc(5 * var(--px, 1px)) #05050c, 0 0 0 calc(9 * var(--px, 1px)) #ffffff", "purpose": "Focus ring: white with a dark gap." }
+    ],
+    "motion": [
+      { "name": "select", "value": "180ms cubic-bezier(0.2, 0.7, 0.2, 1)", "purpose": "Selection changes: scale, background, colour and shadow on focus and hover." },
+      { "name": "ease", "value": "cubic-bezier(0.2, 0.7, 0.2, 1)", "purpose": "Default easing; page entry runs 240ms, artwork cross-fade 600ms." },
+      { "name": "grow-btn", "value": "1.05", "purpose": "Scale of a focused button. 1 under reduced motion." },
+      { "name": "grow-card", "value": "1.08", "purpose": "Scale of a focused card. 1 under reduced motion." },
+      { "name": "grow-avatar", "value": "1.1", "purpose": "Scale of a focused profile picture. 1 under reduced motion." },
+      { "name": "blur-clear", "value": "blur(24px) saturate(1.6)", "purpose": "Backdrop filter for clear glass on artwork. none under Reduce effects." },
+      { "name": "blur-tinted", "value": "blur(34px) saturate(1.6)", "purpose": "Backdrop filter for tinted floating glass. none under Reduce effects." }
+    ],
+    "breakpoints": [
+      { "name": "wide (rail layout)", "value": "(min-width: 1000px) and (orientation: landscape)" },
+      { "name": "tv (wide rail)", "value": "(min-width: 1600px) and (orientation: landscape)" },
+      { "name": "phone (top and side layouts)", "value": "(max-width: 720px)" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Glass Button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "The default action on artwork: a clear glass pill that turns solid white when focused.",
+      "html": "<button class=\"ds-btn\">More info</button>",
+      "css": ".ds-btn { min-height: 44px; padding: 0 26px 0 22px; border: 0; border-radius: 999px; background: var(--glass-clear, rgba(255,255,255,0.14)); color: #fff; font: 600 16px/1 var(--font, 'Sora', system-ui, sans-serif); box-shadow: inset 0 0 0 1px var(--glass-edge, rgba(255,255,255,0.24)); backdrop-filter: blur(24px) saturate(1.6); cursor: pointer; transition: transform 180ms cubic-bezier(0.2,0.7,0.2,1), background-color 180ms cubic-bezier(0.2,0.7,0.2,1), color 180ms cubic-bezier(0.2,0.7,0.2,1), box-shadow 180ms cubic-bezier(0.2,0.7,0.2,1); } .ds-btn:hover { background: rgba(255,255,255,0.24); } .ds-btn:active { transform: scale(0.97); } .ds-btn:focus-visible { outline: none; background: #fff; color: #0b0b16; transform: scale(1.05); box-shadow: 0 0 0 4px #05050c, 0 0 0 7px #fff, 0 16px 34px rgba(0,0,0,0.55); }"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The main action. Strong glass, not accent-coloured.",
+      "html": "<button class=\"ds-btn-primary\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M8 5v14l11-7z\"/></svg>Play</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 26px 0 22px; border: 0; border-radius: 999px; background: var(--glass-strong, rgba(255,255,255,0.22)); color: #fff; font: 600 16px/1 var(--font, 'Sora', system-ui, sans-serif); box-shadow: inset 0 0 0 1px var(--glass-edge, rgba(255,255,255,0.24)); backdrop-filter: blur(24px) saturate(1.6); cursor: pointer; transition: transform 180ms cubic-bezier(0.2,0.7,0.2,1), background-color 180ms cubic-bezier(0.2,0.7,0.2,1), color 180ms cubic-bezier(0.2,0.7,0.2,1), box-shadow 180ms cubic-bezier(0.2,0.7,0.2,1); } .ds-btn-primary:hover { background: rgba(255,255,255,0.3); } .ds-btn-primary:active { transform: scale(0.97); } .ds-btn-primary:focus-visible { outline: none; background: #fff; color: #0b0b16; transform: scale(1.05); box-shadow: 0 0 0 4px #05050c, 0 0 0 7px #fff, 0 16px 34px rgba(0,0,0,0.55); }"
+    },
+    {
+      "name": "Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Text fields and selects: a glass pill whose focus is the white ring.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Library name\">",
+      "css": ".ds-input { width: 260px; min-height: 44px; padding: 0 18px; border: 0; border-radius: 999px; background: rgba(255,255,255,0.1); color: #fff; font: 400 16px/1 var(--font, 'Sora', system-ui, sans-serif); box-shadow: inset 0 0 0 1px var(--glass-edge, rgba(255,255,255,0.24)); } .ds-input::placeholder { color: rgba(255,255,255,0.5); } .ds-input:focus-visible { outline: none; box-shadow: 0 0 0 4px #05050c, 0 0 0 7px #fff; }"
+    },
+    {
+      "name": "Switch",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "On/off setting. Checked is the accent with an ink knob.",
+      "html": "<label class=\"ds-toggle\"><input type=\"checkbox\" checked><span class=\"ds-toggle-track\"></span>Reduce effects</label>",
+      "css": ".ds-toggle { position: relative; display: inline-flex; align-items: center; gap: 14px; min-height: 44px; color: #fff; font: 500 16px/1 var(--font, 'Sora', system-ui, sans-serif); cursor: pointer; } .ds-toggle input { position: absolute; opacity: 0; width: 46px; height: 28px; margin: 0; cursor: pointer; } .ds-toggle-track { position: relative; flex: none; width: 46px; height: 28px; border-radius: 99px; background: rgba(255,255,255,0.18); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.24); transition: background-color 200ms; } .ds-toggle-track::after { content: ''; position: absolute; top: 4px; left: 4px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform 200ms cubic-bezier(0.2,0.7,0.2,1), background-color 200ms; } .ds-toggle input:checked + .ds-toggle-track { background: var(--accent, #8fe9ff); box-shadow: none; } .ds-toggle input:checked + .ds-toggle-track::after { transform: translateX(18px); background: #0b0b16; } .ds-toggle input:focus-visible + .ds-toggle-track { box-shadow: 0 0 0 4px #05050c, 0 0 0 7px #fff; }"
+    },
+    {
+      "name": "Menu",
+      "kind": "nav",
+      "refersTo": "menu",
+      "description": "The floating glass menu from the left rail, shown open. The current page has an accent dot; focus is a white pill.",
+      "html": "<nav class=\"ds-menu\"><a class=\"ds-menu-item\" href=\"#\" aria-current=\"page\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z\"/></svg>Home</a><a class=\"ds-menu-item\" href=\"#\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><rect x=\"3\" y=\"4\" width=\"18\" height=\"16\" rx=\"2\"/><path d=\"M7 4v16M17 4v16M3 12h18\"/></svg>Movies</a><a class=\"ds-menu-item\" href=\"#\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M9 18V5l12-2v13\"/><circle cx=\"6\" cy=\"18\" r=\"3\"/><circle cx=\"18\" cy=\"16\" r=\"3\"/></svg>Music</a></nav>",
+      "css": ".ds-menu { display: flex; flex-direction: column; gap: 6px; width: 220px; padding: 10px; border-radius: 32px; background: var(--glass-tinted, rgba(28,28,42,0.58)); backdrop-filter: blur(34px) saturate(1.6); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.16), inset 0 1px 0 rgba(255,255,255,0.22), 0 18px 44px rgba(0,0,0,0.55); } .ds-menu-item { position: relative; display: flex; align-items: center; gap: 12px; height: 46px; padding: 0 14px; border-radius: 999px; color: rgba(255,255,255,0.82); font: 600 16px/1 var(--font, 'Sora', system-ui, sans-serif); text-decoration: none; transition: background-color 180ms cubic-bezier(0.2,0.7,0.2,1), color 180ms cubic-bezier(0.2,0.7,0.2,1); } .ds-menu-item:hover { color: #fff; background: rgba(255,255,255,0.14); } .ds-menu-item[aria-current='page'] { color: #fff; background: rgba(255,255,255,0.12); } .ds-menu-item[aria-current='page']::after { content: ''; position: absolute; right: 16px; top: calc(50% - 3px); width: 6px; height: 6px; border-radius: 50%; background: var(--accent, #8fe9ff); } .ds-menu-item:focus-visible { outline: none; color: #0b0b16; background: #fff; box-shadow: 0 8px 22px rgba(0,0,0,0.35); }"
+    },
+    {
+      "name": "Chip and Media Flag",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Genre chips are filled pills; media flags are outlined tags.",
+      "html": "<span class=\"ds-chip\">Science fiction</span> <span class=\"ds-chip ds-chip-kids\">Kids</span> <span class=\"ds-flag\">4K</span> <span class=\"ds-flag\">HDR</span>",
+      "css": ".ds-chip { display: inline-flex; align-items: center; padding: 4px 12px; border-radius: 999px; background: rgba(255,255,255,0.12); color: #fff; font: 600 13px/1.4 var(--font, 'Sora', system-ui, sans-serif); } .ds-chip-kids { background: #ffd166; color: #0b0b16; } .ds-flag { display: inline-flex; padding: 3px 8px; border-radius: 6px; box-shadow: inset 0 0 0 1.5px rgba(255,255,255,0.4); color: #fff; font: 600 12px/1.4 var(--font, 'Sora', system-ui, sans-serif); }"
+    },
+    {
+      "name": "Poster Card",
+      "kind": "card",
+      "refersTo": "card-art",
+      "description": "A title in a row: artwork with a progress bar, title and subtitle. Focus grows the artwork and rings it in white.",
+      "html": "<a class=\"ds-card\" href=\"#\"><span class=\"ds-card-art\"><span class=\"ds-card-progress\"><span></span></span></span><span class=\"ds-card-title\">Blade Runner</span><span class=\"ds-card-sub\">1982 · 42 min left</span></a>",
+      "css": ".ds-card { display: inline-flex; flex-direction: column; width: 150px; color: #fff; text-decoration: none; font-family: var(--font, 'Sora', system-ui, sans-serif); } .ds-card-art { position: relative; aspect-ratio: 2 / 3; border-radius: 14px; background: radial-gradient(120% 90% at 0% 0%, rgba(143,233,255,0.35), transparent 60%), linear-gradient(160deg, #24304a, #0d1020); box-shadow: 0 10px 22px rgba(0,0,0,0.45); transition: transform 180ms cubic-bezier(0.2,0.7,0.2,1), box-shadow 180ms cubic-bezier(0.2,0.7,0.2,1); } .ds-card-progress { position: absolute; left: 10px; right: 10px; bottom: 9px; height: 4px; border-radius: 99px; background: rgba(255,255,255,0.28); overflow: hidden; } .ds-card-progress span { display: block; width: 62%; height: 100%; background: var(--accent, #8fe9ff); } .ds-card-title { padding-top: 10px; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-card-sub { font-size: 12px; color: rgba(226,230,255,0.66); } .ds-card:hover .ds-card-art { transform: scale(1.04); box-shadow: 0 16px 34px rgba(0,0,0,0.55); } .ds-card:focus-visible { outline: none; } .ds-card:focus-visible .ds-card-art { transform: scale(1.08); box-shadow: 0 0 0 4px #05050c, 0 0 0 7px #fff, 0 16px 34px rgba(0,0,0,0.55); }"
+    },
+    {
+      "name": "Glass Panel",
+      "kind": "custom",
+      "refersTo": "panel",
+      "description": "A settings group or details block: tinted, unblurred glass that can scroll.",
+      "html": "<section class=\"ds-panel\"><h2>Playback</h2><p>Choose how video is converted when this screen can't play a file directly.</p></section>",
+      "css": ".ds-panel { max-width: 420px; padding: 26px; border-radius: 24px; background: var(--glass-panel, rgba(20,20,34,0.62)); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12); color: #fff; font-family: var(--font, 'Sora', system-ui, sans-serif); } .ds-panel h2 { margin: 0 0 12px; font-size: 20px; font-weight: 600; letter-spacing: -0.015em; } .ds-panel p { margin: 0; font-size: 15px; line-height: 1.5; color: rgba(255,255,255,0.86); }"
+    },
+    {
+      "name": "Dialog",
+      "kind": "custom",
+      "refersTo": "dialog",
+      "description": "A tinted glass dialog: title, body and right-aligned actions with no divider.",
+      "html": "<div class=\"ds-dialog\"><h2>Remove library?</h2><p>Atomix forgets these titles and their watch history. Your files stay where they are.</p><div class=\"ds-dialog-actions\"><button class=\"ds-dialog-btn\">Cancel</button><button class=\"ds-dialog-btn ds-dialog-btn-danger\">Remove</button></div></div>",
+      "css": ".ds-dialog { width: 420px; max-width: 100%; border-radius: 28px; padding: 24px 28px 26px; background: var(--glass-tinted, rgba(28,28,42,0.58)); backdrop-filter: blur(34px) saturate(1.6); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.16), inset 0 1px 0 rgba(255,255,255,0.22), 0 22px 60px rgba(0,0,0,0.6); color: #fff; font-family: var(--font, 'Sora', system-ui, sans-serif); } .ds-dialog h2 { margin: 0 0 10px; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; } .ds-dialog p { margin: 0 0 20px; font-size: 16px; line-height: 1.5; color: rgba(255,255,255,0.86); } .ds-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; } .ds-dialog-btn { min-height: 44px; padding: 0 22px; border: 0; border-radius: 999px; background: rgba(255,255,255,0.14); color: #fff; font: 600 16px/1 var(--font, 'Sora', system-ui, sans-serif); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.24); cursor: pointer; transition: transform 180ms cubic-bezier(0.2,0.7,0.2,1), background-color 180ms cubic-bezier(0.2,0.7,0.2,1), color 180ms cubic-bezier(0.2,0.7,0.2,1); } .ds-dialog-btn:hover { background: rgba(255,255,255,0.24); } .ds-dialog-btn-danger { background: rgba(255,122,134,0.26); } .ds-dialog-btn:focus-visible { outline: none; background: #fff; color: #0b0b16; transform: scale(1.05); box-shadow: 0 0 0 4px #05050c, 0 0 0 7px #fff; }"
+    },
+    {
+      "name": "Player Bar",
+      "kind": "custom",
+      "refersTo": "player-bar",
+      "description": "The floating glass bar over the video: seek bar in the accent, round transport buttons, a solid white Play.",
+      "html": "<div class=\"ds-player\"><div class=\"ds-player-seek\"><span>24:10</span><span class=\"ds-player-track\"><span></span></span><span>1:57:02</span></div><div class=\"ds-player-row\"><button class=\"ds-pbtn\" aria-label=\"Back 10 seconds\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 12a9 9 0 1 0 3-6.7\"/><path d=\"M3 4v5h5\"/></svg></button><button class=\"ds-pbtn ds-pbtn-play\" aria-label=\"Pause\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M7 5h3v14H7zM14 5h3v14h-3z\"/></svg></button><button class=\"ds-pbtn\" aria-label=\"Forward 10 seconds\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M21 12a9 9 0 1 1-3-6.7\"/><path d=\"M21 4v5h-5\"/></svg></button></div></div>",
+      "css": ".ds-player { width: 480px; max-width: 100%; padding: 18px 24px 14px; border-radius: 28px; background: var(--glass-tinted, rgba(28,28,42,0.58)); backdrop-filter: blur(34px) saturate(1.6); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.16), inset 0 1px 0 rgba(255,255,255,0.22), 0 22px 60px rgba(0,0,0,0.5); color: #fff; font-family: var(--font, 'Sora', system-ui, sans-serif); } .ds-player-seek { display: flex; align-items: center; gap: 12px; font-size: 14px; font-weight: 500; font-variant-numeric: tabular-nums; } .ds-player-track { flex: 1; height: 5px; border-radius: 5px; background: rgba(255,255,255,0.22); overflow: hidden; } .ds-player-track span { display: block; width: 21%; height: 100%; background: var(--accent, #8fe9ff); } .ds-player-row { display: flex; justify-content: center; gap: 8px; margin-top: 10px; } .ds-pbtn { width: 46px; height: 46px; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: #fff; cursor: pointer; transition: background-color 150ms, transform 120ms; } .ds-pbtn:hover { background: rgba(255,255,255,0.14); } .ds-pbtn:active { transform: scale(0.92); } .ds-pbtn-play, .ds-pbtn-play:hover { background: #fff; color: #0b0b16; } .ds-pbtn-play:hover { transform: scale(1.04); } .ds-pbtn:focus-visible { outline: none; background: #fff; color: #0b0b16; box-shadow: 0 0 0 4px #05050c, 0 0 0 7px #fff; }"
+    },
+    {
+      "name": "Mini-player",
+      "kind": "custom",
+      "refersTo": "mini-player",
+      "description": "The floating pill shown while music plays: cover, title, artist, a white Play button and a thin accent progress line.",
+      "html": "<div class=\"ds-mini\"><span class=\"ds-mini-art\"></span><span class=\"ds-mini-text\"><span class=\"ds-mini-title\">Teardrop</span><span class=\"ds-mini-sub\">Massive Attack</span></span><button class=\"ds-mini-play\" aria-label=\"Pause\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M7 5h3v14H7zM14 5h3v14h-3z\"/></svg></button><span class=\"ds-mini-line\"><span></span></span></div>",
+      "css": ".ds-mini { position: relative; display: flex; align-items: center; gap: 12px; width: 330px; max-width: 100%; padding: 10px 12px 14px 10px; border-radius: 22px; background: var(--glass-tinted, rgba(28,28,42,0.58)); backdrop-filter: blur(34px) saturate(1.6); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.16), inset 0 1px 0 rgba(255,255,255,0.2), 0 14px 36px rgba(0,0,0,0.5); color: #fff; font-family: var(--font, 'Sora', system-ui, sans-serif); } .ds-mini-art { flex: none; width: 48px; height: 48px; border-radius: 12px; background: linear-gradient(160deg, #3a2f52, #101426); } .ds-mini-text { display: flex; flex-direction: column; min-width: 0; flex: 1; } .ds-mini-title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-mini-sub { font-size: 12px; color: rgba(226,230,255,0.66); } .ds-mini-play { flex: none; width: 40px; height: 40px; display: grid; place-items: center; border: 0; border-radius: 50%; background: rgba(255,255,255,0.92); color: #0b0b16; cursor: pointer; transition: background-color 150ms, transform 150ms; } .ds-mini-play:hover { background: #fff; transform: scale(1.06); } .ds-mini-play:focus-visible { outline: none; background: #fff; box-shadow: 0 0 0 4px #05050c, 0 0 0 7px #fff; } .ds-mini-line { position: absolute; left: 70px; right: 62px; bottom: 9px; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.2); overflow: hidden; } .ds-mini-line span { display: block; width: 38%; height: 100%; background: var(--accent, #8fe9ff); }"
+    },
+    {
+      "name": "Up Next",
+      "kind": "card",
+      "refersTo": "up-next",
+      "description": "The glass card near the end of an episode, with a countdown ring on Play now.",
+      "html": "<div class=\"ds-upnext\"><span class=\"ds-upnext-art\"></span><span class=\"ds-upnext-eyebrow\">Up next in 8</span><h3>The Long Night</h3><p>Season 2 · Episode 5 · 48 min</p><div class=\"ds-upnext-actions\"><button class=\"ds-upnext-btn ds-upnext-btn-primary\"><span class=\"ds-upnext-ring\"></span>Play now</button><button class=\"ds-upnext-btn\">Cancel</button></div></div>",
+      "css": ".ds-upnext { width: 360px; max-width: 100%; padding: 14px 14px 20px; border-radius: 26px; background: var(--glass-tinted, rgba(28,28,42,0.58)); backdrop-filter: blur(34px) saturate(1.6); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.16), inset 0 1px 0 rgba(255,255,255,0.22), 0 22px 60px rgba(0,0,0,0.6); color: #fff; font-family: var(--font, 'Sora', system-ui, sans-serif); } .ds-upnext-art { display: block; aspect-ratio: 16 / 9; margin-bottom: 14px; border-radius: 16px; background: radial-gradient(120% 90% at 0% 0%, rgba(143,233,255,0.3), transparent 60%), linear-gradient(160deg, #24304a, #0d1020); } .ds-upnext-eyebrow { display: block; margin: 0 6px 4px; font-size: 14px; font-weight: 600; color: var(--accent, #8fe9ff); } .ds-upnext h3 { margin: 0 6px 4px; font-size: 19px; font-weight: 700; letter-spacing: -0.015em; } .ds-upnext p { margin: 0 6px 14px; font-size: 14px; color: rgba(255,255,255,0.86); } .ds-upnext-actions { display: flex; gap: 10px; padding: 0 6px; } .ds-upnext-btn { position: relative; display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 22px; border: 0; border-radius: 999px; background: rgba(255,255,255,0.14); color: #fff; font: 600 15px/1 var(--font, 'Sora', system-ui, sans-serif); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.24); cursor: pointer; transition: transform 180ms cubic-bezier(0.2,0.7,0.2,1), background-color 180ms cubic-bezier(0.2,0.7,0.2,1), color 180ms cubic-bezier(0.2,0.7,0.2,1); } .ds-upnext-btn-primary { background: rgba(255,255,255,0.22); } .ds-upnext-btn:hover { background: rgba(255,255,255,0.28); } .ds-upnext-btn:focus-visible { outline: none; background: #fff; color: #0b0b16; transform: scale(1.05); box-shadow: 0 0 0 4px #05050c, 0 0 0 7px #fff; } .ds-upnext-ring { width: 22px; height: 22px; border-radius: 50%; background: conic-gradient(var(--accent, #8fe9ff) 0.7turn, rgba(255,255,255,0.2) 0); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px)); mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px)); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Artwork Is the Screen",
+    "overview": "Orbit, Atomix's default theme, hands the whole screen to the title's artwork. The page fills it edge to edge, a scrim darkens the left and bottom so text can sit on it, and every control floats above as glass. Nothing is a box drawn on a background; the background is the film, the show or the album.\n\nThe feel is cinematic and calm. Controls stay out of the artwork's way and never compete with it. Colour comes from the artwork itself: the accent is a tint worked out from the art on screen, so the interface shifts with what is being browsed. White is reserved for one job, marking where the remote is.\n\nOrbit is the normative system. The other six shipped themes (Arctic, Arctic Side, Midnight, Harbour, Daylight, Obsidian) are alternate skins of the same token contract documented in `docs/THEMES.md`: they set the same custom properties (`--bg`, `--surface`, `--accent`, `--radius`, `--font` and so on) and use a top or side menu layout instead of Orbit's rail.",
+    "keyCharacteristics": [
+      "Full-screen artwork behind every page, faded to near-black at the left and bottom.",
+      "Glass surfaces in two kinds: clear over artwork, tinted for menus, bars and dialogs.",
+      "An accent that follows the artwork's colour.",
+      "White means selected. Nothing else is solid white at rest except Play.",
+      "One typeface, Sora, at sizes drawn for a 1080p TV and scaled to every screen.",
+      "Pills and large radii throughout; no hard corners."
+    ],
+    "rules": [
+      { "name": "The White Is the Remote Rule", "body": "Solid white with ink text marks the focused control. The accent never marks the selection.", "section": "colors" },
+      { "name": "The Borrowed Accent Rule", "body": "The accent is the artwork's colour, not a brand colour. Do not hard-code a hue where `--accent` belongs.", "section": "colors" },
+      { "name": "The Sentence Case Rule", "body": "Orbit removes uppercase and letter-spacing from eyebrows, badges, table heads and menu titles. Hierarchy comes from size and weight.", "section": "typography" },
+      { "name": "The Whole Descender Rule", "body": "Clamped large titles use line-height 1.08 with 0.06em of bottom padding so Sora's descenders are never cut.", "section": "typography" },
+      { "name": "The No Blur While Scrolling Rule", "body": "Anything inside a scrolling row, list or settings group is tinted but not blurred. Blur is for surfaces that stay still.", "section": "elevation" },
+      { "name": "The Dim, Don't Blur Rule", "body": "The page behind a dialog is dimmed (55% Page Shade), never blurred; a full-screen blur is too slow for a TV.", "section": "elevation" },
+      { "name": "The Solid Fallback Rule", "body": "Every glass surface must still read when its colour becomes Solid Glass and its blur becomes none.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do write sizes as `calc(N * var(--px))` with N taken at 1920 × 1080, and give anything tappable a `max(44px, …)` floor.",
+      "Do use `var(--accent)` for progress, current state and small highlights so they follow the artwork.",
+      "Do mark focus with solid white, ink text and `var(--ring)`; add `var(--lift)` and a small scale on cards and buttons.",
+      "Do draw surface edges with inset box-shadows rather than borders.",
+      "Do build glass from the `--glass-*` and `--blur-*` tokens so Reduce effects and reduced transparency work without extra code.",
+      "Do keep text at 4.5:1 or better against what is behind it, including over white artwork.",
+      "Do honour `prefers-reduced-motion` and `html.reduce-motion`: nothing grows."
+    ],
+    "donts": [
+      "Don't use the accent to show what is selected. White does that.",
+      "Don't put `backdrop-filter` on anything that scrolls, or blur the whole page behind a dialog.",
+      "Don't add uppercase, tracked-out labels in Orbit.",
+      "Don't hard-code an accent hue, or assume the accent is Ice.",
+      "Don't cover the artwork with opaque full-width bars or boxed page backgrounds.",
+      "Don't add a second typeface to Orbit, or load fonts from a network.",
+      "Don't add a dependency or a build step to produce styles; the stylesheets are plain CSS, edited and refreshed."
+    ]
+  }
+}

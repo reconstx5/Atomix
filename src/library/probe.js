@@ -61,11 +61,11 @@ export async function detectTools(config) {
     }
   }
   // Used to tone-map HDR films for seek-bar previews, when this ffmpeg has them.
-  let filters = { zscale: false, tonemap: false };
+  let filters = { zscale: false, tonemap: false, subtitles: false };
   if (ffmpeg.available) {
     try {
       const out = (await run(config.ffmpegPath, ['-hide_banner', '-filters'], { timeout: 10000 })).toString();
-      filters = { zscale: /\szscale\s/.test(out), tonemap: /\stonemap\s/.test(out) };
+      filters = { zscale: /\szscale\s/.test(out), tonemap: /\stonemap\s/.test(out), subtitles: /\ssubtitles\s/.test(out) }; // subtitles: libass, for drawing text onto video
     } catch {
       /* ignore */
     }
@@ -73,6 +73,15 @@ export async function detectTools(config) {
   return { ffmpeg, ffprobe, encoders, filters };
 }
 
+/** Lyrics embedded in the tags (ID3 USLT, Vorbis LYRICS, …), capped at 64 KB. */
+function pickLyrics(...sources) {
+  for (const tags of sources) {
+    for (const [k, v] of Object.entries(tags || {})) {
+      if (/^(lyrics|unsyncedlyrics|uslt|lyrics-[a-z]{3})$/i.test(k) && typeof v === 'string' && v.trim()) return v.slice(0, 64 * 1024);
+    }
+  }
+  return null;
+}
 const lang = (tags = {}) => (tags.language && tags.language !== 'und' ? tags.language : null);
 
 /** Probe a file and return a compact summary we store in the DB. */
@@ -128,7 +137,8 @@ export async function probe(ffprobePath, file) {
   const firstAudio = streams.find((st) => st.codec_type === 'audio');
   return {
     container: format.format_name || null,
-    tags: normaliseTags(format.tags, firstAudio?.tags),
+    // lyricsChecked: the tags were read for lyrics (so the catch-up for songs probed before 0.10 skips this one).
+    tags: { ...normaliseTags(format.tags, firstAudio?.tags), ...(pickLyrics(format.tags, firstAudio?.tags) ? { lyrics: pickLyrics(format.tags, firstAudio?.tags) } : {}), lyricsChecked: true },
     coverArt: streams.some((st) => st.disposition?.attached_pic),
     duration: Number(format.duration) || Number(video?.duration) || null,
     bitrate: Number(format.bit_rate) || null,

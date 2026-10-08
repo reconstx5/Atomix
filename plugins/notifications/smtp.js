@@ -120,7 +120,7 @@ export async function sendMail({ host, port, security = 'starttls', user, pass, 
   try {
     const greeting = await conn.read();
     if (greeting.code !== 220) throw new Error(`Unexpected greeting: ${greeting.lines.join(' ')}`);
-    const hello = `EHLO ${'nodeflix.local'}`;
+    const hello = `EHLO ${'atomix.local'}`;
     let ehlo = await conn.command(hello, [250]);
 
     if (security === 'starttls') {
@@ -159,7 +159,7 @@ export async function sendMail({ host, port, security = 'starttls', user, pass, 
       'MIME-Version: 1.0',
       'Content-Type: text/plain; charset=utf-8',
       'Content-Transfer-Encoding: base64',
-      'X-Mailer: NodeFlix',
+      'X-Mailer: Atomix',
     ];
     const body = wrap76(Buffer.from(String(text || '').replace(/\r?\n/g, '\r\n'), 'utf8').toString('base64'));
     // Base64 lines never start with "." so no dot-stuffing is needed.

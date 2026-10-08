@@ -1,5 +1,7 @@
 // Converts DB rows into the JSON shape the web UI (and plugins) consume.
 import { parseJson } from '../db.js';
+import { EXTRA_CAPTIONS } from '../library/parser.js';
+import { isRemotePath } from '../remote/index.js';
 
 export function imageUrl(item, type) {
   const ref = type === 'backdrop' ? item.backdrop : type === 'logo' ? item.logo : item.poster;
@@ -60,6 +62,11 @@ export function serializeItem(row, extra = {}) {
     logo: imageUrl(row, 'logo'),
     addedAt: row.added_at,
   };
+  if (isRemotePath(row.path)) out.remote = true;
+  if (row.extra_kind) {
+    out.extraKind = row.extra_kind;
+    out.caption = EXTRA_CAPTIONS[row.extra_kind] || 'Extra';
+  }
   if (row.artist) out.artist = row.artist;
   if (row.album_title !== undefined) {
     out.albumTitle = row.album_title;
@@ -84,7 +91,7 @@ export function serializeItem(row, extra = {}) {
     out.tmdbId = row.tmdb_id;
     out.imdbId = row.imdb_id;
     out.media = mediaSummary(media);
-    out.fileName = row.path && !row.path.includes('::') ? row.path.split(/[\\/]/).pop() : null;
+    out.fileName = row.path && !row.path.includes('::') && !isRemotePath(row.path) ? row.path.split(/[\\/]/).pop() : null;
     out.size = row.size;
     out.metadataLocked = Boolean(row.metadata_locked);
     out.certification = row.certification || null;
@@ -101,6 +108,9 @@ export function serializeLibrary(row, counts = {}) {
     paths: parseJson(row.paths, []),
     lastScan: row.last_scan,
     count: counts[row.id] || 0,
+    serverId: row.server_id || null,
+    serverName: row.server_name || null,
+    remoteId: row.remote_id || null,
     options: { previews: true, ...parseJson(row.options, {}) },
   };
 }

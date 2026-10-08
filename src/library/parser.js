@@ -8,10 +8,36 @@ export const VIDEO_EXTS = new Set([
 
 export const SUBTITLE_EXTS = new Set(['.srt', '.vtt', '.ass', '.ssa']);
 
-export const EXTRAS_DIRS = new Set([
-  'extras', 'featurettes', 'behind the scenes', 'deleted scenes', 'interviews', 'scenes', 'shorts',
-  'trailers', 'other', 'sample', 'samples', 'bonus', 'specials features',
+// Kodi-style extras: a folder beside the film named for the kind, or a suffix on the file name.
+export const EXTRA_DIR_KINDS = new Map([
+  ['trailers', 'trailer'], ['featurettes', 'featurette'], ['behind the scenes', 'behindthescenes'],
+  ['deleted scenes', 'deleted'], ['interviews', 'interview'], ['scenes', 'scene'], ['shorts', 'short'],
+  ['extras', 'other'], ['other', 'other'], ['bonus', 'other'],
 ]);
+export const EXTRA_SUFFIX_KINDS = new Map([
+  ['trailer', 'trailer'], ['featurette', 'featurette'], ['behindthescenes', 'behindthescenes'], ['deleted', 'deleted'],
+  ['interview', 'interview'], ['scene', 'scene'], ['short', 'short'], ['other', 'other'],
+]);
+export const EXTRA_CAPTIONS = {
+  trailer: 'Trailer', featurette: 'Featurette', behindthescenes: 'Behind the scenes', deleted: 'Deleted scene',
+  interview: 'Interview', scene: 'Scene', short: 'Short', other: 'Extra',
+};
+/** Folders the scanner never looks in (samples are never extras). */
+export const SKIP_MEDIA_DIRS = new Set(['sample', 'samples', 'specials features']);
+// Only a hyphen marks a suffix (Kodi and Plex: `Film-trailer.mkv`); "The Interview.mkv" is a film.
+const SUFFIX_RE = new RegExp(`^(.*?)-(${[...EXTRA_SUFFIX_KINDS.keys()].join('|')})$`, 'i');
+const tidyExtraTitle = (s) => s.replace(/[._]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+/** `{ kind, title }` when a file is a Kodi-style extra (by its folder name or its name's suffix), else null. */
+export function extraKindOf(file) {
+  const parsed = path.parse(file);
+  const folder = path.basename(parsed.dir).toLowerCase();
+  const byDir = EXTRA_DIR_KINDS.get(folder);
+  if (byDir) return { kind: byDir, title: tidyExtraTitle(parsed.name) };
+  const m = SUFFIX_RE.exec(parsed.name);
+  if (m) return { kind: EXTRA_SUFFIX_KINDS.get(m[2].toLowerCase()), title: tidyExtraTitle(m[1]) };
+  return null;
+}
 
 // Words that mark the end of the real title in scene-style names.
 const JUNK = [

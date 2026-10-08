@@ -4,6 +4,7 @@
 // which themes use for glows, progress bars and highlights.
 import { h } from './dom.js';
 import { ambientColour } from './tint.js';
+import { coverRect } from './orbit-rules.js';
 
 const layer = h('div', { class: 'backdrop', 'aria-hidden': 'true' });
 const imgs = [h('img', { alt: '', decoding: 'async' }), h('img', { alt: '', decoding: 'async' })];
@@ -14,6 +15,38 @@ let token = 0;
 let setThisRoute = false;
 
 export const backdropLayer = layer;
+
+// Orbit's "environment": the same artwork behind the sign-in, picker and music pages, drawn tiny (64 × 36) and stretched to
+// the whole screen, so it looks blurred without a full-screen blur filter. Two canvases cross-fade.
+const ENV_W = 64;
+const ENV_H = 36;
+const envLayer = h('div', { class: 'environment', 'aria-hidden': 'true' });
+const envCanvases = [0, 1].map(() => h('canvas', { width: ENV_W, height: ENV_H }));
+envLayer.append(...envCanvases);
+let envFront = 0;
+export const environmentLayer = envLayer;
+
+function paintEnvironment(img) {
+  if (document.documentElement.dataset.layout !== 'orbit' || !img?.naturalWidth) return;
+  const canvas = envCanvases[1 - envFront];
+  const ctx = canvas.getContext('2d');
+  const r = coverRect(img.naturalWidth, img.naturalHeight, ENV_W, ENV_H);
+  if (!ctx || !r) return;
+  ctx.clearRect(0, 0, ENV_W, ENV_H);
+  ctx.filter = 'blur(2px) saturate(1.5)'; // where supported; the stretch alone already blurs it
+  ctx.drawImage(img, r.sx, r.sy, r.sw, r.sh, 0, 0, ENV_W, ENV_H);
+  canvas.classList.add('is-on');
+  envCanvases[envFront].classList.remove('is-on');
+  envFront = 1 - envFront;
+}
+function clearEnvironment() {
+  for (const c of envCanvases) c.classList.remove('is-on');
+}
+/** The layout just changed: paint (or clear) the environment for the artwork already showing. */
+export function repaintEnvironment() {
+  if (current && imgs[front].classList.contains('is-on')) paintEnvironment(imgs[front]);
+  else clearEnvironment();
+}
 
 const tintCache = new Map();
 const sampler = document.createElement('canvas');
@@ -53,12 +86,14 @@ export function setBackdrop(url) {
     for (const img of imgs) img.classList.remove('is-on');
     layer.classList.remove('has-art');
     setTint(null);
+    clearEnvironment();
     return;
   }
   const next = imgs[1 - front];
   next.onload = () => {
     if (my !== token) return;
     setTint(tintOf(next));
+    paintEnvironment(next);
     next.classList.add('is-on');
     imgs[front].classList.remove('is-on');
     front = 1 - front;

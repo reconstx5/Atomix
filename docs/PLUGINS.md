@@ -1,4 +1,4 @@
-# Writing NodeFlix plugins
+# Writing Atomix plugins
 
 A plugin is a folder inside `plugins/` with two files:
 
@@ -9,7 +9,7 @@ plugins/
     index.js        ES module exporting setup(api)
 ```
 
-Restart NodeFlix (or use **Settings → Plugins → turn off/on**) to load it. Plugins run inside the server with
+Restart Atomix (or use **Settings → Plugins → turn off/on**) to load it. Plugins run inside the server with
 full access to the machine, so only install code you trust.
 
 ## plugin.json
@@ -61,7 +61,7 @@ export function setup(api) {
 | Member | Description |
 | --- | --- |
 | `api.id`, `api.manifest`, `api.folder` | Plugin identity and location |
-| `api.version`, `api.serverName` | The NodeFlix version, and the server name set in Settings |
+| `api.version`, `api.serverName` | The Atomix version, and the server name set in Settings |
 | `api.config` | Current settings (defaults merged with saved values). Read it each time — it updates live. |
 | `api.onConfigChange(fn)` | Called with the new config after an admin saves settings |
 | `api.log.debug/info/warn/error(...)` | Logging, prefixed with the plugin id |
@@ -229,5 +229,5 @@ api.registerSource({
 ## Tips
 
 - Keep network calls cached (see the Internet Archive plugin) and time-limited (`AbortSignal.timeout`).
-- Use `api.log.debug` generously and run with `NODEFLIX_LOG_LEVEL=debug`.
+- Use `api.log.debug` generously and run with `ATOMIX_LOG_LEVEL=debug`.
 - Saving a plugin file doesn't reload it — toggle it off and on in Settings, or restart.

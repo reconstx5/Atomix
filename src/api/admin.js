@@ -38,6 +38,7 @@ export function registerAdminRoutes(r, core) {
         sessions: playback.list(),
         scan: scanner.status,
         tmdbConfigured: core.metadata.tmdb.enabled(),
+        servers: db.all('SELECT id, name, kind, status, status_detail, last_sync FROM servers ORDER BY name').map((s) => ({ id: s.id, name: s.name, kind: s.kind, status: s.status, statusDetail: s.status_detail || null, lastSync: s.last_sync || null })),
       };
     },
     admin,
@@ -78,8 +79,30 @@ export function registerAdminRoutes(r, core) {
       const body = await ctx.body();
       // Don't overwrite secrets with their masked placeholder.
       for (const k of SECRET_SETTINGS) if (typeof body[k] === 'string' && body[k].startsWith('••••')) delete body[k];
+      delete body.plexClientId; // this Atomix's device id at plex.tv: made once, never changed by hand
+      if (body.castEnabled !== undefined) body.castEnabled = body.castEnabled !== false && body.castEnabled !== 'false';
+      if (body.castBaseUrl !== undefined) {
+        const v = String(body.castBaseUrl ?? '').trim();
+        if (!v) body.castBaseUrl = null;
+        else {
+          let u;
+          try {
+            u = new URL(v);
+          } catch {
+            u = null;
+          }
+          if (!u || !/^https?:$/.test(u.protocol) || u.search || u.hash) throw new HttpError(400, 'Enter the address TVs use as http://<address>:<port>, like http://192.168.1.20:8787.');
+          body.castBaseUrl = `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, '')}`;
+        }
+      }
       if (body.maxTranscodes != null) body.maxTranscodes = Math.max(1, Math.min(32, Number(body.maxTranscodes) || 1));
       if (body.scanIntervalMinutes != null) body.scanIntervalMinutes = Math.max(0, Math.min(10080, Number(body.scanIntervalMinutes) || 0));
+      if (body.remoteSyncHours != null) body.remoteSyncHours = Math.max(0, Math.min(168, Number(body.remoteSyncHours) || 0));
+      if (body.pickerIdleMinutes !== undefined) {
+        // One of the five choices (a number, or the same as a string from a form); anything else is the default.
+        const v = typeof body.pickerIdleMinutes === 'number' || (typeof body.pickerIdleMinutes === 'string' && body.pickerIdleMinutes.trim() !== '') ? Number(body.pickerIdleMinutes) : NaN;
+        body.pickerIdleMinutes = [0, 15, 30, 60, 240].includes(v) ? v : 30;
+      }
       settings.set(body);
       const s = settings.all();
       for (const k of SECRET_SETTINGS) s[k] = s[k] ? '••••••••' + String(s[k]).slice(-4) : '';

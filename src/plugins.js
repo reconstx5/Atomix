@@ -103,7 +103,7 @@ export class PluginManager {
       id,
       version: core.version,
       get serverName() {
-        return core.settings.get('serverName') || 'NodeFlix';
+        return core.settings.get('serverName') || 'Atomix';
       },
       /** Handle a button listed under "actions" in plugin.json (Settings → Plugins). */
       registerAction(actionId, handler) {

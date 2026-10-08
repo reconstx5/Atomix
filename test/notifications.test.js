@@ -6,7 +6,7 @@ import net from 'node:net';
 import tls from 'node:tls';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { hasFfmpeg, tempDir, makeVideo, startNodeFlix, client, waitForScan, fakeServer } from './helpers.js';
+import { hasFfmpeg, tempDir, makeVideo, startAtomix, client, waitForScan, fakeServer } from './helpers.js';
 import { buildMessage } from '../plugins/notifications/index.js';
 import { sendMail } from '../plugins/notifications/smtp.js';
 
@@ -103,7 +103,7 @@ const decodeBody = (data) => {
 
 test('messages group episodes by show and link to the server', () => {
   const msg = buildMessage({
-    serverName: 'NodeFlix',
+    serverName: 'Atomix',
     publicUrl: 'https://media.example.com/',
     items: [
       { id: 1, kind: 'movie', title: 'Heat', year: 1995 },
@@ -111,18 +111,18 @@ test('messages group episodes by show and link to the server', () => {
       { id: 3, kind: 'episode', title: 'Second', season: 2, episode: 2, show: { id: 9, title: 'Demo Show' } },
     ],
   });
-  assert.equal(msg.subject, 'New on NodeFlix: Heat, Demo Show');
+  assert.equal(msg.subject, 'New on Atomix: Heat, Demo Show');
   assert.match(msg.text, /Heat \(1995\)/);
   assert.match(msg.text, /Demo Show — S2 E1 “Pilot”, S2 E2 “Second”/);
   assert.match(msg.text, /https:\/\/media\.example\.com\/#\/item\/9/);
-  const many = buildMessage({ serverName: 'NodeFlix', items: Array.from({ length: 400 }, (_, i) => ({ id: i, kind: 'movie', title: `Movie number ${i}` })) });
+  const many = buildMessage({ serverName: 'Atomix', items: Array.from({ length: 400 }, (_, i) => ({ id: i, kind: 'movie', title: `Movie number ${i}` })) });
   assert.ok(many.discord.length <= 2000, 'fits in one Discord message');
   assert.match(many.discord, /and \d+ more/);
 });
 
 test('SMTP: AUTH PLAIN, headers and a UTF-8 body', async () => {
   const smtp = await fakeSmtp();
-  await sendMail({ host: '127.0.0.1', port: smtp.port, security: 'none', user: 'me@example.com', pass: 's3cret', from: 'NodeFlix <me@example.com>', to: ['you@example.com'], subject: 'New on NodeFlix: Māori Movie', text: 'Kia ora — new stuff\n.dot line' });
+  await sendMail({ host: '127.0.0.1', port: smtp.port, security: 'none', user: 'me@example.com', pass: 's3cret', from: 'Atomix <me@example.com>', to: ['you@example.com'], subject: 'New on Atomix: Māori Movie', text: 'Kia ora — new stuff\n.dot line' });
   await smtp.close();
   const [mail] = smtp.mails;
   assert.deepEqual(mail.auth, { user: 'me@example.com', pass: 's3cret', method: 'PLAIN' });
@@ -130,7 +130,7 @@ test('SMTP: AUTH PLAIN, headers and a UTF-8 body', async () => {
   assert.deepEqual(mail.to, ['<you@example.com>']);
   const { head, text } = decodeBody(mail.data);
   assert.match(head, /^Subject: =\?UTF-8\?B\?/m, 'non-ASCII subject is encoded');
-  assert.match(head, /^From: NodeFlix <me@example\.com>/m);
+  assert.match(head, /^From: Atomix <me@example\.com>/m);
   assert.match(head, /^Content-Type: text\/plain; charset=utf-8/m);
   assert.equal(text, 'Kia ora — new stuff\r\n.dot line');
 });
@@ -183,7 +183,7 @@ before(async () => {
   smtp = await fakeSmtp();
   makeVideo(path.join(media, 'Movies', 'First (2000)', 'First (2000).mp4'));
   makeVideo(path.join(media, 'TV', 'Demo Show', 'Season 01', 'Demo.Show.S01E01.mp4'));
-  nf = await startNodeFlix();
+  nf = await startAtomix();
   admin = client(nf.base);
   await admin.post('/api/setup', { username: 'admin', password: 'password123', serverName: 'Hub' });
   await admin.put('/api/admin/plugins/notifications/config', {

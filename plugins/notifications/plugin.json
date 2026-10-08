@@ -3,7 +3,7 @@
   "name": "New-episode alerts",
   "version": "1.0.0",
   "description": "Sends a message to Discord, email or any webhook when new movies and episodes arrive — one tidy message per scan.",
-  "author": "NodeFlix",
+  "author": "Atomix",
   "main": "index.js",
   "enabledByDefault": false,
   "actions": [{ "id": "test", "label": "Send a test message" }],
@@ -27,7 +27,7 @@
     },
     { "key": "smtpUser", "label": "Mail username", "type": "text", "default": "" },
     { "key": "smtpPass", "label": "Mail password", "type": "password", "default": "", "help": "Gmail and Outlook need an app password here, not your normal password." },
-    { "key": "publicUrl", "label": "Your NodeFlix address (for links)", "type": "text", "default": "", "help": "e.g. https://media.example.com — leave empty to send without links." },
+    { "key": "publicUrl", "label": "Your Atomix address (for links)", "type": "text", "default": "", "help": "e.g. https://media.example.com — leave empty to send without links." },
     { "key": "notifyMovies", "label": "Announce new movies", "type": "boolean", "default": true },
     { "key": "notifyEpisodes", "label": "Announce new episodes", "type": "boolean", "default": true },
     { "key": "skipFirstScan", "label": "Stay quiet on a library's first scan (so adding a big library doesn't spam everyone)", "type": "boolean", "default": true }

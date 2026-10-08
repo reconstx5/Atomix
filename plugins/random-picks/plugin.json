@@ -3,7 +3,7 @@
   "name": "Random picks",
   "version": "1.0.0",
   "description": "Adds a home-screen row of things you haven't watched yet, shuffled every visit, plus a /surprise API endpoint. A small example of home rows and plugin routes.",
-  "author": "NodeFlix",
+  "author": "Atomix",
   "main": "index.js",
   "settings": [
     { "key": "title", "label": "Row title", "type": "text", "default": "Something different" },

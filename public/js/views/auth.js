@@ -14,7 +14,7 @@ function showError(box, message) {
 }
 
 export async function render(el, { setup }) {
-  const serverName = state.status?.serverName || 'NodeFlix';
+  const serverName = state.status?.serverName || 'Atomix';
   setTitle(setup ? 'Welcome' : 'Sign in');
   const error = errorBox();
 
@@ -22,14 +22,14 @@ export async function render(el, { setup }) {
     const username = h('input', { name: 'username', autocomplete: 'username', required: true, minlength: 2, maxlength: 32, pattern: '[A-Za-z0-9._\\-]+', 'data-autofocus': !state.status?.setupCodeRequired || null });
     const password = h('input', { name: 'password', type: 'password', autocomplete: 'new-password', required: true, minlength: 8 });
     const confirm = h('input', { name: 'confirm', type: 'password', autocomplete: 'new-password', required: true, minlength: 8 });
-    const name = h('input', { name: 'serverName', value: 'NodeFlix', maxlength: 60 });
+    const name = h('input', { name: 'serverName', value: 'Atomix', maxlength: 60 });
     const tmdb = h('input', { name: 'tmdb', autocomplete: 'off', spellcheck: 'false' });
     const code = state.status?.setupCodeRequired ? h('input', { name: 'setupCode', required: true, autocomplete: 'off', spellcheck: 'false', maxlength: 8, class: 'code-input', 'data-autofocus': true }) : null;
     const submit = h('button', { class: 'btn btn-primary btn-block', type: 'submit' }, 'Create admin account');
     const form = h(
       'form',
       { class: 'auth-form' },
-      code ? field('Setup code', code, 'Shown in the NodeFlix terminal window or `docker compose logs` — it proves you own this server.') : null,
+      code ? field('Setup code', code, 'Shown in the Atomix terminal window or `docker compose logs` — it proves you own this server.') : null,
       field('Server name', name, 'Shown in the menu bar and browser tab.'),
       field('Admin username', username),
       field('Password', password, 'At least 8 characters.'),
@@ -65,9 +65,9 @@ export async function render(el, { setup }) {
         h(
           'div',
           { class: 'auth-card auth-card-wide' },
-          h('div', { class: 'auth-brand' }, logoMark(44), h('span', {}, 'NodeFlix')),
+          h('div', { class: 'auth-brand' }, logoMark(44), h('span', {}, 'Atomix')),
           h('h1', {}, 'Welcome to your media hub'),
-          h('p', { class: 'muted' }, "Let's create the admin account. Next you'll point NodeFlix at your movie and TV folders."),
+          h('p', { class: 'muted' }, "Let's create the admin account. Next you'll point Atomix at your movie and TV folders."),
           form,
         ),
       ),

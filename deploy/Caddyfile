@@ -1,7 +1,7 @@
 # Caddy gets and renews a free HTTPS certificate for your domain automatically.
-{$NODEFLIX_DOMAIN} {
+{$ATOMIX_DOMAIN} {
 	encode zstd gzip
-	reverse_proxy nodeflix:8787 {
+	reverse_proxy atomix:8787 {
 		# Send video to the viewer as soon as ffmpeg produces it.
 		flush_interval -1
 	}

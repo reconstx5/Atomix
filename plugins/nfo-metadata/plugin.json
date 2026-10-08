@@ -3,7 +3,7 @@
   "name": "Kodi NFO metadata",
   "version": "1.0.0",
   "description": "Reads Kodi-style .nfo files (movie.nfo, tvshow.nfo, episode .nfo) so hand-curated titles, plots, ratings and artwork win over online lookups.",
-  "author": "NodeFlix",
+  "author": "Atomix",
   "main": "index.js",
   "settings": [
     { "key": "useArtworkUrls", "label": "Use artwork URLs found in NFO files", "type": "boolean", "default": true },

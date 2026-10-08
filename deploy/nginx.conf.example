@@ -1,5 +1,5 @@
-# Example nginx site for NodeFlix (if you prefer nginx over Caddy).
-# Remember to set NODEFLIX_TRUST_PROXY=true for NodeFlix.
+# Example nginx site for Atomix (if you prefer nginx over Caddy).
+# Remember to set ATOMIX_TRUST_PROXY=true for Atomix.
 server {
     listen 443 ssl http2;
     server_name media.example.com;

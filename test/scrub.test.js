@@ -57,3 +57,15 @@ test('stays inside the video, and Back cancels', () => {
   const unknown = new Scrubber({ duration: () => 0 });
   assert.equal(unknown.press(1, { from: 50, now: 0 }), 60, 'length not known yet: no upper limit');
 });
+
+test('press reports the step it used', () => {
+  const s = new Scrubber({ duration: () => 7200 });
+  s.press(1, { from: 1000, now: 0 });
+  assert.equal(s.lastStep, 10);
+  s.press(1, { from: 1000, now: 1600, repeat: true });
+  assert.equal(s.lastStep, 30);
+  s.press(1, { from: 1000, now: 4100, repeat: true });
+  assert.equal(s.lastStep, 60);
+  s.cancel();
+  assert.equal(s.lastStep, 0, 'nothing held');
+});

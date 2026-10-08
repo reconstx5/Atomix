@@ -3,7 +3,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { hasFfmpeg, tempDir, makeVideo, makeEpisode, startNodeFlix, client, waitForScan } from './helpers.js';
+import { hasFfmpeg, tempDir, makeVideo, makeEpisode, startAtomix, client, waitForScan } from './helpers.js';
 
 const skip = !hasFfmpeg && 'ffmpeg not installed';
 const media = tempDir();
@@ -39,7 +39,7 @@ before(async () => {
   makeEpisode(path.join(s1, 'Theme.Show.S01E02.mkv'), { themeAt: 17, seed: 3, audioCodec: 'mp3', gain: 0.5, lowpass: 3000 });
   makeEpisode(path.join(s1, 'Theme.Show.S01E03.mkv'), { seed: 5, chapters: [[0, 5, 'Recap'], [5, 20, 'Opening'], [20, 80, 'Part 1'], [80, 100, 'End Credits']] });
 
-  nf = await startNodeFlix();
+  nf = await startAtomix();
   admin = client(nf.base);
   await admin.post('/api/setup', { username: 'admin', password: 'password123' });
   ids.movies = (await admin.post('/api/libraries', { name: 'Movies', type: 'movies', paths: [m] })).data.id;

@@ -19,6 +19,8 @@ const UNRATED = /^(nr|not rated|unrated|n\/a|none|tbc|tba|e|exempt)$/i;
  * @param {string} [country] ISO country to interpret a bare label with (default US)
  * @returns {number|null}
  */
+export const RATING_COUNTRIES = Object.keys(TABLES);
+
 export function certToAge(cert, country) {
   if (cert == null) return null;
   let text = String(cert).trim();

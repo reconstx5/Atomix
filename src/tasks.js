@@ -128,7 +128,12 @@ export class TaskRunner {
       if (s.previewsEnabled) {
         const item = this.store.nextPreviewItem(only);
         if (item) return { key: `previews:${item.id}:${item.size}:${item.mtime}`, job: 'previews', item, itemId: item.id, title: this.store.itemLabel(item) };
+        const ex = this.store.nextThumbItem(only);
+        if (ex) return { key: `thumb:${ex.id}:${ex.size}:${ex.mtime}`, job: 'thumb', item: ex, itemId: ex.id, title: this.store.itemLabel(ex) };
       }
+      // Embedded lyrics for songs probed before 0.10: one ffprobe each, once.
+      const song = this.store.nextLyricsItem(only);
+      if (song) return { key: `lyrics:${song.id}`, job: 'lyrics', item: song, itemId: song.id, title: this.store.itemLabel(song) };
       return null;
     };
     if (this.priority.size) {
@@ -202,13 +207,15 @@ export class TaskRunner {
     };
     try {
       if (task.job === 'previews') await this.jobs.previews(task.item, ctx);
+      else if (task.job === 'thumb') await this.jobs.thumb(task.item, ctx);
+      else if (task.job === 'lyrics') await this.jobs.lyrics(task.item, ctx);
       else await this.jobs.intros(task.seasonId, ctx);
       this.lastDone = task.key;
     } catch (err) {
       this.lastDone = null;
       if (controller.signal.aborted) log.info(`Stopped "${task.title}" for now; it will be redone later.`);
       else {
-        log.warn(`${task.job === 'previews' ? 'Previews' : 'Intro check'} for "${task.title}" failed: ${err.message}`);
+        log.warn(`${{ previews: 'Previews', thumb: 'Thumbnail', intros: 'Intro check', lyrics: 'Lyrics check' }[task.job]} for "${task.title}" failed: ${err.message}`);
         this.recordFailure(task, err);
       }
     } finally {
@@ -217,7 +224,8 @@ export class TaskRunner {
   }
 
   recordFailure(task, err) {
-    if (task.job === 'previews') this.store.saveJob(task.item, 'previews', { status: 'failed', error: err.message });
+    if (task.job === 'lyrics') return; // the job marks the song checked itself
+    if (task.job === 'previews' || task.job === 'thumb') this.store.saveJob(task.item, task.job, { status: 'failed', error: err.message });
     else for (const ep of this.store.pendingIntroEpisodes(task.seasonId)) this.store.saveJob(ep, 'intros', { status: 'failed', error: err.message });
   }
 }

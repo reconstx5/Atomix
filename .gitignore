@@ -1,6 +1,7 @@
 data/
 node_modules/
 .env
+atomix.config.json
 nodeflix.config.json
 *.log
 .DS_Store

@@ -5,8 +5,11 @@
 import { api } from './api.js';
 import { h, icon, clear, formatClock } from './dom.js';
 import { Queue } from './queue.js';
+import { addToPlaylistItems } from './lists.js';
 import { detectCaps } from './caps.js';
-import { art, toast, openDialog } from './components.js';
+import { markPlaying as gatePlaying } from './gate.js';
+import { art, toast, openDialog, openSheet } from './components.js';
+import { VOLUME_KEY, musicKey } from './storage.js';
 
 const PING_EVERY = 30000; // the server drops sessions it hasn't heard from in 2 minutes
 const SAVE_EVERY = 5000;
@@ -43,6 +46,27 @@ export const music = {
   },
   get playing() {
     return !audio.paused;
+  },
+  /** Where the song is, in seconds, and how long it is (for the Now Playing page). */
+  get position() {
+    return currentTime();
+  },
+  get duration() {
+    return totalDuration();
+  },
+  get shuffle() {
+    return queue.shuffle;
+  },
+  /** 0–1 (Now Playing's slider and the mini-player's share it). */
+  get volume() {
+    return audio.muted ? 0 : audio.volume;
+  },
+  setVolume(v) {
+    audio.volume = Math.max(0, Math.min(1, Number(v) || 0));
+    audio.muted = audio.volume === 0;
+  },
+  get repeat() {
+    return queue.repeat;
   },
 
   /** Play a list of songs. `start` = index to begin at, or -1 with shuffle for a random start. */
@@ -199,6 +223,19 @@ export const music = {
     audio.removeAttribute('src');
     audio.load();
     profileId = id;
+    // The profile's own music volume, when it has set one on Now Playing; otherwise this device's remembered one.
+    // A profile's volume is not written over the device's: the next profile without one gets the device's back.
+    let remembered = null;
+    try {
+      remembered = localStorage.getItem(VOLUME_KEY);
+    } catch {
+      /* private mode */
+    }
+    const target = profile?.prefs?.musicVolume != null ? profile.prefs.musicVolume : id != null ? (remembered !== null && Number(remembered) >= 0 && Number(remembered) <= 1 ? Number(remembered) : 1) : null;
+    if (target != null && target !== audio.volume) {
+      fromPref = target; // the volumechange event comes later: that one is not the device's to remember
+      this.setVolume(target);
+    }
     queue = new Queue();
     resumeAt = 0;
     if (id != null) restore();
@@ -348,8 +385,10 @@ audio.addEventListener('error', () => {
 audio.addEventListener('play', () => {
   failures = 0;
   pausedAt = 0;
+  gatePlaying(true); // music playing counts as being there (gate.js)
   updateState();
 });
+
 audio.addEventListener('pause', () => {
   if (switching) return;
   pausedAt = Date.now();
@@ -362,20 +401,27 @@ audio.addEventListener('playing', () => setBusy(false));
 audio.addEventListener('canplay', () => setBusy(false));
 audio.addEventListener('timeupdate', () => {
   updateTime();
+  emit('time');
   if (Date.now() - lastSave > SAVE_EVERY) save();
 });
 audio.addEventListener('loadedmetadata', updateTime);
 
 // Remember the volume (shared with the video player).
 try {
-  const v = localStorage.getItem('nf-volume');
+  const v = localStorage.getItem(VOLUME_KEY);
   if (v !== null && Number(v) >= 0 && Number(v) <= 1) audio.volume = Number(v);
 } catch {
   /* private mode */
 }
+let fromPref = null; // a profile's saved volume being applied: that change is not the device's to remember
 audio.addEventListener('volumechange', () => {
+  if (fromPref !== null && Math.abs(audio.volume - fromPref) < 1e-6) {
+    fromPref = null;
+    return;
+  }
+  fromPref = null;
   try {
-    localStorage.setItem('nf-volume', String(audio.volume));
+    localStorage.setItem(VOLUME_KEY, String(audio.volume));
   } catch {
     /* ignore */
   }
@@ -396,7 +442,7 @@ window.addEventListener('pagehide', () => {
 });
 
 // ---- Saving the queue between visits ----
-const storageKey = () => `nf-music:${profileId}`;
+const storageKey = () => musicKey(profileId);
 
 function save(force = false) {
   if (profileId == null) return;
@@ -591,8 +637,7 @@ function changed() {
   miniPlayer.hidden = !t;
   document.documentElement.classList.toggle('has-mini', Boolean(t));
   if (t) {
-    const href = t.albumId ? `#/item/${t.albumId}?track=${t.id}` : `#/item/${t.id}`;
-    artLink.href = href;
+    artLink.href = '#/now-playing'; // the cover and the title open Now Playing
     const artKey = `${t.poster}|${t.albumTitle || t.title}`;
     if (artLink.dataset.key !== artKey) {
       // Only redraw the cover when it changes, so it doesn't flicker on every button press.
@@ -600,7 +645,7 @@ function changed() {
       miniPlayer.style.setProperty('--mini-art', t.poster ? `url("${t.poster.replace(/["\\]/g, '')}")` : 'none');
       clear(artLink).append(art(t.poster, t.albumTitle || t.title, { kind: 'square', eager: true }));
     }
-    titleEl.href = href;
+    titleEl.href = '#/now-playing';
     titleEl.textContent = t.title;
     titleEl.title = t.title;
     const sub = [t.artist, t.albumTitle].filter(Boolean).join(' · ');
@@ -634,7 +679,7 @@ export function markPlaying(root = document) {
 }
 
 // ---- "Up next" dialog ----
-function openQueue() {
+export function openQueue() {
   let list;
   let focusKey = null; // e.g. "3:up" — refocused after the list redraws
   const act = (key, fn) => () => {
@@ -743,31 +788,15 @@ export function trackList(tracks, { showAlbum = false, showArtist = true, number
 }
 
 function trackMenu(t) {
-  const act = (label, iconName, fn) =>
-    h(
-      'button',
-      {
-        type: 'button',
-        class: 'sheet-item',
-        onClick: (e) => {
-          e.currentTarget.closest('dialog').close('done');
-          fn();
-        },
-      },
-      icon(iconName, { size: 20 }),
-      h('span', {}, label),
-    );
-  openDialog({
-    title: t.title,
-    body: h(
-      'div',
-      { class: 'sheet' },
-      act('Play now', 'play', () => music.playTracks([t], 0)),
-      act('Play next', 'queue', () => music.playNext([t])),
-      act('Add to queue', 'plus', () => music.addToQueue([t])),
-      t.parentId ? act('Go to album', 'album', () => (location.hash = `#/item/${t.parentId}?track=${t.id}`)) : null,
-      t.showId ? act('Go to artist', 'user', () => (location.hash = `#/item/${t.showId}`)) : null,
-    ),
-    actions: [],
-  });
+  openSheet(t.title, [
+    { label: 'Play now', icon: 'play', onSelect: () => music.playTracks([t], 0) },
+    { label: 'Play next', icon: 'queue', onSelect: () => music.playNext([t]) },
+    { label: 'Add to queue', icon: 'queue', onSelect: () => music.addToQueue([t]) },
+    // Lyrics for a song that isn't playing: its own page, with the queue left as it is.
+    { label: 'Lyrics', icon: 'list', onSelect: () => { location.hash = music.current?.id === t.id ? '#/now-playing' : `#/now-playing?song=${t.id}`; } },
+    addToPlaylistItems({ itemId: t.id }, { kind: 'music' }),
+    { label: 'Cast to…', icon: 'cast', onSelect: async () => (await import('./cast.js')).openCastPicker({ queue: { itemIds: [t.id], index: 0 } }) },
+    t.parentId ? { label: 'Go to album', icon: 'album', onSelect: () => (location.hash = `#/item/${t.parentId}?track=${t.id}`) } : null,
+    t.showId ? { label: 'Go to artist', icon: 'user', onSelect: () => (location.hash = `#/item/${t.showId}`) } : null,
+  ]);
 }

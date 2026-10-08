@@ -1,7 +1,7 @@
 @echo off
-REM NodeFlix launcher for Windows. Double-click to start.
+REM Atomix launcher for Windows. Double-click to start.
 cd /d "%~dp0"
-title NodeFlix
+title Atomix
 where node >nul 2>nul
 if errorlevel 1 (
   echo Node.js is not installed. Get the LTS version from https://nodejs.org and run this again.

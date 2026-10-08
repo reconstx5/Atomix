@@ -34,7 +34,7 @@ test('migration 6 upgrades a version 5 database', () => {
   const old = openDatabase(file, { upTo: 5 });
   old.run('INSERT INTO libraries (name, type, paths, created_at) VALUES (?, ?, ?, ?)', 'Films', 'movies', '[]', now);
   old.close();
-  const upgraded = openDatabase(file);
+  const upgraded = openDatabase(file, { upTo: 6 });
   assert.equal(upgraded.get('PRAGMA user_version').user_version, 6);
   assert.equal(upgraded.get('SELECT options FROM libraries').options, '{}');
   const tables = upgraded.all("SELECT name FROM sqlite_master WHERE type = 'table'").map((t) => t.name);
@@ -145,4 +145,17 @@ test('results for a title that was removed mid-job are ignored', () => {
   db.run('DELETE FROM items WHERE id = ?', id);
   assert.equal(store.saveJob(item, 'previews', { status: 'done', data: { sheets: 1 } }), false);
   assert.equal(store.setMarker(id, 'intro', { start: 1, end: 20, source: 'audio' }), false);
+});
+
+test('extras without a picture want a thumbnail, in the same libraries previews run in', () => {
+  const movies = addLibrary('movies');
+  const skipped = addLibrary('movies', '{"previews":false}');
+  const film = addItem({ library_id: movies, kind: 'movie', title: 'Owner' });
+  const ex = addItem({ library_id: movies, kind: 'extra', extra_kind: 'featurette', parent_id: film, title: 'Making Of' });
+  addItem({ library_id: movies, kind: 'extra', extra_kind: 'other', parent_id: film, title: 'Has one', poster: 'cache:x.jpg' });
+  addItem({ library_id: skipped, kind: 'extra', extra_kind: 'other', parent_id: film, title: 'Opted out' });
+  assert.equal(store.nextThumbItem().id, ex);
+  assert.equal(store.pendingCounts().thumbs, 1);
+  assert.ok(store.saveJob(row(ex), 'thumb', { status: 'done' }));
+  assert.equal(store.nextThumbItem(), null);
 });

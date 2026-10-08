@@ -24,7 +24,7 @@ export class Themes {
           name: t.name || entry.name,
           description: t.description || '',
           author: t.author || '',
-          layout: t.layout === 'side' ? 'side' : 'top',
+          layout: ['side', 'orbit'].includes(t.layout) ? t.layout : 'top',
           colorScheme: t.colorScheme === 'light' ? 'light' : 'dark',
           preview: t.preview || {},
           css: `/themes/${encodeURIComponent(entry.name)}/${t.stylesheet || 'theme.css'}`,

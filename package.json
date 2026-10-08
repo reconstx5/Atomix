@@ -1,6 +1,6 @@
 {
-  "name": "nodeflix",
-  "version": "0.5.0",
+  "name": "atomix",
+  "version": "0.14.0",
   "description": "A self-hosted, customisable media hub. Run it on your own PC or on a VPS as your own streaming site.",
   "type": "module",
   "private": true,

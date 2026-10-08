@@ -1,4 +1,4 @@
-// Fetch wrapper for the NodeFlix JSON API.
+// Fetch wrapper for the Atomix JSON API.
 export class ApiError extends Error {
   constructor(status, message, details) {
     super(message);

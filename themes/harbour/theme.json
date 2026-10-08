@@ -1,7 +1,7 @@
 {
   "name": "Harbour",
   "description": "Kodi-inspired 10-foot layout: side menu, big posters, deep navy. Great on a TV with a remote or keyboard.",
-  "author": "NodeFlix",
+  "author": "Atomix",
   "layout": "side",
   "colorScheme": "dark",
   "preview": { "background": "#0a1624", "surface": "#132338", "accent": "#2fb8f0" }

@@ -2,6 +2,8 @@
 // control in that direction, Enter activates, Backspace goes back.
 // Works with keyboards, TV remotes (which send arrow keys) and gamepads
 // mapped to arrows.
+import { menuKey, menuStep, leftOnPage, FRAME_QUERY } from './orbit-rules.js';
+
 const FOCUSABLE = [
   'a[href]',
   'button:not([disabled])',
@@ -13,6 +15,13 @@ const FOCUSABLE = [
 
 let keyboardMode = false;
 export const isKeyboardMode = () => keyboardMode;
+/** An arrow key or Tab was pressed: focus rings show and pages start with a control focused. */
+export function enterKeyboardMode() {
+  keyboardMode = true;
+  document.documentElement.classList.add('kbd');
+}
+const KBD_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab']);
+export const isKeyboardModeKey = (key) => KBD_KEYS.has(key);
 
 function visible(el) {
   if (el.getAttribute('tabindex') === '-1') return false; // mouse-only helpers (e.g. row scroll arrows)
@@ -43,12 +52,13 @@ function scroller(el, axis) {
   return null;
 }
 
-function findNext(from, dir, root) {
+/** The nearest focusable element from `from` in direction `dir`, inside `root`, leaving out `skip` (Orbit's menu). */
+function findNext(from, dir, root, skip = null) {
   const a = from.getBoundingClientRect();
   const horizontal = dir === 'left' || dir === 'right';
   let candidates = [];
   for (const el of root.querySelectorAll(FOCUSABLE)) {
-    if (el === from || !visible(el)) continue;
+    if (el === from || !visible(el) || skip?.contains(el)) continue;
     const b = el.getBoundingClientRect();
     let primary;
     let ov;
@@ -104,45 +114,123 @@ export function focusFirst(root = document) {
   }
 }
 
+// ---- Orbit's floating menu ----
+// Left from the leftmost control enters it (it grows to show names), Up/Down move, OK opens,
+// Right or Back leave and put the remote back where it was. Phones use it as a dock instead.
+const BACK_KEYS = ['BrowserBack', 'GoBack', 'Backspace'];
+const framed = matchMedia(FRAME_QUERY);
+let menuEl = null;
+let rowInline = 'nearest';
+let returnTo = null;
+
+/** Layout-specific behaviour: Orbit's menu list (null for layouts without one) and how rows follow the selection. */
+export function configureNavigation({ menu = null, rowAlign = 'nearest' } = {}) {
+  if (menuEl && menuEl !== menu) document.documentElement.classList.remove('menu-open');
+  menuEl = menu;
+  rowInline = rowAlign;
+}
+const floatingMenu = () => (menuEl?.isConnected && framed.matches ? menuEl : null);
+const menuItems = () => [...(floatingMenu()?.querySelectorAll(FOCUSABLE) || [])].filter(visible);
+export const menuIsOpen = () => document.documentElement.classList.contains('menu-open');
+
+/** Put the remote in the menu, on the page you're on. Remembers where it came from. */
+export function openMenu(from = document.activeElement) {
+  const items = menuItems();
+  if (!items.length) return false;
+  if (from && from !== document.body && !menuEl.contains(from)) returnTo = from;
+  document.documentElement.classList.add('menu-open');
+  (items.find((a) => a.getAttribute('aria-current') === 'page') || items[0]).focus({ preventScroll: true });
+  return true;
+}
+
+/** Leave the menu and put the remote back where it was. */
+export function closeMenu() {
+  document.documentElement.classList.remove('menu-open');
+  const target = returnTo;
+  returnTo = null;
+  if (target?.isConnected && visible(target)) target.focus({ preventScroll: true });
+  else focusFirst(document.querySelector('main') || document);
+}
+
+/** An arrow or Back press that involves the menu. Returns true when it was used. */
+function menuKeys(e, key, active) {
+  const menu = floatingMenu();
+  if (!menu || scopeRoot() !== document) return false;
+  const inMenu = menu.contains(active);
+  let leftTarget = 'none';
+  if (!inMenu) {
+    if (key !== 'left' || !active?.matches?.(FOCUSABLE)) return false;
+    // Where Left would go on the page (the menu left out): on the same line, or wholly to the left like a column of
+    // section tabs, it is an ordinary move; anything else means the remote has reached the edge.
+    const next = findNext(active, 'left', document, menu);
+    leftTarget = leftOnPage(active.getBoundingClientRect(), next?.getBoundingClientRect()) ? 'page' : 'none';
+  }
+  const action = menuKey({ key, inMenu, leftTarget });
+  if (!action || (action === 'enter' && !openMenu(active))) return false;
+  if (action === 'move') {
+    const items = menuItems();
+    const next = items[menuStep(items.length, items.indexOf(active), key)];
+    next?.focus({ preventScroll: true });
+    next?.scrollIntoView({ block: 'nearest' });
+  }
+  if (action === 'leave') closeMenu();
+  e.preventDefault();
+  return true;
+}
+
 export function initNavigation({ onBack }) {
   window.addEventListener('pointerdown', () => {
     keyboardMode = false;
     document.documentElement.classList.remove('kbd');
   }, { passive: true });
+  // Clicking or tabbing somewhere else closes the menu.
+  document.addEventListener('focusin', (e) => {
+    if (menuIsOpen() && !menuEl?.contains(e.target)) {
+      document.documentElement.classList.remove('menu-open');
+      returnTo = null;
+    }
+  });
 
   window.addEventListener('keydown', (e) => {
     if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
     const dir = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' }[e.key];
-    if (dir || e.key === 'Tab') {
-      keyboardMode = true;
-      document.documentElement.classList.add('kbd');
-    }
-    if (document.body.dataset.view === 'player') return; // the player handles its own keys
+    if (isKeyboardModeKey(e.key)) enterKeyboardMode();
+    // The player handles its own keys, except in a dialog over it (the cast picker).
+    if (document.body.dataset.view === 'player' && !document.activeElement?.closest?.('dialog[open]')) return;
     const active = document.activeElement;
 
     if (dir) {
       if (isTyping(active) && (dir === 'left' || dir === 'right' || active.tagName === 'SELECT' || active.tagName === 'TEXTAREA')) return;
       if (active?.type === 'range' && (dir === 'left' || dir === 'right')) return; // sliders use left/right; up/down leaves them
+      if (menuKeys(e, dir, active)) return;
       const root = scopeRoot();
       if (!active || active === document.body || active.id === 'main' || !active.matches(FOCUSABLE) || !root.contains(active)) {
         e.preventDefault();
         focusFirst(root === document ? document.querySelector('main') || document : root);
         return;
       }
-      const next = findNext(active, dir, root);
+      // The floating menu is entered with Left only (menuKeys); other moves stay on the page.
+      const menu = floatingMenu();
+      const next = findNext(active, dir, root, menu && !menu.contains(active) ? menu : null);
       if (next) {
         e.preventDefault();
         next.focus({ preventScroll: true });
         const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-        next.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: reduce ? 'auto' : 'smooth' });
+        // Orbit: moving along a row scrolls it so the selected card stays at the left.
+        const inline = rowInline === 'start' && (dir === 'left' || dir === 'right') && next.closest('.row-scroller') ? 'start' : 'nearest';
+        next.scrollIntoView({ block: 'nearest', inline, behavior: reduce ? 'auto' : 'smooth' });
       }
       return;
     }
 
-    const backKeys = ['BrowserBack', 'GoBack', 'Backspace'];
-    if (backKeys.includes(e.key) && !isTyping(active) && !document.querySelector('dialog[open]')) {
+    const back = BACK_KEYS.includes(e.key);
+    if ((back || e.key === 'Escape') && menuIsOpen() && !isTyping(active) && menuKeys(e, 'back', active)) return;
+    if (back && !isTyping(active)) {
       e.preventDefault();
-      onBack();
+      // The remote's Back closes a dialog first, as Esc does.
+      const dialogs = document.querySelectorAll('dialog[open]');
+      if (dialogs.length) dialogs[dialogs.length - 1].close('cancel');
+      else onBack();
     }
   });
 }

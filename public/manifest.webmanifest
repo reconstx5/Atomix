@@ -1,11 +1,11 @@
 {
-  "name": "NodeFlix",
-  "short_name": "NodeFlix",
+  "name": "Atomix",
+  "short_name": "Atomix",
   "description": "Your self-hosted media hub",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0c0e13",
-  "theme_color": "#0c0e13",
+  "background_color": "#17191c",
+  "theme_color": "#17191c",
   "icons": [
     { "src": "/img/favicon.svg", "sizes": "any", "type": "image/svg+xml" },
     { "src": "/img/icon-512.png", "sizes": "512x512", "type": "image/png" }

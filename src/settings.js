@@ -2,8 +2,8 @@
 import { parseJson } from './db.js';
 
 export const SETTING_DEFAULTS = {
-  serverName: 'NodeFlix',
-  defaultTheme: 'arctic',
+  serverName: 'Atomix',
+  defaultTheme: 'orbit',
   tmdbApiKey: '',
   metadataLanguage: 'en-US',
   ratingCountry: 'NZ', // whose age ratings Kids profiles use (falls back to US)
@@ -17,6 +17,13 @@ export const SETTING_DEFAULTS = {
   previewsEnabled: true, // background job: seek-bar preview pictures
   introDetection: true, // background job: find TV intros (and credits chapters)
   loginMessage: '',
+  remoteSyncHours: 6, // connected servers are re-read this often (0 = only on demand)
+  castEnabled: true, // cast to Chromecasts and DLNA TVs on the home network
+  castBaseUrl: null, // the address TVs use to reach Atomix (null: the home-network address, found on its own)
+  plexClientId: null, // made the first time Plex is used; this Atomix's stable device id at plex.tv
+  onlineTrailers: true, // the film's YouTube trailer when there is no local one
+  onlineLyrics: true, // ask LRCLIB for lyrics the files don't have
+  pickerIdleMinutes: 30, // "Who's watching?" comes back after this long untouched (0 = never)
 };
 
 export class Settings {
@@ -67,6 +74,6 @@ export class Settings {
   /** Settings safe to expose to any signed-in user. */
   publicView() {
     const s = this.all();
-    return { serverName: s.serverName, defaultTheme: s.defaultTheme, defaultQuality: s.defaultQuality };
+    return { serverName: s.serverName, defaultTheme: s.defaultTheme, defaultQuality: s.defaultQuality, pickerIdleMinutes: s.pickerIdleMinutes };
   }
 }

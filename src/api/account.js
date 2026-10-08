@@ -18,6 +18,8 @@ const PREF_KEYS = {
   skipIntros: 'boolean',
   quality: 'string',
   reduceMotion: 'boolean',
+  reduceEffects: 'boolean',
+  musicVolume: 'number', // Now Playing's volume, 0–1
 };
 
 function cleanPrefs(input, current) {
@@ -34,6 +36,7 @@ function cleanPrefs(input, current) {
     if (type === 'string') out[k] = String(v).slice(0, 64);
   }
   if (out.accent && !/^#[0-9a-f]{6}$/i.test(out.accent)) delete out.accent;
+  if (out.musicVolume != null) out.musicVolume = Math.max(0, Math.min(1, out.musicVolume));
   return out;
 }
 
@@ -66,8 +69,13 @@ export function registerAccountRoutes(r, core) {
       const s = settings.all();
       const row = auth.resolve(ctx.req);
       const profile = row ? core.profiles.active(row) : null;
+      const profiles = row ? core.profiles.list(row.id) : [];
+      const servers = row?.role === 'admin'
+        ? db.all('SELECT id, name, kind, status, status_detail, last_sync FROM servers ORDER BY name').map((s) => ({ id: s.id, name: s.name, kind: s.kind, status: s.status, statusDetail: s.status_detail || null, lastSync: s.last_sync || null }))
+        : undefined;
       return {
-        name: 'NodeFlix',
+        servers,
+        name: 'Atomix',
         version,
         serverName: s.serverName,
         defaultTheme: s.defaultTheme,
@@ -77,7 +85,10 @@ export function registerAccountRoutes(r, core) {
         user: publicUser(row),
         profile: publicProfile(profile),
         profileRequired: Boolean(row && !profile),
+        profileCount: profiles.length,
+        profilePinned: profiles.some((p) => p.pin_hash),
         defaultQuality: s.defaultQuality,
+        pickerIdleMinutes: s.pickerIdleMinutes,
       };
     },
     { auth: 'none' },
@@ -91,7 +102,7 @@ export function registerAccountRoutes(r, core) {
       if (needsCode(ctx.req)) auth.checkRateLimit(ctx.req);
       if (needsCode(ctx.req) && String(body.setupCode || '').trim().toUpperCase() !== setupCode) {
         auth.recordFailure(ctx.req);
-        throw new HttpError(403, 'Wrong setup code. It is printed in the NodeFlix terminal window (or `docker compose logs`).');
+        throw new HttpError(403, 'Wrong setup code. It is printed in the Atomix terminal window (or `docker compose logs`).');
       }
       validateUsername(body.username);
       validatePassword(body.password);

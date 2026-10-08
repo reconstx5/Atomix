@@ -1,25 +1,26 @@
-# NodeFlix with Docker Compose.
+# Atomix with Docker Compose.
 #
 #   Local / LAN:  docker compose up -d            → http://<this-machine>:8787
-#   VPS + HTTPS:  set NODEFLIX_DOMAIN in .env, then
+#   VPS + HTTPS:  set ATOMIX_DOMAIN in .env, then
 #                 docker compose --profile https up -d
 #
-# See docs/DEPLOY.md for the full walkthrough.
+# See docs/DEPLOY.md for the full walkthrough. Atomix used to be called NodeFlix:
+# a .env file that still uses the NODEFLIX_ names works too.
 services:
-  nodeflix:
+  atomix:
     build: .
-    image: nodeflix:latest
-    container_name: nodeflix
+    image: atomix:latest
+    container_name: atomix
     restart: unless-stopped
     environment:
       - TZ=${TZ:-Pacific/Auckland}
       # Set to true when running behind the Caddy proxy below (or any reverse proxy)
-      - NODEFLIX_TRUST_PROXY=${NODEFLIX_TRUST_PROXY:-false}
+      - ATOMIX_TRUST_PROXY=${ATOMIX_TRUST_PROXY:-${NODEFLIX_TRUST_PROXY:-false}}
       # Optional: pre-fill the TMDB key (can also be set in Settings → Server)
       - TMDB_API_KEY=${TMDB_API_KEY:-}
     ports:
       # With the https profile you can remove this, so only Caddy is reachable.
-      - "${NODEFLIX_PORT:-8787}:8787"
+      - "${ATOMIX_PORT:-${NODEFLIX_PORT:-8787}}:8787"
     volumes:
       - ./data:/data                      # database, artwork cache, plugin data
       - ${MEDIA_MOVIES:-./media/movies}:/media/movies:ro
@@ -28,18 +29,25 @@ services:
       # Your own plugins/themes (optional):
       # - ./plugins:/app/plugins
       # - ./themes:/app/themes
+    # Casting to a Chromecast or DLNA TV: Atomix has to be on your home network to find them (multicast) and to be
+    # reachable by the TV. Uncomment the next line (Linux only) and remove `ports:` above — host networking uses 8787
+    # directly. Not needed for a VPS, or if you add TVs by address and set the address in Settings → Server → Casting.
+    # network_mode: host
     # Hardware transcoding (Intel/AMD, Linux): uncomment, then pick VAAPI in Settings → Server
     # devices:
     #   - /dev/dri:/dev/dri
 
   caddy:
     image: caddy:2
-    container_name: nodeflix-caddy
+    container_name: atomix-caddy
     profiles: ["https"]
     restart: unless-stopped
-    depends_on: [nodeflix]
+    depends_on: [atomix]
     environment:
-      - NODEFLIX_DOMAIN=${NODEFLIX_DOMAIN:?Set NODEFLIX_DOMAIN in .env, e.g. media.example.com}
+      - ATOMIX_DOMAIN=${ATOMIX_DOMAIN:-${NODEFLIX_DOMAIN:-}}
+    # Refuses to start without a domain (the reason is in `docker compose logs caddy`).
+    # Checked here rather than with ${…:?} above, which would stop the plain local setup too.
+    command: ["sh", "-c", "[ -n \"$$ATOMIX_DOMAIN\" ] || { echo 'Set ATOMIX_DOMAIN in .env, e.g. media.example.com'; exit 1; }; exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"]
     ports:
       - "80:80"
       - "443:443"

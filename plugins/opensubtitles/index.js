@@ -31,12 +31,12 @@ export async function movieHash(file) {
 }
 
 export function setup(api) {
-  const override = process.env.NODEFLIX_OPENSUBTITLES_BASE; // used by tests
+  const override = process.env.ATOMIX_OPENSUBTITLES_BASE; // used by tests
   let base = override || DEFAULT_BASE;
   let token = null;
   let tokenFor = null;
   let tokenExpires = 0;
-  const userAgent = `NodeFlix v${api.version || '0'}`;
+  const userAgent = `Atomix v${api.version || '0'}`;
   const found = new Map(); // file_id → { language, label, hearingImpaired } from recent searches
 
   api.onConfigChange(() => {

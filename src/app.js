@@ -1,4 +1,4 @@
-// Wires every part of NodeFlix together and creates the HTTP server.
+// Wires every part of Atomix together and creates the HTTP server.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -24,9 +24,23 @@ import { registerLibraryRoutes } from './api/library.js';
 import { registerPlaybackRoutes } from './api/playback.js';
 import { registerAdminRoutes } from './api/admin.js';
 import { registerExtrasRoutes } from './api/extras.js';
+import { registerListRoutes } from './api/lists.js';
+import { registerServerRoutes } from './api/servers.js';
 import { ExtrasStore } from './extras/store.js';
 import { makeJobs } from './extras/jobs.js';
 import { TaskRunner } from './tasks.js';
+import { Lists } from './lists.js';
+import { Collections } from './collections.js';
+import { Picks } from './picks.js';
+import { Lyrics } from './lyrics.js';
+import { makeProviders } from './remote/index.js';
+import { RemoteSync } from './remote/sync.js';
+import { attachReporter } from './remote/progress.js';
+import { PlexTv } from './remote/plextv.js';
+import { CastLinks } from './cast/tokens.js';
+import { CastDevices } from './cast/devices.js';
+import { CastManager } from './cast/sessions.js';
+import { registerCastRoutes } from './api/cast.js';
 
 const log = logger('server');
 const version = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
@@ -37,12 +51,13 @@ const SECURITY_HEADERS = {
   'X-Frame-Options': 'SAMEORIGIN',
   'Content-Security-Policy':
     "default-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; style-src 'self' 'unsafe-inline'; " +
-    "script-src 'self'; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+    "script-src 'self'; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; frame-src https://www.youtube-nocookie.com",
 };
 
 export async function createApp(overrides = {}) {
   const config = { ...loadConfig(), ...overrides };
   setLogLevel(config.logLevel);
+  for (const notice of config.notices || []) log.info(notice);
 
   const db = openDatabase(config.dbFile);
   const settings = new Settings(db);
@@ -52,7 +67,7 @@ export async function createApp(overrides = {}) {
   const tools = await detectTools(config);
   if (!tools.ffmpeg.available || !tools.ffprobe.available) {
     log.warn('ffmpeg/ffprobe not found — only browser-friendly files (MP4/WebM) will play and media info will be limited.');
-    log.warn('Install ffmpeg (Windows: winget install Gyan.FFmpeg) or set NODEFLIX_FFMPEG / NODEFLIX_FFPROBE.');
+    log.warn('Install ffmpeg (Windows: winget install Gyan.FFmpeg) or set ATOMIX_FFMPEG / ATOMIX_FFPROBE.');
   }
   const images = new ImageCache(config);
   const metadata = new MetadataManager({ db, config, settings, images, hooks });
@@ -63,9 +78,24 @@ export async function createApp(overrides = {}) {
   const core = { config, db, settings, hooks, tools, images, metadata, library, router, auth, themes, version };
   core.profiles = new Profiles({ db, auth });
   core.scanner = new Scanner({ db, config, settings, metadata, hooks, tools });
+  core.remote = { providers: makeProviders({ version, settings }), sync: null };
+  core.remote.plextv = new PlexTv({ base: config.plexTvBase, settings, version, serverName: () => settings.get('serverName') || 'Atomix' });
+  core.remote.sync = new RemoteSync({ db, settings, providers: core.remote.providers, scanner: core.scanner, images, plextv: core.remote.plextv });
+  core.scanner.remote = core.remote.sync;
+  core.remote.reporter = attachReporter(core);
+  core.cast = { links: new CastLinks({ db }) };
+  hooks.on('playback:stop', ({ session }) => core.cast.links.revokeSession(session.id));
   core.playback = new PlaybackManager({ db, config, settings, hooks, tools: () => core.tools });
+  core.cast.devices = new CastDevices({ db, config, search: config.castDiscovery ? {} : { cast: async () => [], dlna: async () => [] } });
+  core.cast.manager = new CastManager(core);
   core.plugins = new PluginManager(core);
   core.extras = new ExtrasStore(db);
+  core.lists = new Lists({ db, library });
+  core.collections = new Collections({ db, library });
+  metadata.setCollections(core.collections);
+  core.picks = new Picks({ db, library, collections: core.collections });
+  core.lyrics = new Lyrics({ db, settings, version, base: config.lrclibBase });
+  core.lists.onChange(() => core.picks.clear());
   core.tasks = new TaskRunner({
     store: core.extras,
     settings,
@@ -79,6 +109,9 @@ export async function createApp(overrides = {}) {
   hooks.on('scan:complete', () => {
     core.tasks.sweep();
     core.tasks.kick();
+    core.picks.clear();
+    // Keywords, cast and film series for titles matched before v0.9.0 (and any the scan just matched).
+    metadata.enrichMissing().catch((err) => log.warn(`Keyword catch-up failed: ${err.message}`));
   });
   hooks.on('playback:start', () => core.tasks.interruptIfBusy());
 
@@ -87,10 +120,13 @@ export async function createApp(overrides = {}) {
   registerPlaybackRoutes(router, core);
   registerAdminRoutes(router, core);
   registerExtrasRoutes(router, core);
+  registerListRoutes(router, core);
+  registerServerRoutes(router, core);
+  registerCastRoutes(router, core);
   await core.plugins.loadAll();
 
   settings.onChange((changed) => {
-    if ('scanIntervalMinutes' in changed) core.scanner.schedule();
+    if ('scanIntervalMinutes' in changed || 'remoteSyncHours' in changed) core.scanner.schedule();
     if ('previewsEnabled' in changed || 'introDetection' in changed) core.tasks.kick();
   });
 
@@ -118,7 +154,19 @@ export async function createApp(overrides = {}) {
     }
 
     const ctx = createContext(req, res, url, params, { core });
-    if (route.auth !== 'none') {
+    const castToken = route.cast && url.searchParams.get('cast');
+    if (castToken) {
+      // A TV fetching with its cast link: no cookie, one item or one stream, and CORS for the Chromecast receiver.
+      const link = core.cast.links.check(castToken, { route: route.cast, itemId: params.id, sessionId: params.sid });
+      if (!link) throw new HttpError(401, 'This cast link has ended.');
+      ctx.user = db.get('SELECT * FROM users WHERE id = ?', link.userId);
+      if (!ctx.user) throw new HttpError(401, 'This cast link has ended.');
+      ctx.profile = link.profileId ? core.profiles.get(ctx.user.id, link.profileId) : core.profiles.active(ctx.user);
+      if (link.profileId && !ctx.profile) throw new HttpError(401, 'This cast link has ended.'); // the profile is gone
+      ctx.viewer = core.profiles.viewer(ctx.user, ctx.profile);
+      ctx.castLink = link;
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    } else if (route.auth !== 'none') {
       ctx.user = auth.resolve(req);
       if (!ctx.user) throw new HttpError(401, 'Please sign in.');
       ctx.profile = core.profiles.active(ctx.user);
@@ -186,18 +234,24 @@ export async function createApp(overrides = {}) {
       server.once('error', reject);
       server.listen(config.port, config.host, resolve);
     });
+    core.listening = { port: server.address().port };
     core.scanner.schedule();
     if (overrides.backgroundTasks !== false) core.tasks.start();
     await hooks.emit('server:ready', { port: server.address().port });
     // Pick up anything that changed while the server was off.
     const libs = db.get('SELECT COUNT(*) AS n FROM libraries').n;
     if (libs && !overrides.skipStartupScan) setTimeout(() => core.scanner.scanAll().catch((e) => log.error(e.message)), 5000).unref();
+    // Titles matched before v0.9.0 get their keywords, cast and film series in the background (a scan runs it too).
+    if (libs && !overrides.skipStartupScan) setTimeout(() => metadata.enrichMissing().catch((e) => log.warn(`Keyword catch-up failed: ${e.message}`)), 8000).unref();
     return server.address();
   }
 
   async function stop() {
     await core.tasks.stop(); // before the database closes
+    await core.cast.manager.stopAll(); // TVs are told to stop and progress is saved (at most 3 s)
     for (const s of [...core.playback.sessions.keys()]) core.playback.stop(s, 'shutdown');
+    // Connected servers hear about those stops before the database closes (at most 3 s).
+    if (core.remote?.reporter) await Promise.race([core.remote.reporter.idle(), new Promise((r) => setTimeout(r, 3000))]);
     for (const id of core.plugins.plugins.keys()) await core.plugins.unload(id);
     await new Promise((resolve) => server.close(() => resolve()));
     server.closeAllConnections?.();

@@ -161,6 +161,27 @@ export async function render(el, params, query) {
   }
 
   const tools = [];
+  if (lib.type === 'movies') {
+    // Collections: the film series and hand-made collections with a film in this library.
+    const startOnCollections = opts.view === 'collections';
+    if (startOnCollections) opts.view = '';
+    const collectionsBtn = button('Collections', { icon: 'list', variant: 'ghost', attrs: { 'aria-pressed': 'false' } });
+    collectionsBtn.addEventListener('click', async () => {
+      opts.view = opts.view === 'collections' ? '' : 'collections';
+      collectionsBtn.setAttribute('aria-pressed', String(opts.view === 'collections'));
+      if (opts.view === 'collections') {
+        history.replaceState(null, '', `#/library/${id}?view=collections`);
+        clear(results).append(spinner());
+        const { collectionCard } = await import('./lists.js');
+        const cols = (await api.get('/api/collections')).filter((c) => c.libraryIds?.includes(Number(id)));
+        clear(results);
+        count.textContent = `${cols.length} ${cols.length === 1 ? 'collection' : 'collections'}`;
+        results.append(cols.length ? h('div', { class: 'grid grid-poster', role: 'list' }, cols.map(collectionCard)) : emptyState({ title: 'No collections yet', text: 'Film series turn up here as your films are matched; admins can make their own in Settings → Libraries.' }));
+      } else reload();
+    });
+    tools.push(collectionsBtn);
+    if (startOnCollections) setTimeout(() => collectionsBtn.click(), 0);
+  }
   if (isMusic) {
     tools.push(
       button('Shuffle all', {

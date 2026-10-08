@@ -5,6 +5,8 @@ import path from 'node:path';
 import { run } from '../library/probe.js';
 import { SUBTITLE_EXTS, parseSubtitleName } from '../library/parser.js';
 import { parseJson } from '../db.js';
+import { isRemotePath } from '../remote/index.js';
+import { headerArgs } from './ffheaders.js';
 
 export const TEXT_SUB_CODECS = new Set(['subrip', 'srt', 'ass', 'ssa', 'webvtt', 'mov_text', 'text']);
 export const IMAGE_SUB_CODECS = new Set(['hdmv_pgs_subtitle', 'dvd_subtitle', 'dvb_subtitle', 'xsub']);
@@ -88,13 +90,14 @@ export function removeAllDownloaded(config, itemId) {
 export function listSubtitles(item, config) {
   const out = [];
   if (!item.path) return out;
-  if (config) {
+  const remote = isRemotePath(item.path); // a connected server's title: only the stream's own tracks
+  if (config && !remote) {
     for (const e of readMeta(config, item.id)) {
       const bits = [languageName(e.language) || 'Unknown', e.hearingImpaired && 'SDH', 'Downloaded'].filter(Boolean);
       out.push({ id: `d${e.n}`, label: bits.join(' · '), language: e.language, forced: false, kind: 'text', source: 'downloaded', provider: e.provider, release: e.label, url: `/api/items/${item.id}/subtitles/d${e.n}.vtt` });
     }
   }
-  for (const s of sidecars(item.path)) {
+  for (const s of remote ? [] : sidecars(item.path)) {
     const bits = [languageName(s.language) || 'Unknown', s.label, s.forced && 'Forced', s.sdh && 'SDH'].filter(Boolean);
     out.push({ id: s.id, label: bits.join(' · '), language: s.language, forced: s.forced, kind: 'text', source: 'external', url: `/api/items/${item.id}/subtitles/${s.id}.vtt` });
   }
@@ -103,7 +106,10 @@ export function listSubtitles(item, config) {
     const isText = TEXT_SUB_CODECS.has(s.codec);
     const isImage = IMAGE_SUB_CODECS.has(s.codec);
     if (!isText && !isImage) continue;
-    const bits = [languageName(s.language) || 'Unknown', s.title, s.forced && 'Forced', isImage && '(burn-in)'].filter(Boolean);
+    const lang = languageName(s.language) || 'Unknown';
+    // A track titled just its language ("English") — what Plex and Jellyfin send — would read "English · English".
+    const title = s.title && s.title.trim().toLowerCase() !== lang.toLowerCase() ? s.title : null;
+    const bits = [lang, title, s.forced && 'Forced', isImage && '(burn-in)'].filter(Boolean);
     out.push({
       id: `e${s.index}`,
       label: bits.join(' · '),
@@ -143,7 +149,10 @@ async function toVtt(file, ffmpegPath) {
   return out.toString('utf8');
 }
 
-export async function getSubtitleVtt(item, subId, { ffmpegPath, cacheDir, dataDir }) {
+/**
+ * @param {object} [source]  for a connected server's title: { file: stream URL, headers } — ffmpeg reads the stream
+ */
+export async function getSubtitleVtt(item, subId, { ffmpegPath, cacheDir, dataDir }, source = null) {
   if (subId.startsWith('d')) {
     const entry = readMeta({ dataDir }, item.id).find((e) => e.n === Number(subId.slice(1)));
     if (!entry) return null;
@@ -159,7 +168,7 @@ export async function getSubtitleVtt(item, subId, { ffmpegPath, cacheDir, dataDi
     if (!Number.isInteger(index)) return null;
     const dir = path.join(cacheDir, 'subs');
     await fs.promises.mkdir(dir, { recursive: true });
-    const cacheFile = path.join(dir, `${item.id}-${index}-${item.mtime || 0}.vtt`);
+    const cacheFile = path.join(dir, `${item.id}-${index}-${item.mtime || item.metadata_at || 0}.vtt`);
     try {
       return await fs.promises.readFile(cacheFile, 'utf8');
     } catch {
@@ -167,7 +176,7 @@ export async function getSubtitleVtt(item, subId, { ffmpegPath, cacheDir, dataDi
     }
     const out = await run(
       ffmpegPath,
-      ['-hide_banner', '-loglevel', 'error', '-nostdin', '-i', item.path, '-map', `0:s:${index}`, '-f', 'webvtt', 'pipe:1'],
+      ['-hide_banner', '-loglevel', 'error', '-nostdin', ...(source?.headers ? headerArgs(source.headers) : []), '-i', source?.file || item.path, '-map', `0:s:${index}`, '-f', 'webvtt', 'pipe:1'],
       { timeout: 10 * 60 * 1000 },
     );
     const text = out.toString('utf8');

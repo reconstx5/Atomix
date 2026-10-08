@@ -3,7 +3,7 @@
   "name": "Internet Archive",
   "version": "1.0.0",
   "description": "Browse and stream public-domain films, cartoons and classic TV from archive.org. An example of a Kodi-style video add-on.",
-  "author": "NodeFlix",
+  "author": "Atomix",
   "homepage": "https://archive.org/details/movies",
   "main": "index.js",
   "settings": [

@@ -16,7 +16,7 @@ export async function render(el) {
     el.append(
       emptyState({
         title: 'Your media hub is empty',
-        text: isAdmin ? 'Add a folder of movies, TV shows or music and NodeFlix will organise it for you.' : 'An admin needs to add some media folders first.',
+        text: isAdmin ? 'Add a folder of movies, TV shows or music and Atomix will organise it for you.' : 'An admin needs to add some media folders first.',
         action: isAdmin ? button('Add a library', { icon: 'plus', variant: 'primary', href: '#/settings/libraries', autofocus: true }) : null,
       }),
     );
@@ -25,7 +25,7 @@ export async function render(el) {
 
   const rows = h('div', { class: 'rows' });
   for (const r of data.rows) {
-    rows.append(row({ title: r.title, items: r.items, style: r.style, href: r.libraryId ? `#/library/${r.libraryId}` : null }));
+    rows.append(row({ id: r.id, inMenu: true, title: r.title, items: r.items, style: r.style, href: r.libraryId ? `#/library/${r.libraryId}` : r.id === 'watchlist' || r.id === 'lists' ? '#/lists' : null }));
   }
   if (!data.rows.length) {
     rows.append(
@@ -46,4 +46,8 @@ export async function render(el) {
     el.classList.add('no-spotlight');
   }
   el.append(h('div', { class: 'home-rows' }, rows));
+  // Orbit: past the first row the top area gets smaller so two rows fit; moving back up restores it.
+  // (Other themes have no styles for .is-compact.)
+  const rowEls = [...rows.querySelectorAll(':scope > .row')];
+  el.addEventListener('focusin', (e) => el.classList.toggle('is-compact', rowEls.indexOf(e.target.closest?.('.row')) > 0));
 }

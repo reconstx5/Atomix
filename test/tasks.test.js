@@ -72,7 +72,7 @@ test('one job at a time: new titles first, then intros, then the backlog oldest 
   await runner.stop();
   assert.deepEqual(log, [`p${m2}`, `i${s1}`, `p${m1}`, `p${e1}`]);
   assert.equal(most, 1, 'never two at once');
-  assert.deepEqual(runner.status().queued, { previews: 0, intros: 0 });
+  assert.deepEqual(runner.status().queued, { previews: 0, intros: 0, thumbs: 0, lyrics: 0 });
   db.close();
 });
 

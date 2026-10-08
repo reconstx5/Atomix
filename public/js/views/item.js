@@ -1,11 +1,13 @@
 // Detail page for a movie, show (with seasons & episodes) or single episode.
 import { api, qs } from '../api.js';
+import { openCastPicker } from '../cast.js';
 import { h, icon, clear, episodeLabel, formatRuntime, formatBytes, formatClock } from '../dom.js';
-import { art, metaLine, button, toast, openDialog, landscapeCard, spinner, grid, mediaFlags, endsAt, timeLeft, field } from '../components.js';
+import { art, metaLine, button, toast, openDialog, landscapeCard, spinner, grid, mediaFlags, endsAt, timeLeft, field, moreButton, row, episodeCaption } from '../components.js';
+import { watchlistButton, addToPlaylistItems } from '../lists.js';
 import { parseClock } from '../markers.js';
-import { setTitle, navigate, refreshView, canAdmin, isKidsProfile } from '../app.js';
+import { setTitle, navigate, refreshView, canAdmin, isKidsProfile, isOrbit } from '../app.js';
 import { music, trackList } from '../music.js';
-import { setBackdrop } from '../backdrop.js';
+import { setBackdrop, followFocus } from '../backdrop.js';
 
 /** The title as its clear logo when there is one (the text stays for screen readers and as a fallback). */
 function titleArt(logoUrl, text) {
@@ -44,7 +46,7 @@ function watchedButton(item) {
 }
 
 function adminMenu(item) {
-  if (!canAdmin()) return null;
+  if (!canAdmin() || item.remote) return null; // a connected server's title: its details live there
   const actions = [
     button('Refresh info', {
       icon: 'refresh',
@@ -59,6 +61,33 @@ function adminMenu(item) {
   ];
   if (item.kind === 'movie' || item.kind === 'show') actions.push(button('Fix match', { icon: 'edit', variant: 'ghost', onClick: () => identifyDialog(item) }));
   return actions;
+}
+
+/** Orbit's round "…" button: the less-used actions (Refresh info, Fix match, Download, Edit intro). */
+function moreItems(item, markers, extra = {}) {
+  const items = [];
+  // Playlists first: they are for everyone, not just admins.
+  if (item.kind === 'movie' || item.kind === 'episode') items.push(addToPlaylistItems({ itemId: item.id }));
+  else if (item.kind === 'show') items.push(addToPlaylistItems({ get seasonId() { return extra.seasonId?.(); } }, { label: 'Add season to playlist…' }));
+  else if (item.kind === 'album' || item.kind === 'artist') items.push(addToPlaylistItems({ itemIds: (extra.tracks || []).map((t) => t.id) }, { kind: 'music' }));
+  // Casting: Atomix plays it on a TV and this screen is the remote.
+  if (item.kind === 'movie' || item.kind === 'episode') items.push({ label: 'Cast to…', icon: 'cast', onSelect: () => openCastPicker({ itemId: item.id }) });
+  else if ((item.kind === 'album' || item.kind === 'artist') && extra.tracks?.length) items.push({ label: 'Cast to…', icon: 'cast', onSelect: () => openCastPicker({ queue: { itemIds: extra.tracks.map((t) => t.id), index: 0 } }) });
+  if (canAdmin() && !item.remote) {
+    items.push({
+      label: 'Refresh info',
+      icon: 'refresh',
+      onSelect: async () => {
+        toast('Refreshing metadata…');
+        await api.post(`/api/items/${item.id}/refresh`, {});
+        refreshView();
+      },
+    });
+    if (item.kind === 'movie' || item.kind === 'show') items.push({ label: 'Fix match', icon: 'edit', onSelect: () => identifyDialog(item) });
+  }
+  if ((item.kind === 'movie' || item.kind === 'episode') && !isKidsProfile() && !item.remote) items.push({ label: 'Download', icon: 'download', href: `/api/items/${item.id}/download`, download: true });
+  if (item.kind === 'episode' && markers !== undefined) items.push({ label: 'Edit intro', icon: 'edit', onSelect: () => introDialog(item, markers?.intro) });
+  return items;
 }
 
 async function identifyDialog(item) {
@@ -126,17 +155,17 @@ async function identifyDialog(item) {
 
 const INTRO_SOURCE = { audio: 'found automatically', chapter: 'from chapters', manual: 'set by hand' };
 
-/** Admins: where this episode's intro is, and a way to fix it. */
-function introLine(item, markers) {
+/** Admins: where this episode's intro is, and (older themes) a way to fix it. Orbit keeps Edit intro in "…". */
+function introLine(item, markers, { edit = true } = {}) {
   const m = markers?.intro;
   const text = !m ? 'Intro not found yet' : m.none ? 'No intro' : `Intro ${formatClock(m.start)}–${formatClock(m.end)} · ${INTRO_SOURCE[m.source] || ''}`;
-  return h('p', { class: 'intro-line muted' }, h('span', {}, text), button('Edit', { icon: 'edit', variant: 'ghost', onClick: () => introDialog(item, m) }));
+  return h('p', { class: 'intro-line muted' }, h('span', {}, text), edit ? button('Edit', { icon: 'edit', variant: 'ghost', onClick: () => introDialog(item, m) }) : null);
 }
 
 async function introDialog(item, current) {
   const has = current && !current.none;
-  const start = h('input', { value: has ? formatClock(current.start) : '', placeholder: '0:42', inputmode: 'decimal', autocomplete: 'off', 'data-autofocus': true });
-  const end = h('input', { value: has ? formatClock(current.end) : '', placeholder: '1:32', inputmode: 'decimal', autocomplete: 'off' });
+  const start = h('input', { value: has ? formatClock(current.start, { tenths: true }) : '', placeholder: '0:42', inputmode: 'decimal', autocomplete: 'off', 'data-autofocus': true });
+  const end = h('input', { value: has ? formatClock(current.end, { tenths: true }) : '', placeholder: '1:32', inputmode: 'decimal', autocomplete: 'off' });
   const all = h('input', { type: 'checkbox' });
   const actions = [
     { label: 'Cancel', value: 'cancel' },
@@ -185,12 +214,13 @@ function mediaDetails(item, subtitles) {
   const m = item.media;
   const rows = [];
   if (item.fileName) rows.push(['File', `${item.fileName}${item.size ? ` · ${formatBytes(item.size)}` : ''}`]);
+  if (item.remote && item.serverName) rows.push(['From', item.serverName]);
   if (m?.videoCodec) rows.push(['Video', `${m.videoCodec.toUpperCase()} ${m.width}×${m.height}${m.bitDepth > 8 ? ` · ${m.bitDepth}-bit` : ''}${m.hdr ? ' · HDR' : ''}`]);
   if (m?.audio?.length) rows.push(['Audio', m.audio.map((a) => [a.language?.toUpperCase(), a.codec?.toUpperCase(), a.channels ? `${a.channels}ch` : null, a.title].filter(Boolean).join(' ')).join(' / ')]);
   if (subtitles?.length) rows.push(['Subtitles', subtitles.map((s) => s.label).join(' / ')]);
   if (item.originalTitle) rows.push(['Original title', item.originalTitle]);
   if (!rows.length) return null;
-  return h('section', { class: 'detail-section' }, h('h2', {}, 'Details'), h('dl', { class: 'details-list' }, rows.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])));
+  return h('section', { class: 'detail-section details-panel' }, h('h2', {}, 'Details'), h('dl', { class: 'details-list' }, rows.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])));
 }
 
 function episodeList(episodes) {
@@ -200,7 +230,7 @@ function episodeList(episodes) {
     { class: 'episodes', role: 'list' },
     episodes.map((ep) => {
       const r = resumeInfo(ep);
-      const bits = [ep.airDate ? new Date(ep.airDate).toLocaleDateString() : null, formatRuntime(ep.runtime || (ep.duration ? ep.duration / 60 : null)), r?.left ? `${formatRuntime(r.left / 60)} left` : null].filter(Boolean);
+      const bits = [ep.airDate ? new Date(ep.airDate).toLocaleDateString() : null, episodeCaption(ep)].filter(Boolean);
       return h(
         'li',
         { class: `episode${ep.progress?.watched ? ' is-watched' : ''}` },
@@ -222,6 +252,57 @@ function episodeList(episodes) {
       );
     }),
   );
+}
+
+/**
+ * Orbit: a season's episodes as a row of wide cards. The selected episode's story shows under the
+ * row, next to an Episode details button that Down reaches. OK on a card plays that episode.
+ */
+function episodeRow(episodes) {
+  if (!episodes.length) return h('p', { class: 'muted' }, 'No episodes found.');
+  const cards = h('div', { class: 'row-scroller row-landscape episode-row' });
+  const byCard = new WeakMap();
+  // The episode the story below describes: the one to resume, else the first unwatched, else the first.
+  const first = episodes.find((e) => resumeInfo(e)) || episodes.find((e) => !e.progress?.watched) || episodes[0];
+  let firstCard = null;
+  for (const ep of episodes) {
+    const r = resumeInfo(ep);
+    const length = episodeCaption(ep);
+    const card = h(
+      'a',
+      { class: `card episode-card${ep.progress?.watched ? ' is-watched' : ''}`, href: `#/play/${ep.id}`, 'aria-label': `Play episode ${ep.episode}: ${ep.title}` },
+      h(
+        'div',
+        { class: 'card-art' },
+        art(ep.poster, ep.title, { kind: 'landscape' }),
+        ep.progress?.watched ? h('span', { class: 'badge badge-watched' }, icon('check', { size: 14, label: 'Watched' })) : null,
+        r && ep.duration ? h('div', { class: 'progress' }, h('span', { style: { width: `${Math.min(100, (r.position / ep.duration) * 100)}%` } })) : null,
+      ),
+      h('div', { class: 'card-meta' }, h('span', { class: 'card-title' }, `${ep.episode}. ${ep.title}`), length ? h('span', { class: 'card-sub' }, length) : null),
+    );
+    byCard.set(card, ep);
+    if (ep === first) firstCard = card;
+    cards.append(card);
+  }
+  // Open the row at that episode, so the story matches the card at the start and Down lands on it
+  // (it may be far along a long season). Waits for the row to be on the page; gives up after a second.
+  let tries = 0;
+  const reveal = () => {
+    if (!cards.isConnected) return void (tries++ < 60 && requestAnimationFrame(reveal));
+    const pad = parseFloat(getComputedStyle(cards).paddingLeft) || 0;
+    cards.scrollLeft += firstCard.getBoundingClientRect().left - cards.getBoundingClientRect().left - pad;
+  };
+  if (firstCard !== cards.firstElementChild) requestAnimationFrame(reveal);
+  const story = h('p', { class: 'episode-story' });
+  const details = button('Episode details', { icon: 'info', variant: 'ghost', href: `#/item/${first.id}` });
+  const show = (ep) => {
+    clear(story).append(h('strong', {}, `${ep.title}.`), ep.overview ? ` ${ep.overview}` : '');
+    details.href = `#/item/${ep.id}`;
+    details.setAttribute('aria-label', `Episode details: ${ep.episode}. ${ep.title}`);
+  };
+  show(first);
+  followFocus(cards, (card) => byCard.get(card), show);
+  return h('div', { class: 'episode-browser' }, cards, h('div', { class: 'episode-about' }, story, details));
 }
 
 // ---- Music: album and artist pages ----
@@ -268,8 +349,13 @@ function renderAlbum(el, data, query) {
   setTitle(`${item.title}${artist ? ` · ${artist.title}` : ''}`);
   const focusId = Number(query.track) || null;
   const actions = playButtons(tracks, { autofocus: !focusId });
-  const admin = adminMenu(item);
-  if (admin) actions.push(...admin);
+  if (isOrbit()) {
+    const more = moreItems(item, undefined, { tracks });
+    if (more.length) actions.push(moreButton(item.title, more));
+  } else {
+    const admin = adminMenu(item);
+    if (admin) actions.push(...admin);
+  }
   musicHeader(el, {
     item,
     backdrop: item.backdrop || artist?.backdrop,
@@ -298,8 +384,13 @@ function renderArtist(el, data) {
   const tracks = data.tracks || [];
   setTitle(item.title);
   const actions = playButtons(tracks, { label: 'Play all' });
-  const admin = adminMenu(item);
-  if (admin) actions.push(...admin);
+  if (isOrbit()) {
+    const more = moreItems(item, undefined, { tracks });
+    if (more.length) actions.push(moreButton(item.title, more));
+  } else {
+    const admin = adminMenu(item);
+    if (admin) actions.push(...admin);
+  }
   musicHeader(el, {
     item,
     round: true,
@@ -345,13 +436,27 @@ export async function render(el, params, query) {
     const n = data.nextEpisode;
     const nr = resumeInfo(n);
     actions.push(button(`${nr ? 'Resume' : 'Play'} ${episodeLabel(n)}`, { icon: 'play', variant: 'primary', href: `#/play/${n.id}`, autofocus: true }));
+    if (nr && isOrbit()) actions.push(button('From the start', { icon: 'replay', variant: 'ghost', href: `#/play/${n.id}?t=0` }));
   }
+  if (data.trailer) {
+    const t = data.trailer;
+    actions.push(button('Trailer', { icon: 'film', variant: 'ghost', href: t.kind === 'local' ? `#/play/${t.itemId}?from=${item.id}` : `#/trailer/${item.id}` }));
+  }
+  if (item.kind === 'movie' || item.kind === 'show') actions.push(watchlistButton(item, data.inWatchlist));
   actions.push(watchedButton(item));
-  if (item.kind !== 'show' && !isKidsProfile()) {
-    actions.push(button('', { icon: 'download', variant: 'ghost', href: `/api/items/${item.id}/download`, title: 'Download file', attrs: { download: '' } }));
+  const currentSeason = () => Number(document.querySelector('.season-tab[aria-selected="true"]')?.dataset.id) || null;
+  if (isOrbit()) {
+    const more = moreItems(item, data.markers, { seasonId: currentSeason });
+    if (more.length) actions.push(moreButton(item.title, more));
+  } else {
+    const playlistEntry = item.kind === 'show' ? addToPlaylistItems({ get seasonId() { return currentSeason(); } }, { label: 'Add season to playlist…' }) : addToPlaylistItems({ itemId: item.id });
+    actions.push(moreButton(item.title, [playlistEntry]));
+    if (item.kind !== 'show' && !isKidsProfile() && !item.remote) {
+      actions.push(button('', { icon: 'download', variant: 'ghost', href: `/api/items/${item.id}/download`, title: 'Download file', attrs: { download: '' } }));
+    }
+    const admin = adminMenu(item);
+    if (admin) actions.push(...admin);
   }
-  const admin = adminMenu(item);
-  if (admin) actions.push(...admin);
 
   // Episodes say which show they belong to; movies and shows don't need a label.
   const eyebrow = item.kind === 'episode' ? h('p', { class: 'eyebrow' }, h('a', { href: `#/item/${show.id}` }, show.title), ` · ${episodeLabel(item)}`) : null;
@@ -380,7 +485,7 @@ export async function render(el, params, query) {
           item.overview ? h('p', { class: 'overview' }, item.overview) : h('p', { class: 'overview muted' }, 'No description yet.'),
           r?.left ? h('p', { class: 'muted small' }, `${formatRuntime(r.left / 60)} left`) : null,
           h('div', { class: 'actions' }, actions),
-          data.markers !== undefined ? introLine(item, data.markers) : null,
+          data.markers !== undefined ? introLine(item, data.markers, { edit: !isOrbit() }) : null,
         ),
       ),
     ),
@@ -401,7 +506,7 @@ export async function render(el, params, query) {
       const sd = await api.get(`/api/items/${season.id}`);
       clear(panel);
       if (sd.item.overview && sd.item.overview !== item.overview) panel.append(h('p', { class: 'season-overview muted' }, sd.item.overview));
-      panel.append(episodeList(sd.episodes || []));
+      panel.append(isOrbit() ? episodeRow(sd.episodes || []) : episodeList(sd.episodes || []));
     }
     for (const s of seasons) {
       const done = s.childCount && !s.unwatched;
@@ -424,4 +529,20 @@ export async function render(el, params, query) {
     const details = mediaDetails(item, data.subtitles);
     if (details) body.append(details);
   }
+  if (data.extras?.length) {
+    body.append(row({ id: 'extras', title: 'Extras', items: data.extras.map((e) => ({ ...e, href: `#/play/${e.id}?from=${item.id}`, ownerBackdrop: backdrop })), style: 'landscape' }));
+  }
+  if (data.collection) {
+    const part = row({ id: 'collection', title: `Part of ${data.collection.name}`, subtitle: `${data.collection.owned} of ${data.collection.total} in your library`, items: data.collection.items, style: 'poster', href: `#/collections/${data.collection.id}` });
+    // The film you're on: a "This film" badge, and not a link to the page you're already on.
+    const at = data.collection.items.findIndex((i) => i.isCurrent);
+    const link = at >= 0 ? part.querySelector('.row-scroller').children[at] : null;
+    if (link) {
+      const card = h('div', { class: `${link.className} is-current`, tabindex: '0', 'aria-label': `${link.getAttribute('aria-label') || ''}, this film` }, ...link.childNodes);
+      card.querySelector('.card-art')?.append(h('span', { class: 'badge badge-current' }, 'This film'));
+      link.replaceWith(card);
+    }
+    body.append(part);
+  }
+  if (data.similar?.length) body.append(row({ id: 'similar', title: 'More like this', items: data.similar, style: 'poster' }));
 }

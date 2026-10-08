@@ -1,14 +1,17 @@
 // Full-screen player with custom controls, subtitles, audio/quality switching,
 // resume, progress sync and "up next" for TV episodes.
 import { api } from '../api.js';
-import { h, icon, clear, append, formatClock, episodeLabel } from '../dom.js';
-import { toast, endsAt } from '../components.js';
+import { h, icon, clear, append, formatClock, formatRuntime, episodeLabel } from '../dom.js';
+import { art, toast, endsAt } from '../components.js';
 import { Scrubber, COMMIT_AFTER_MS } from '../scrub.js';
 import { seekPreview } from '../seekpreview.js';
 import { introRange, inIntro, introLeft, upNextAt, focusIsFree, creditsStep, reportedPosition } from '../markers.js';
-import { state, goBack, navigate, setTitle } from '../app.js';
+import { state, goBack, navigate, setTitle, isOrbit } from '../app.js';
+import { markPlaying } from '../gate.js';
 import { detectCaps } from '../caps.js';
 import { parseVtt, cueHtml } from '../vtt.js';
+import { VOLUME_KEY } from '../storage.js';
+import { openCastPicker } from '../cast.js';
 
 const QUALITIES = [
   ['original', 'Original'],
@@ -24,7 +27,8 @@ const MODE_LABEL = { direct: 'Direct play', remux: 'Remux (no quality loss)', tr
 export async function render(el, params, query) {
   const isSource = Boolean(params.plugin);
   const prefs = state.profile?.prefs || {};
-  const video = h('video', { playsinline: true, preload: 'auto', 'aria-label': 'Video' });
+  // x-webkit-airplay: Safari offers its AirPlay picker; the Apple TV then fetches the video itself (with a cast link).
+  const video = h('video', { playsinline: true, preload: 'auto', 'aria-label': 'Video', 'x-webkit-airplay': 'allow' });
   const subLayer = h('div', { class: 'subtitle-layer', 'aria-live': 'off' });
   const spinnerEl = h('div', { class: 'player-spinner', hidden: true }, h('div', { class: 'spinner' }));
   const bigPlay = h('button', { class: 'player-bigplay', type: 'button', 'aria-label': 'Play', hidden: true }, icon('play', { size: 44 }));
@@ -42,7 +46,7 @@ export async function render(el, params, query) {
   const seekTrack = h('div', { class: 'seek-track' }, bufferBar, seek);
   const bubble = seekPreview(seekTrack);
   const ctlBtn = (name, label, onClick, extra = {}) => h('button', { class: 'pbtn', type: 'button', 'aria-label': label, title: label, onClick, ...extra }, icon(name, { size: 24 }));
-  const playBtn = ctlBtn('play', 'Play (Space)', () => togglePlay());
+  const playBtn = ctlBtn('play', 'Play (Space)', () => togglePlay(), { class: 'pbtn pbtn-play' });
   const backBtn = ctlBtn('replay', 'Back 10 seconds', () => seekTo(currentTime() - 10));
   const fwdBtn = ctlBtn('skip', 'Forward 30 seconds', () => seekTo(currentTime() + 30));
   const muteBtn = ctlBtn('volume', 'Mute (M)', () => {
@@ -54,24 +58,32 @@ export async function render(el, params, query) {
   const audioBtn = ctlBtn('audio', 'Audio track', () => toggleMenu('audio'), { hidden: true });
   const qualityBtn = ctlBtn('quality', 'Quality', () => toggleMenu('quality'));
   const fsBtn = ctlBtn('fullscreen', 'Full screen (F)', () => toggleFullscreen());
+  const castBtn = ctlBtn('cast', 'Cast to a TV', () => castToTv(), { class: 'pbtn pbtn-cast', hidden: isSource });
+  const airplayBtn = ctlBtn('airplay', 'AirPlay', () => video.webkitShowPlaybackTargetPicker?.(), { class: 'pbtn pbtn-airplay', hidden: true });
   const menu = h('div', { class: 'player-menu', hidden: true, role: 'menu' });
   const modeBadge = h('button', { class: 'mode-badge', type: 'button', title: 'Playback info (I)', onClick: () => toggleInfo() });
 
+  const playGroup = h('div', { class: 'control-group' }, playBtn, backBtn, fwdBtn, h('div', { class: 'volume-wrap' }, muteBtn, volume));
   const controls = h(
     'div',
     { class: 'player-controls' },
     h('div', { class: 'seek-wrap' }, timeCur, seekTrack, timeEnd),
-    h(
-      'div',
-      { class: 'control-row' },
-      h('div', { class: 'control-group' }, playBtn, backBtn, fwdBtn, h('div', { class: 'volume-wrap' }, muteBtn, volume)),
-      h('div', { class: 'control-group' }, modeBadge, nextBtn, subsBtn, audioBtn, qualityBtn, fsBtn),
-    ),
+    h('div', { class: 'control-row' }, playGroup, h('div', { class: 'control-group' }, modeBadge, nextBtn, subsBtn, audioBtn, qualityBtn, castBtn, airplayBtn, fsBtn)),
     menu,
   );
   // Like a TV media centre: when will this finish if I keep watching?
   const endsEl = h('div', { class: 'player-ends', 'aria-live': 'off' });
   const top = h('div', { class: 'player-top' }, h('button', { class: 'pbtn', type: 'button', 'aria-label': 'Back', title: 'Back (Esc)', onClick: () => leave() }, icon('back', { size: 26 })), titleEl, endsEl);
+  // Orbit: the clock top-right, and "Ends at" beside the play buttons.
+  const clockEl = h('time', { class: 'player-clock' });
+  const tickClock = () => (clockEl.textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
+  let clockTimer = null;
+  if (isOrbit()) {
+    playGroup.append(endsEl);
+    top.append(clockEl);
+    tickClock();
+    clockTimer = setInterval(tickClock, 15000);
+  }
   const root = h('div', { class: 'player', tabindex: '-1', dataset: { controls: 'visible' } }, video, subLayer, spinnerEl, bigPlay, notice, errorEl, infoEl, upNext, skipBtn, top, controls);
   el.append(root);
 
@@ -182,6 +194,7 @@ export async function render(el, params, query) {
     clearTimeout(pendingSeek);
     const body = {
       caps: detectCaps(),
+      listId: query.list ? Number(query.list) : undefined, // playing through a playlist: "next" follows it
       start: resume ? undefined : Math.max(0, start || 0),
       resume,
       audioIndex,
@@ -301,8 +314,10 @@ export async function render(el, params, query) {
     bubble.show(t, total);
     showControls(true);
   }
+  const stepLabel = (dir, step) => (step > 10 ? `${dir > 0 ? '+' : '−'}${step} s` : null);
   function scrubPress(dir, e) {
     showScrub(scrubber.press(dir, { from: currentTime(), now: performance.now(), repeat: e.repeat }));
+    bubble.setStep(stepLabel(dir, scrubber.lastStep));
     clearTimeout(commitTimer);
     const check = () => {
       if (scrubber.due(performance.now())) commitScrub();
@@ -382,6 +397,8 @@ export async function render(el, params, query) {
     maybeReport();
   });
   video.addEventListener('play', updatePlayState);
+  // Playing counts as being there: "Who's watching?" never interrupts a video (gate.js).
+  video.addEventListener('play', () => markPlaying(true)); // the gate asks the element itself whether it's still playing
   video.addEventListener('pause', () => {
     updatePlayState();
     report();
@@ -394,7 +411,7 @@ export async function render(el, params, query) {
     clear(muteBtn).append(icon(video.muted || video.volume === 0 ? 'mute' : 'volume', { size: 24 }));
     volume.value = String(video.muted ? 0 : video.volume);
     try {
-      localStorage.setItem('nf-volume', String(video.volume));
+      localStorage.setItem(VOLUME_KEY, String(video.volume));
     } catch {
       /* private mode */
     }
@@ -404,8 +421,8 @@ export async function render(el, params, query) {
     video.muted = video.volume === 0;
   });
   try {
-    const v = Number(localStorage.getItem('nf-volume'));
-    if (v >= 0 && v <= 1 && localStorage.getItem('nf-volume') !== null) video.volume = v;
+    const v = Number(localStorage.getItem(VOLUME_KEY));
+    if (v >= 0 && v <= 1 && localStorage.getItem(VOLUME_KEY) !== null) video.volume = v;
   } catch {
     /* ignore */
   }
@@ -424,6 +441,7 @@ export async function render(el, params, query) {
 
   video.addEventListener('ended', () => {
     report(true);
+    if (item?.kind === 'extra') return leave(); // a trailer or featurette goes back to its film
     if (!upNext.hidden) return; // already counting down (it started at the credits)
     if (session?.next && prefs.autoplayNext !== false && !upNextCancelled) startUpNext();
     else showControls(true);
@@ -505,10 +523,15 @@ export async function render(el, params, query) {
 
   // ---- Menus ----
   let openMenu = null;
+  const menuOpeners = { subs: subsBtn, audio: audioBtn, quality: qualityBtn, online: subsBtn };
   function closeMenu() {
+    // A picked online result disables itself while it downloads, which drops focus to the page: that counts too.
+    const refocus = menu.contains(document.activeElement) || document.activeElement === document.body;
+    const opener = menuOpeners[openMenu];
     menu.hidden = true;
     openMenu = null;
     showControls();
+    if (refocus) opener?.focus({ preventScroll: true });
   }
   function menuItem(label, checked, onClick, detail) {
     return h('button', { type: 'button', role: 'menuitemradio', class: 'menu-item', 'aria-checked': String(Boolean(checked)), onClick }, h('span', { class: 'menu-check' }, checked ? icon('check', { size: 16 }) : null), h('span', {}, label), detail ? h('small', {}, detail) : null);
@@ -522,7 +545,7 @@ export async function render(el, params, query) {
       for (const s of session?.subtitles || []) menu.append(menuItem(s.label, currentSub?.id === s.id, () => selectSubtitle(s), s.source === 'external' ? 'File' : null));
       if (!(session?.subtitles || []).length) menu.append(h('p', { class: 'menu-empty' }, 'No subtitles found for this video.'));
       if (session?.subtitleProviders?.length) {
-        menu.append(h('button', { type: 'button', class: 'menu-item menu-action', onClick: () => searchOnline() }, h('span', { class: 'menu-check' }, icon('search', { size: 16 })), h('span', {}, 'Find subtitles online…')));
+        menu.append(h('div', { class: 'menu-sep', 'aria-hidden': 'true' }), h('button', { type: 'button', class: 'menu-item menu-action', onClick: () => searchOnline() }, h('span', { class: 'menu-check' }, icon('search', { size: 16 })), h('span', {}, 'Find subtitles online…')));
       }
     } else if (kind === 'audio') {
       menu.append(h('p', { class: 'menu-title' }, 'Audio'));
@@ -653,17 +676,33 @@ export async function render(el, params, query) {
     const next = session.next;
     let left = 10;
     const count = h('span', { class: 'upnext-count' }, String(left));
-    clear(upNext).append(
+    // Orbit also shows the episode's picture, the show and its length, and a ring round Play now that
+    // empties as the countdown runs (older themes hide those three).
+    const ring = h('span', { class: 'upnext-ring', 'aria-hidden': 'true', style: { '--left': '1' } });
+    const length = formatRuntime(next.runtime || (next.duration ? next.duration / 60 : null));
+    append(clear(upNext), [
+      // The episode's picture, else the show's; with neither, the tinted placeholder the episode rows use.
+      h('div', { class: 'upnext-art' }, art(next.poster || session.show?.backdrop, next.title, { kind: 'landscape', eager: true })),
       h('p', { class: 'eyebrow' }, 'Up next'),
       h('h3', {}, `${episodeLabel(next)} · ${next.title}`),
+      h('p', { class: 'upnext-meta muted' }, [session.show?.title, length].filter(Boolean).join(', ')),
       h('p', { class: 'muted' }, 'Starting in ', count, ' s'),
-      h('div', { class: 'actions' }, h('button', { class: 'btn btn-primary', type: 'button', onClick: () => playNext(), 'data-autofocus': true }, icon('play'), h('span', {}, 'Play now')), h('button', { class: 'btn btn-secondary', type: 'button', onClick: cancelUpNext }, 'Cancel')),
-    );
+      h(
+        'div',
+        { class: 'actions' },
+        h('button', { class: 'btn btn-primary', type: 'button', onClick: () => playNext(), 'data-autofocus': true }, ring, icon('play'), h('span', {}, 'Play now')),
+        h('button', { class: 'btn btn-secondary', type: 'button', onClick: cancelUpNext }, 'Keep watching'),
+      ),
+    ]);
     upNext.hidden = false;
+    upNext.classList.remove('is-live');
+    void upNext.offsetWidth; // restart the ring's sweep from the top each time the card shows
+    upNext.classList.add('is-live');
     upNext.querySelector('[data-autofocus]').focus();
     upNextTimer = setInterval(() => {
       left--;
       count.textContent = String(left);
+      ring.style.setProperty('--left', String(Math.max(0, left) / 10));
       if (left <= 0) playNext();
     }, 1000);
   }
@@ -671,16 +710,18 @@ export async function render(el, params, query) {
     if (upNextAt(session?.markers, totalDuration()) != null) upNextCancelled = true;
     clearInterval(upNextTimer);
     upNext.hidden = true;
+    upNext.classList.remove('is-live');
     showControls(true);
   }
   function playNext() {
     clearInterval(upNextTimer);
-    if (session?.next) navigate(`#/play/${session.next.id}`, { replace: true });
+    if (session?.next) navigate(`#/play/${session.next.id}${session.listId ? `?list=${session.listId}` : ''}`, { replace: true });
   }
 
   // ---- Keyboard / remote ----
   function onKey(e) {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.target.closest?.('dialog[open]')) return; // the cast picker (or another dialog) has the keys
     const active = document.activeElement;
     // Typing in a text box (e.g. subtitle search): leave the keys alone.
     if (active && (active.tagName === 'TEXTAREA' || (active.tagName === 'INPUT' && !['range', 'checkbox', 'button'].includes(active.type)))) {
@@ -691,7 +732,7 @@ export async function render(el, params, query) {
       }
       return;
     }
-    const inControls = controls.contains(active) || top.contains(active) || upNext.contains(active) || errorEl.contains(active);
+    const inControls = controls.contains(active) || top.contains(active) || upNext.contains(active) || errorEl.contains(active) || notice.contains(active);
     const onButton = inControls && active.tagName === 'BUTTON';
     showControls();
     switch (e.key) {
@@ -717,8 +758,9 @@ export async function render(el, params, query) {
           return;
         }
         if (onButton) {
-          // Move between control buttons.
-          const buttons = [...root.querySelectorAll('.player-controls button:not([hidden]), .player-top button')].filter((b) => b.offsetParent);
+          // Along the control buttons, or between the two Up next buttons.
+          const pool = upNext.contains(active) ? upNext.querySelectorAll('button') : root.querySelectorAll('.player-controls button:not([hidden]), .player-top button, .player-notice:not([hidden]) button');
+          const buttons = [...pool].filter((b) => b.offsetParent);
           const i = buttons.indexOf(active);
           const next = buttons[i + (e.key === 'ArrowRight' ? 1 : -1)];
           if (next) next.focus();
@@ -757,6 +799,16 @@ export async function render(el, params, query) {
           return;
         }
         if (e.key === 'ArrowUp' && !inControls) {
+          playBtn.focus();
+          return;
+        }
+        // Up from the control row reaches the notice's button ("Watch it", "Start over") when one is showing.
+        const noticeBtn = !notice.hidden && notice.querySelector('button');
+        if (e.key === 'ArrowUp' && controls.contains(active) && noticeBtn) {
+          noticeBtn.focus();
+          return;
+        }
+        if (e.key === 'ArrowDown' && notice.contains(active)) {
           playBtn.focus();
           return;
         }
@@ -800,12 +852,59 @@ export async function render(el, params, query) {
   }
   window.addEventListener('keydown', onKey);
 
+  // ---- Casting: Atomix drives the TV from where this player is; the player closes to the Remote ----
+  function castToTv() {
+    if (!item) return;
+    const subtitle = burnIndex != null ? `e${burnIndex}` : currentSub?.id || null;
+    openCastPicker(
+      { itemId: item.id },
+      {
+        position: Math.round(currentTime() * 10) / 10,
+        audioIndex,
+        subtitle,
+        onStarted: () => video.pause(),
+      },
+    );
+  }
+
+  // ---- AirPlay (Safari): the Apple TV fetches the media itself, so it gets a cast link for this session ----
+  let plainSrc = null;
+  if (window.WebKitPlaybackTargetAvailabilityEvent && !isSource) {
+    video.addEventListener('webkitplaybacktargetavailabilitychanged', (e) => {
+      airplayBtn.hidden = e.availability !== 'available';
+    });
+    video.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', async () => {
+      if (!session?.sessionId) return;
+      const at = video.currentTime;
+      const resume = () => {
+        video.addEventListener('loadedmetadata', () => (video.currentTime = at), { once: true });
+        video.play().catch(() => {});
+      };
+      if (video.webkitCurrentPlaybackTargetIsWireless) {
+        try {
+          const { token } = await api.post(`/api/playback/${session.sessionId}/cast-link`, {});
+          plainSrc = session.url;
+          video.src = `${session.url}${session.url.includes('?') ? '&' : '?'}cast=${encodeURIComponent(token)}`;
+          resume();
+        } catch (err) {
+          toast(err.message, { type: 'error' });
+        }
+      } else if (plainSrc) {
+        video.src = plainSrc;
+        plainSrc = null;
+        resume();
+      }
+    });
+  }
+
   function leave() {
-    goBack(item?.kind === 'episode' && item.parentId ? `#/item/${item.showId}?season=${item.parentId}` : item ? `#/item/${item.id}` : '#/');
+    if (query.from) return goBack(`#/item/${query.from}`);
+    goBack(item?.kind === 'episode' && item.parentId ? `#/item/${item.showId}?season=${item.parentId}` : item?.kind === 'extra' ? `#/item/${item.parentId}` : item ? `#/item/${item.id}` : '#/');
   }
 
   // ---- Start ----
   if (isSource) {
+    state.playingItemHash = `#/addons/${params.plugin}/${params.source}`; // where "Who's watching?" returns to
     try {
       const res = await api.post(`/api/sources/${params.plugin}/${params.source}/resolve`, { id: query.id });
       titleEl.append(h('h1', {}, res.title || query.title || 'Playing'));
@@ -829,9 +928,15 @@ export async function render(el, params, query) {
     // Title bar
     if (item.kind === 'episode') {
       titleEl.append(h('h1', {}, session.show?.title || ''), h('p', {}, `${episodeLabel(item)} · ${item.title}`));
+      state.playingItemHash = `#/item/${session.show?.id || item.id}`;
       setTitle(`${session.show?.title || ''} ${episodeLabel(item)}`);
+    } else if (item.kind === 'extra') {
+      append(titleEl, [h('h1', {}, item.title), h('p', {}, [item.caption, session.parent?.title].filter(Boolean).join(' · '))]);
+      state.playingItemHash = `#/item/${item.parentId}`;
+      setTitle(`${item.title} · ${session.parent?.title || ''}`);
     } else {
       append(titleEl, [h('h1', {}, item.title), item.year ? h('p', {}, String(item.year)) : null]);
+      state.playingItemHash = `#/item/${item.id}`;
       setTitle(item.title);
     }
     // Preferred audio language
@@ -854,10 +959,12 @@ export async function render(el, params, query) {
 
   function cleanupFn() {
     destroyed = true;
+    state.playingItemHash = null;
     report();
     if (session?.sessionId) api.post(`/api/playback/${session.sessionId}/stop`, {}, { keepalive: true }).catch(() => {});
     clearInterval(heartbeat);
     clearInterval(upNextTimer);
+    clearInterval(clockTimer);
     clearTimeout(hideTimer);
     clearTimeout(commitTimer);
     cancelAnimationFrame(rafId);

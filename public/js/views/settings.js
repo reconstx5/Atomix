@@ -1,8 +1,9 @@
 // Settings: personal profile for everyone, plus admin screens.
 import { api } from '../api.js';
+import { addDeviceDialog } from '../cast.js';
 import { h, icon, clear, timeAgo, formatClock } from '../dom.js';
 import { button, toast, openDialog, confirmDialog, field, toggle, spinner, avatar, AVATAR_NAMES } from '../components.js';
-import { state, setTitle, applyTheme, updatePrefs, signOut, refreshLibraries, navigate, refreshView, canAdmin, isKidsProfile, renderNav } from '../app.js';
+import { state, setTitle, applyTheme, updatePrefs, signOut, refreshLibraries, navigate, refreshView, canAdmin, isKidsProfile, renderNav, isOrbit } from '../app.js';
 
 const KIDS_LEVELS = [
   [5, 'Little kids — G only'],
@@ -72,7 +73,8 @@ async function profileTab(el) {
   const user = state.user;
   const profile = state.profile;
   const prefs = profile.prefs || {};
-  const themes = state.themes;
+  // The server's default theme first (Orbit, normally); the rest as the server lists them.
+  const themes = [...state.themes].sort((a, b) => (b.id === state.status.defaultTheme) - (a.id === state.status.defaultTheme));
   const current = prefs.theme || state.status.defaultTheme;
 
   const themeGrid = h('div', { class: 'theme-grid', role: 'radiogroup', 'aria-label': 'Theme' });
@@ -154,12 +156,18 @@ async function profileTab(el) {
   });
 
   el.append(
-    section('Appearance', themeGrid, h('div', { class: 'inline-fields' }, field('Accent colour', accent), resetAccent), toggle('Reduce motion', prefs.reduceMotion, (v) => save(() => updatePrefs({ reduceMotion: v })))),
+    section(
+      'Appearance',
+      themeGrid,
+      h('div', { class: 'inline-fields' }, field('Accent colour', accent, isOrbit() ? 'Used when a title has no artwork to take its colour from.' : undefined), resetAccent),
+      toggle('Reduce motion', prefs.reduceMotion, (v) => save(() => updatePrefs({ reduceMotion: v })), { hint: 'Nothing grows or slides.' }),
+      toggle('Reduce effects', prefs.reduceEffects, (v) => save(() => updatePrefs({ reduceEffects: v })), { hint: 'Solid panels instead of glass and blur. Try this if your TV feels slow.' }),
+    ),
     section(
       'Playback',
       h('div', { class: 'form-grid' }, field('Default quality', quality, 'Lower quality converts video on the server to save bandwidth.'), field('Subtitle size', subSize), field('Preferred subtitle language', subLang, 'Two-letter code. Leave empty to only show forced subtitles.'), field('Preferred audio language', audioLang)),
       toggle('Play the next episode automatically', prefs.autoplayNext !== false, (v) => save(() => updatePrefs({ autoplayNext: v }))),
-      toggle('Skip intros automatically', prefs.skipIntros === true, (v) => save(() => updatePrefs({ skipIntros: v }))),
+      toggle('Skip intros automatically', prefs.skipIntros === true, (v) => save(() => updatePrefs({ skipIntros: v })), { hint: 'You can still choose Watch it when it skips.' }),
     ),
     isKidsProfile()
       ? section('Profile', h('div', { class: 'profile-line' }, avatar(profile, 48), h('div', {}, h('strong', {}, profile.name), h('p', { class: 'muted' }, 'Kids profile'))), h('div', { class: 'actions' }, button('Switch profile', { icon: 'users', href: '#/profiles' })))
@@ -280,10 +288,13 @@ const TASK_PAUSED = {
 
 /** What the background jobs are doing, what's left, and anything that failed. */
 function backgroundSection(t, reload) {
-  const now = t.running ? `${t.running.job === 'previews' ? 'Making seek-bar previews for' : 'Finding intros in'} ${t.running.title}.` : TASK_PAUSED[t.paused] || 'Nothing running right now.';
+  const doing = { previews: 'Making seek-bar previews for', thumb: 'Making a thumbnail for', lyrics: 'Reading the lyrics in', intros: 'Finding intros in' };
+  const now = t.running ? `${doing[t.running.job] || 'Working on'} ${t.running.title}.` : TASK_PAUSED[t.paused] || 'Nothing running right now.';
   const waiting = [
     t.queued.previews ? `${t.queued.previews} ${t.queued.previews === 1 ? 'title' : 'titles'} waiting for previews` : null,
     t.queued.intros ? `${t.queued.intros} ${t.queued.intros === 1 ? 'season' : 'seasons'} waiting for an intro check` : null,
+    t.queued.thumbs ? `${t.queued.thumbs} ${t.queued.thumbs === 1 ? 'extra' : 'extras'} waiting for a thumbnail` : null,
+    t.queued.lyrics ? `${t.queued.lyrics} ${t.queued.lyrics === 1 ? 'song' : 'songs'} waiting for a lyrics check` : null,
   ].filter(Boolean);
   return section(
     'Background tasks',
@@ -362,6 +373,13 @@ async function dashboardTab(el) {
         !d.tmdbConfigured ? h('p', { class: 'notice' }, icon('info'), ' No TMDB API key yet — posters and descriptions will be limited. ', h('a', { href: '#/settings/server' }, 'Add one in Server settings.')) : null,
       ),
       backgroundSection(tasks, load),
+      d.servers?.length
+        ? section(
+            'Connected servers',
+            h('ul', { class: 'plain-list servers-card' }, d.servers.map((s) => { const st = serverState(s); return h('li', {}, h('span', { class: `dot ${st.bad ? 'bad' : 'ok'}` }), h('strong', {}, s.name), ' ', h('span', { class: `server-state${st.bad ? ' bad' : ''}` }, st.text)); })),
+            h('a', { href: '#/settings/libraries' }, 'Manage in Libraries'),
+          )
+        : null,
       section(
         'Server',
         h(
@@ -370,12 +388,12 @@ async function dashboardTab(el) {
           toolRow('ffmpeg', t.ffmpeg),
           toolRow('ffprobe', t.ffprobe),
           h('li', {}, h('strong', {}, 'H.264 encoders in ffmpeg: '), t.encoders.length ? t.encoders.join(', ') : 'none', h('small', { class: 'muted' }, ' (hardware ones also need a matching GPU)')),
-          h('li', {}, h('strong', {}, 'NodeFlix '), d.server.version, ' on Node ', d.server.node, ` · ${d.server.platform}`),
+          h('li', {}, h('strong', {}, 'Atomix '), d.server.version, ' on Node ', d.server.node, ` · ${d.server.platform}`),
           h('li', {}, h('strong', {}, 'Uptime '), formatClock(d.server.uptime), ` · ${d.server.memoryMb} MB RAM · ${d.server.cpus} CPU threads`),
           h('li', {}, h('strong', {}, 'Data folder '), h('code', {}, d.server.dataDir)),
         ),
         !t.ffmpeg.available
-          ? h('p', { class: 'notice' }, icon('info'), ' Install ffmpeg to play MKV/HEVC files and read media info. On Windows: ', h('code', {}, 'winget install Gyan.FFmpeg'), ', then restart NodeFlix.')
+          ? h('p', { class: 'notice' }, icon('info'), ' Install ffmpeg to play MKV/HEVC files and read media info. On Windows: ', h('code', {}, 'winget install Gyan.FFmpeg'), ', then restart Atomix.')
           : null,
         button('Re-check ffmpeg', { variant: 'ghost', icon: 'refresh', onClick: async () => (await api.post('/api/admin/tools/recheck', {}), load()) }),
       ),
@@ -439,6 +457,22 @@ const LIBRARY_NOUN = { movies: 'movies', tv: 'shows', music: 'albums' };
 
 async function libraryDialog(lib) {
   const name = h('input', { value: lib?.name || '', required: true, maxlength: 60, placeholder: 'e.g. Movies' });
+  if (lib?.serverId) {
+    // A connected server's library: the server owns its folders and media, so only the name is ours to change.
+    return openDialog({
+      title: `Edit ${lib.name}`,
+      body: h('div', { class: 'stack' }, field('Name', name, `On ${lib.serverName}. What it holds is set on that server.`)),
+      actions: [
+        { label: 'Cancel', value: 'cancel' },
+        { label: 'Save', value: 'ok', variant: 'primary' },
+      ],
+      onSubmit: async () => {
+        await api.put(`/api/libraries/${lib.id}`, { name: name.value.trim() });
+        toast('Library saved', { type: 'success' });
+        return true;
+      },
+    });
+  }
   const type = select(
     [
       ['movies', 'Movies'],
@@ -504,32 +538,402 @@ async function libraryDialog(lib) {
   });
 }
 
+// ---------------- Connected servers (admins) ----------------
+const SERVER_KINDS = [
+  ['jellyfin', 'Jellyfin'],
+  ['emby', 'Emby'],
+  ['plex', 'Plex'],
+  ['atomix', 'Atomix'],
+];
+const kindName = (k) => SERVER_KINDS.find(([id]) => id === k)?.[1] || k;
+
+/** "Synced 2 h ago", "Sign in again", "Can't reach <name>" — one line for a server's state. */
+function serverState(s) {
+  if (s.status === 'unauthorized') return { text: 'Sign in again', bad: true };
+  if (s.status === 'unreachable') return { text: `Can't reach ${s.name}`, bad: true };
+  return { text: s.lastSync ? `Synced ${timeAgo(s.lastSync)}` : 'Not synced yet', bad: false };
+}
+
+function serversPanel(servers) {
+  const rows = servers.map((s) => {
+    const st = serverState(s);
+    const address = s.url.replace(/^https?:\/\//, '');
+    const gone = s.libraries.filter((l) => l.gone);
+    return h(
+      'div',
+      { class: 'server-row', 'data-id': s.id },
+      icon('server', { size: 28 }),
+      h(
+        'div',
+        { class: 'server-info' },
+        h('h3', {}, s.name),
+        h('p', { class: 'muted' }, `${kindName(s.kind)} · ${address} · ${s.libraries.length ? s.libraries.map((l) => l.name).join(', ') : 'no libraries added'}${s.relay ? ' · via Plex relay (slow)' : ''}`),
+        h('p', { class: `server-state${st.bad ? ' bad' : ''}` }, st.bad ? icon('info', { size: 16 }) : null, st.text, gone.length ? ` · No longer on ${s.name}: ${gone.map((l) => l.name).join(', ')}` : ''),
+      ),
+      h(
+        'div',
+        { class: 'actions' },
+        s.status === 'unauthorized'
+          ? button('Sign in again', { icon: 'lock', variant: 'primary', onClick: async () => { if ((await reconnectDialog(s)) === 'ok') refreshView(); } })
+          : button('Sync now', { icon: 'refresh', onClick: async () => (await api.post(`/api/servers/${s.id}/sync`, {}), toast(`Syncing ${s.name}…`)) }),
+        button('Libraries…', { icon: 'grid', variant: 'ghost', onClick: async () => { if ((await chooseLibrariesDialog(s)) === 'ok') { await refreshLibraries(); refreshView(); } } }),
+        button('Remove', {
+          icon: 'trash',
+          variant: 'ghost danger',
+          onClick: async () => {
+            if (await confirmDialog(`Remove ${s.name}?`, 'Its libraries leave Atomix, with everyone’s watch history for them. Nothing changes on that server.', { confirm: 'Remove', danger: true })) {
+              await api.del(`/api/servers/${s.id}`);
+              await refreshLibraries();
+              refreshView();
+            }
+          },
+        }),
+      ),
+    );
+  });
+  return h(
+    'section',
+    { class: 'panel servers-panel' },
+    h('div', { class: 'panel-head' }, h('div', {}, h('h2', {}, 'Connected servers'), h('p', { class: 'muted' }, 'A Jellyfin, Emby, Plex or Atomix server you already run. Its libraries appear beside your own and play through this Atomix.')), button('Connect a server…', { icon: 'plus', variant: 'primary', onClick: async () => { if ((await connectServerDialog()) === 'ok') { await refreshLibraries(); refreshView(); } } })),
+    rows.length ? h('div', { class: 'server-list' }, rows) : h('p', { class: 'muted' }, 'No servers connected.'),
+  );
+}
+
+/** The kind pills act as one radio group: Left/Right move the choice (and focus) within the group. */
+function kindPills(initial = 'jellyfin') {
+  let value = initial;
+  const group = h('div', { class: 'kind-pills', role: 'radiogroup', 'aria-label': 'Kind of server' });
+  const pick = (k, focus = false) => {
+    value = k;
+    for (const b of group.children) {
+      b.setAttribute('aria-checked', String(b.dataset.kind === k));
+      b.tabIndex = b.dataset.kind === k ? 0 : -1;
+      if (focus && b.dataset.kind === k) b.focus();
+    }
+    group.dispatchEvent(new Event('change'));
+  };
+  for (const [k, label] of SERVER_KINDS) {
+    group.append(h('button', { type: 'button', role: 'radio', class: 'pill', 'data-kind': k, 'aria-checked': String(k === value), tabindex: k === value ? 0 : -1, onClick: () => pick(k) }, label));
+  }
+  group.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    e.stopPropagation();
+    const i = SERVER_KINDS.findIndex(([k]) => k === value);
+    pick(SERVER_KINDS[(i + (e.key === 'ArrowRight' ? 1 : SERVER_KINDS.length - 1)) % SERVER_KINDS.length][0], true);
+  });
+  return { el: group, get value() { return value; } };
+}
+
+/**
+ * The plex.tv link code: a big code to type at plex.tv/link, polled every 2 s while the dialog is open.
+ * `onLinked(pinId, servers)` is called once linked. Returns { el, start(), stop() }.
+ */
+function plexLinkStep({ onLinked }) {
+  const el = h('div', { class: 'plex-link stack', 'aria-live': 'polite' });
+  let timer = null;
+  let live = false;
+  let pinId = null;
+  let linked = false;
+  let failures = 0; // polls that failed in a row: plex.tv hiccups are retried quietly up to three times
+  const stop = () => {
+    live = false;
+    clearTimeout(timer);
+  };
+  const show = (...children) => {
+    clear(el);
+    el.append(...children);
+  };
+  const problem = (text, label) => show(h('p', { class: 'danger-text plex-problem' }, icon('info', { size: 16 }), ' ', text), button(label, { icon: 'refresh', onClick: () => start() }));
+  async function poll() {
+    if (!live || !el.isConnected) return stop();
+    try {
+      const r = await api.get(`/api/servers/plex/pins/${pinId}`);
+      if (!live || !el.isConnected) return stop();
+      failures = 0;
+      if (r.expired) return (stop(), problem('That code has expired', 'New code'));
+      if (r.linked) {
+        stop();
+        linked = true;
+        if (!r.servers.length) return show(h('p', { class: 'muted' }, 'This Plex account has no servers.'));
+        return onLinked(pinId, r.servers);
+      }
+    } catch (err) {
+      if (!live) return;
+      if (++failures < 3) {
+        timer = setTimeout(poll, 2000);
+        return;
+      }
+      stop();
+      return problem(err.message.startsWith("Couldn't reach plex.tv") ? err.message : `Couldn't reach plex.tv: ${err.message}`, 'Try again');
+    }
+    timer = setTimeout(poll, 2000);
+  }
+  /** Back on the Plex pill with a code still waiting: carry on polling it (no new code). */
+  function resume() {
+    if (live || linked || !pinId) return false;
+    live = true;
+    poll();
+    return true;
+  }
+  async function start() {
+    stop();
+    live = true;
+    linked = false;
+    pinId = null;
+    failures = 0;
+    show(spinner());
+    try {
+      const pin = await api.post('/api/servers/plex/pins', {});
+      if (!live) return;
+      pinId = pin.pinId;
+      show(
+        h('p', { class: 'plex-code', 'aria-label': `Code ${pin.code.split('').join(' ')}` }, pin.code),
+        h('p', { class: 'plex-howto' }, 'Go to ', h('strong', {}, 'plex.tv/link'), ' on your phone or computer and enter this code'),
+        h('p', { class: 'muted plex-waiting' }, h('span', { class: 'plex-dot', 'aria-hidden': 'true' }), ' Waiting for Plex…'),
+      );
+      timer = setTimeout(poll, 2000);
+    } catch (err) {
+      if (live) problem(err.message.startsWith("Couldn't reach plex.tv") ? err.message : `Couldn't reach plex.tv: ${err.message}`, 'Try again');
+      live = false;
+    }
+  }
+  return { el, start, stop, show, resume };
+}
+
+/** Pick a server: one row per server ("Yours" / "Shared by <owner>"); Up/Down move, Enter or a click picks. */
+function plexServerList(servers, onPick) {
+  const group = h('div', { class: 'plex-servers', role: 'radiogroup', 'aria-label': 'Pick a server' });
+  servers.forEach((sv, i) => {
+    group.append(
+      h('button', { type: 'button', role: 'radio', class: 'plex-server', 'data-id': sv.id, 'aria-checked': String(i === 0), tabindex: i === 0 ? 0 : -1, 'data-autofocus': i === 0 || null, onClick: () => onPick(sv) },
+        icon('server', { size: 22 }), h('span', { class: 'plex-server-name' }, sv.name), h('span', { class: 'muted' }, sv.owned ? 'Yours' : `Shared by ${sv.owner}`)),
+    );
+  });
+  group.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    e.stopPropagation();
+    const rows = [...group.children];
+    const i = Math.max(0, rows.indexOf(document.activeElement));
+    const next = rows[Math.min(rows.length - 1, Math.max(0, i + (e.key === 'ArrowDown' ? 1 : -1)))];
+    for (const r of rows) { r.setAttribute('aria-checked', String(r === next)); r.tabIndex = r === next ? 0 : -1; }
+    next.focus();
+  });
+  return group;
+}
+
+/** Step one of Connect a server…: kind, address, sign-in. A good sign-in goes straight to the libraries step. */
+async function connectServerDialog() {
+  const kind = kindPills('jellyfin');
+  const url = h('input', { name: 'url', required: true, placeholder: 'jellyfin.local:8096', autocomplete: 'off', 'data-autofocus': true });
+  const username = h('input', { name: 'username', required: true, autocomplete: 'off' });
+  const password = h('input', { name: 'password', type: 'password', required: true, autocomplete: 'new-password' });
+  const httpNote = h('p', { class: 'hint http-note', hidden: true }, icon('info', { size: 16 }), ' Sign-ins travel unencrypted over http. Fine on your own network; use https across the internet.');
+  const hint = h('p', { class: 'hint kind-hint' });
+  const hints = { jellyfin: 'Your Jellyfin account on that server.', emby: 'Your Emby account on that server.', atomix: 'An account on that Atomix with a profile that has no PIN.', plex: '' };
+  url.addEventListener('input', () => (httpNote.hidden = !/^\s*http:\/\//i.test(url.value)));
+  let connected = null;
+  let pickedPin = null;
+  let picked = null;
+  // Plex: no address or password — a link code, then the account's servers.
+  let busy = false;
+  let posting = null; // the pick being posted (the dialog may be cancelled before it answers)
+  const plexConnect = async (sv) => {
+    if (busy) return; // a double press posts once
+    busy = true;
+    picked = sv;
+    plexStep.el.querySelector('.plex-problem')?.remove();
+    plexStep.el.querySelector('.plex-servers')?.setAttribute('aria-busy', 'true');
+    try {
+      posting = api.post('/api/servers', { kind: 'plex', pinId: pickedPin, serverId: sv.id });
+      connected = await posting;
+      plexStep.el.closest('dialog')?.close('ok');
+    } catch (e) {
+      plexStep.el.append(h('p', { class: 'danger-text plex-problem' }, icon('info', { size: 16 }), ' ', e.message));
+    } finally {
+      busy = false;
+      posting = null;
+      plexStep.el.querySelector('.plex-servers')?.removeAttribute('aria-busy');
+    }
+  };
+  const plexStep = plexLinkStep({
+    onLinked: (pinId, servers) => {
+      pickedPin = pinId;
+      plexStep.show(h('p', { class: 'field-label' }, 'Pick a server'), plexServerList(servers, plexConnect));
+      plexStep.el.querySelector('[data-autofocus]')?.focus();
+    },
+  });
+  const signIn = h(
+    'div',
+    { class: 'stack' },
+    field('Address', url, 'With the port if it has one. https is assumed when you leave it out.'),
+    httpNote,
+    h('div', { class: 'form-grid' }, field('Username', username), field('Password', password)),
+  );
+  const setKind = () => {
+    hint.textContent = hints[kind.value];
+    const plex = kind.value === 'plex';
+    signIn.hidden = plex;
+    for (const i of [url, username, password]) i.required = !plex;
+    plexStep.el.hidden = !plex;
+    if (plex && !pickedPin && !plexStep.el.childElementCount) plexStep.start();
+    else if (plex && !pickedPin) plexStep.resume();
+    if (!plex) plexStep.stop();
+  };
+  kind.el.addEventListener('change', setKind);
+  const body = h(
+    'div',
+    { class: 'stack' },
+    h('div', {}, h('p', { class: 'field-label' }, 'Kind'), kind.el),
+    signIn,
+    plexStep.el,
+    hint,
+  );
+  setKind();
+  const r = await openDialog({
+    title: 'Connect a server…',
+    wide: true,
+    body,
+    actions: [
+      { label: 'Cancel', value: 'cancel' },
+      { label: 'Connect', value: 'ok', variant: 'primary' },
+    ],
+    onSubmit: async () => {
+      if (kind.value === 'plex') {
+        // Connect with a Plex server row chosen (the checked one); before the code is linked there is nothing to do.
+        const row = plexStep.el.querySelector('.plex-server[aria-checked="true"]');
+        if (row) await plexConnect({ id: row.dataset.id });
+        else if (!pickedPin) {
+          plexStep.el.querySelector('.plex-first')?.remove();
+          plexStep.el.append(h('p', { class: 'danger-text plex-first', role: 'alert' }, icon('info', { size: 16 }), ' Enter the code at plex.tv/link first'));
+        }
+        return false;
+      }
+      connected = await api.post('/api/servers', { kind: kind.value, url: url.value.trim(), username: username.value.trim(), password: password.value });
+      return true;
+    },
+  });
+  plexStep.stop();
+  // Cancelled while a pick was still posting: once it answers, the panel still has to show the new server.
+  if (r !== 'ok' && posting) {
+    await posting.catch(() => null);
+    return connected ? 'ok' : r;
+  }
+  if (r !== 'ok' || !connected) return r;
+  await chooseLibrariesDialog(connected, connected.available);
+  return 'ok'; // the server exists either way: the panel must show it even when the libraries step was cancelled
+}
+
+/** Step two (and Libraries… later): tick the server's libraries to show in Atomix. */
+async function chooseLibrariesDialog(server, available = null) {
+  const list = h('div', { class: 'stack lib-choices' }, spinner());
+  const dialog = openDialog({
+    title: available ? `Add libraries from ${server.name}` : `Libraries on ${server.name}`,
+    body: h('div', { class: 'stack' }, h('p', { class: 'muted' }, 'Ticked libraries appear beside your own, for everyone, under the same access and kids rules.'), list),
+    actions: [
+      { label: 'Cancel', value: 'cancel' },
+      { label: available ? 'Add' : 'Save', value: 'ok', variant: 'primary' },
+    ],
+    onSubmit: async () => {
+      const remoteIds = [...list.querySelectorAll('input[name=lib]:checked')].map((c) => c.value);
+      await api.put(`/api/servers/${server.id}/libraries`, { remoteIds });
+      toast(remoteIds.length ? `Syncing from ${server.name}…` : 'Libraries saved', { type: 'success' });
+      return true;
+    },
+  });
+  try {
+    const libs = available || (await api.get(`/api/servers/${server.id}/available`));
+    const have = new Set((server.libraries || []).map((l) => l.remoteId));
+    clear(list);
+    if (!libs.length) list.append(h('p', { class: 'muted' }, `${server.name} has no movie, TV or music libraries that this account can see.`));
+    libs.forEach((l, i) =>
+      list.append(h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'lib', value: l.remoteId, checked: available ? true : have.has(l.remoteId), 'data-autofocus': i === 0 || null }), h('span', {}, `${l.name} `, h('small', { class: 'muted' }, LIBRARY_NOUN[l.type] ? `(${l.type === 'tv' ? 'TV shows' : l.type})` : '')))),
+    );
+    for (const l of server.libraries || []) if (l.gone && !libs.some((x) => x.remoteId === l.remoteId)) list.append(h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'lib', value: l.remoteId, checked: true }), h('span', {}, `${l.name} `, h('small', { class: 'muted' }, `(no longer on ${server.name})`))));
+    list.querySelector('[data-autofocus]')?.focus();
+  } catch (err) {
+    clear(list);
+    list.append(h('p', { class: 'danger-text' }, err.message));
+  }
+  return dialog;
+}
+
+/** Sign in again: a new token or password for a server that stopped accepting the stored one. */
+async function reconnectDialog(server) {
+  if (server.kind === 'plex') {
+    // A fresh link code; once linked, the same server is reached again with that account's token.
+    const msg = h('div');
+    const step = plexLinkStep({
+      onLinked: async (pinId) => {
+        step.show(h('p', { class: 'muted plex-waiting' }, h('span', { class: 'plex-dot', 'aria-hidden': 'true' }), ` Signing in to ${server.name}…`));
+        try {
+          await api.post(`/api/servers/${server.id}/reconnect`, { pinId });
+          toast(`Signed in to ${server.name}`, { type: 'success' });
+          step.el.closest('dialog')?.close('ok');
+        } catch (e) {
+          step.show(h('p', { class: 'danger-text plex-problem' }, icon('info', { size: 16 }), ' ', e.message), button('New code', { icon: 'refresh', onClick: () => step.start() }));
+        }
+      },
+    });
+    const done = openDialog({
+      title: `Sign in to ${server.name}`,
+      body: h('div', { class: 'stack' }, h('p', { class: 'muted' }, `${server.name} no longer accepts the saved sign-in.`), step.el, msg),
+      actions: [{ label: 'Cancel', value: 'cancel' }],
+    });
+    step.start();
+    const r = await done;
+    step.stop();
+    return r;
+  }
+  const username = h('input', { name: 'username', value: server.username, required: true, autocomplete: 'off' });
+  const password = h('input', { name: 'password', type: 'password', required: true, autocomplete: 'new-password', 'data-autofocus': true });
+  return openDialog({
+    title: `Sign in to ${server.name}`,
+    body: h('div', { class: 'stack' }, h('p', { class: 'muted' }, `${server.name} no longer accepts the saved sign-in. Enter the password again (or a different account).`), h('div', { class: 'form-grid' }, field('Username', username), field('Password', password))),
+    actions: [
+      { label: 'Cancel', value: 'cancel' },
+      { label: 'Sign in', value: 'ok', variant: 'primary' },
+    ],
+    onSubmit: async () => {
+      await api.post(`/api/servers/${server.id}/reconnect`, { username: username.value.trim(), password: password.value });
+      toast(`Signed in to ${server.name}`, { type: 'success' });
+      return true;
+    },
+  });
+}
+
 async function librariesTab(el) {
-  const libs = await api.get('/api/libraries');
+  const [libs, servers] = await Promise.all([api.get('/api/libraries'), api.get('/api/servers')]);
   el.append(
-    h('div', { class: 'panel-head' }, h('p', { class: 'muted' }, 'Point NodeFlix at folders on this computer or server. They are scanned automatically.'), button('Add library', { icon: 'plus', variant: 'primary', autofocus: true, onClick: async () => { if ((await libraryDialog()) === 'ok') { await refreshLibraries(); refreshView(); } } })),
+    h('div', { class: 'panel-head' }, h('p', { class: 'muted' }, 'Point Atomix at folders on this computer or server, or connect a media server you already run. They are scanned automatically.'), button('Add library', { icon: 'plus', variant: 'primary', autofocus: true, onClick: async () => { if ((await libraryDialog()) === 'ok') { await refreshLibraries(); refreshView(); } } })),
+    serversPanel(servers),
   );
   if (!libs.length) {
     el.append(section(null, h('p', {}, 'No libraries yet. Add your movie folder first, then your TV folder.')));
     return;
   }
+  const gone = new Set(servers.flatMap((s) => s.libraries.filter((l) => l.gone).map((l) => l.id)));
   for (const lib of libs) {
+    const caption = lib.serverId
+      ? gone.has(lib.id) ? `No longer on ${lib.serverName} · ${lib.count} ${LIBRARY_NOUN[lib.type] || 'items'} kept` : `On ${lib.serverName} · ${lib.count} ${LIBRARY_NOUN[lib.type] || 'items'} · synced ${timeAgo(lib.lastScan)}`
+      : `${lib.count} ${LIBRARY_NOUN[lib.type] || 'items'} · last scanned ${timeAgo(lib.lastScan)}`;
     el.append(
       h(
         'section',
-        { class: 'panel library-panel' },
-        h('div', { class: 'library-panel-head' }, icon(LIBRARY_ICON[lib.type] || 'film', { size: 28 }), h('div', {}, h('h2', {}, lib.name), h('p', { class: 'muted' }, `${lib.count} ${LIBRARY_NOUN[lib.type] || 'items'} · last scanned ${timeAgo(lib.lastScan)}`))),
-        h('ul', { class: 'plain-list' }, lib.paths.map((p) => h('li', {}, h('code', {}, p)))),
+        { class: `panel library-panel${lib.serverId ? ' library-remote' : ''}` },
+        h('div', { class: 'library-panel-head' }, icon(lib.serverId ? 'cloud' : LIBRARY_ICON[lib.type] || 'film', { size: 28 }), h('div', {}, h('h2', {}, lib.name), h('p', { class: 'muted' }, caption))),
+        lib.serverId ? null : h('ul', { class: 'plain-list' }, lib.paths.map((p) => h('li', {}, h('code', {}, p)))),
         h(
           'div',
           { class: 'actions' },
-          button('Scan now', { icon: 'refresh', onClick: async () => (await api.post(`/api/libraries/${lib.id}/scan`, {}), toast(`Scanning ${lib.name}…`)) }),
+          button(lib.serverId ? 'Sync now' : 'Scan now', { icon: 'refresh', onClick: async () => (await api.post(`/api/libraries/${lib.id}/scan`, {}), toast(lib.serverId ? `Syncing ${lib.name}…` : `Scanning ${lib.name}…`)) }),
           button('Edit', { icon: 'edit', variant: 'ghost', onClick: async () => { if ((await libraryDialog(lib)) === 'ok') { await refreshLibraries(); refreshView(); } } }),
-          button('Delete', {
+          lib.serverId ? null : button('Delete', {
             icon: 'trash',
             variant: 'ghost danger',
             onClick: async () => {
-              if (await confirmDialog(`Delete ${lib.name}?`, 'This removes it from NodeFlix (and everyone’s watch history for it). Your files are not touched.', { confirm: 'Delete', danger: true })) {
+              if (await confirmDialog(`Delete ${lib.name}?`, 'This removes it from Atomix (and everyone’s watch history for it). Your files are not touched.', { confirm: 'Delete', danger: true })) {
                 await api.del(`/api/libraries/${lib.id}`);
                 await refreshLibraries();
                 refreshView();
@@ -540,6 +944,112 @@ async function librariesTab(el) {
       ),
     );
   }
+  el.append(await collectionsPanel());
+}
+
+// ---------------- Collections (admins) ----------------
+async function collectionsPanel() {
+  const cols = await api.get('/api/collections?all=1');
+  const rows = cols.map((c) =>
+    h(
+      'tr',
+      {},
+      h('td', {}, c.name),
+      h('td', { class: 'muted' }, `${c.owned} of ${c.total}`),
+      h('td', { class: 'muted' }, c.manual ? 'Hand-made' : 'TMDB', c.hidden ? ' · hidden' : ''),
+      h(
+        'td',
+        { class: 'row-actions' },
+        c.manual ? button('Edit', { icon: 'edit', variant: 'ghost', onClick: async () => { if ((await collectionDialog(c)) === 'ok') refreshView(); } }) : null,
+        button('Rename', { icon: 'edit', variant: 'ghost', onClick: () => renameCollection(c) }),
+        c.manual
+          ? button('Delete', { icon: 'trash', variant: 'ghost', onClick: async () => { if (await confirmDialog('Delete this collection?', `“${c.name}” goes; the films stay.`, { confirm: 'Delete', danger: true })) { await api.del(`/api/collections/${c.id}`); refreshView(); } } })
+          : button(c.hidden ? 'Show' : 'Hide', { icon: c.hidden ? 'eye' : 'eyeOff', variant: 'ghost', onClick: async () => { await api.patch(`/api/collections/${c.id}`, { hidden: !c.hidden }); refreshView(); } }),
+      ),
+    ),
+  );
+  return h(
+    'section',
+    { class: 'panel collections-panel' },
+    h('div', { class: 'panel-head' }, h('div', {}, h('h2', {}, 'Collections'), h('p', { class: 'muted' }, 'Film series come from TMDB as your films are matched. Make your own from films and shows.')), button('New collection', { icon: 'plus', variant: 'primary', onClick: async () => { if ((await collectionDialog(null)) === 'ok') refreshView(); } })),
+    cols.length ? h('div', { class: 'table-scroll' }, h('table', { class: 'table' }, h('thead', {}, h('tr', {}, h('th', {}, 'Name'), h('th', {}, 'In your library'), h('th', {}, 'From'), h('th', {}, ''))), h('tbody', {}, rows))) : h('p', { class: 'muted' }, 'No collections yet.'),
+  );
+}
+
+function renameCollection(c) {
+  const name = h('input', { type: 'text', name: 'name', value: c.name, maxlength: '80', required: true, 'data-autofocus': true });
+  openDialog({
+    title: 'Rename collection',
+    body: field('Name', name),
+    actions: [{ label: 'Cancel', value: 'cancel' }, { label: 'Save', value: 'ok', variant: 'primary' }],
+    onSubmit: async () => {
+      await api.patch(`/api/collections/${c.id}`, { name: name.value });
+      toast('Collection saved');
+      refreshView();
+    },
+  });
+}
+
+/** New or edit a hand-made collection: a name, a search box that adds films and shows, the members in order. */
+async function collectionDialog(existing) {
+  const full = existing ? await api.get(`/api/collections/${existing.id}?all=1`) : null;
+  const members = full ? full.items.map((i) => ({ id: i.id, title: i.title, year: i.year })) : [];
+  const name = h('input', { type: 'text', name: 'name', value: existing?.name || '', maxlength: '80', required: true, 'data-autofocus': true });
+  const overview = h('textarea', { name: 'overview', rows: '2' }, existing?.overview || '');
+  const search = h('input', { type: 'search', placeholder: 'Find a film or show', 'aria-label': 'Find a film or show', autocomplete: 'off' });
+  // Enter here picks the first hit (or does nothing); it must not save and close the dialog.
+  search.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    e.stopPropagation();
+    results.querySelector('button')?.click();
+  });
+  const results = h('div', { class: 'pick-results' });
+  const list = h('ol', { class: 'pick-members', role: 'list' });
+  const artwork = h('select', { 'aria-label': 'Artwork from' });
+  function drawMembers() {
+    clear(list);
+    members.forEach((m, i) => {
+      list.append(
+        h(
+          'li',
+          {},
+          h('span', { class: 'pick-title' }, `${m.title}${m.year ? ` (${m.year})` : ''}`),
+          button('', { icon: 'up', variant: 'ghost', title: 'Move up', onClick: () => { if (i > 0) { members.splice(i - 1, 0, members.splice(i, 1)[0]); drawMembers(); } } }),
+          button('', { icon: 'chevronDown', variant: 'ghost', title: 'Move down', onClick: () => { if (i < members.length - 1) { members.splice(i + 1, 0, members.splice(i, 1)[0]); drawMembers(); } } }),
+          button('', { icon: 'close', variant: 'ghost', title: 'Remove', onClick: () => { members.splice(i, 1); drawMembers(); } }),
+        ),
+      );
+    });
+    clear(artwork).append(h('option', { value: '' }, 'First title'), members.map((m) => h('option', { value: String(m.id) }, m.title)));
+  }
+  drawMembers();
+  let timer;
+  search.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const q = search.value.trim();
+      clear(results);
+      if (q.length < 2) return;
+      const r = await api.get(`/api/search?q=${encodeURIComponent(q)}`);
+      const hits = [...r.movies, ...r.shows].filter((i) => !members.some((m) => m.id === i.id)).slice(0, 12);
+      const nodes = hits.map((i) => button(`${i.title}${i.year ? ` (${i.year})` : ''}`, { icon: 'plus', variant: 'ghost', onClick: () => { members.push({ id: i.id, title: i.title, year: i.year }); drawMembers(); clear(results); search.value = ''; } }));
+      results.append(...(nodes.length ? nodes : [h('p', { class: 'muted small' }, 'Nothing matches.')]));
+    }, 250);
+  });
+  return openDialog({
+    title: existing ? 'Edit collection' : 'New collection',
+    wide: true,
+    body: h('div', { class: 'stack' }, field('Name', name), field('Description', overview), field('Add titles', search), results, h('div', { class: 'field' }, h('label', {}, 'Titles, in order'), list), field('Artwork from', artwork)),
+    actions: [{ label: 'Cancel', value: 'cancel' }, { label: 'Save', value: 'ok', variant: 'primary' }],
+    onSubmit: async () => {
+      const body = { name: name.value, overview: overview.value, itemIds: members.map((m) => m.id) };
+      if (artwork.value) body.artworkFrom = Number(artwork.value);
+      if (existing) await api.patch(`/api/collections/${existing.id}`, body);
+      else await api.post('/api/collections', body);
+      toast('Collection saved');
+    },
+  });
 }
 
 // ---------------- Users ----------------
@@ -656,7 +1166,7 @@ function pluginSettingsForm(plugin) {
 async function pluginsTab(el) {
   const plugins = await api.get('/api/admin/plugins');
   el.append(
-    h('div', { class: 'panel-head' }, h('p', { class: 'muted' }, 'Plugins live in the ', h('code', {}, 'plugins'), ' folder. Drop a new one in and restart NodeFlix. See docs/PLUGINS.md to write your own.')),
+    h('div', { class: 'panel-head' }, h('p', { class: 'muted' }, 'Plugins live in the ', h('code', {}, 'plugins'), ' folder. Drop a new one in and restart Atomix. See docs/PLUGINS.md to write your own.')),
   );
   if (!plugins.length) el.append(section(null, h('p', {}, 'No plugins found.')));
   for (const p of plugins) {
@@ -714,12 +1224,13 @@ async function pluginsTab(el) {
 
 // ---------------- Server ----------------
 async function serverTab(el) {
-  const [s, dash] = await Promise.all([api.get('/api/admin/settings'), api.get('/api/admin/dashboard')]);
+  const [s, dash, castInfo] = await Promise.all([api.get('/api/admin/settings'), api.get('/api/admin/dashboard'), api.get('/api/cast/devices').catch(() => null)]);
   const encoders = dash.tools.encoders;
   const serverName = h('input', { value: s.serverName, maxlength: 60 });
   const loginMessage = h('input', { value: s.loginMessage, maxlength: 200, placeholder: 'Optional note on the sign-in page' });
   const defaultTheme = select(state.themes.map((t) => [t.id, t.name]), s.defaultTheme);
   const scanInterval = h('input', { type: 'number', min: 0, max: 10080, value: s.scanIntervalMinutes });
+  const remoteSync = h('input', { type: 'number', min: 0, max: 168, value: s.remoteSyncHours ?? 6 });
   const tmdbKey = h('input', { type: 'password', value: s.tmdbApiKey, autocomplete: 'off', spellcheck: 'false' });
   const language = h('input', { value: s.metadataLanguage, maxlength: 10, placeholder: 'en-US' });
   const ratingCountry = select(
@@ -748,6 +1259,17 @@ async function serverTab(el) {
   );
   const preset = select(['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium'].map((p) => [p, p]), s.x264Preset);
   const maxTranscodes = h('input', { type: 'number', min: 1, max: 32, value: s.maxTranscodes });
+  const pickerIdle = select(
+    [
+      ['15', '15 minutes'],
+      ['30', '30 minutes'],
+      ['60', '1 hour'],
+      ['240', '4 hours'],
+      ['0', 'Never'],
+    ],
+    String(s.pickerIdleMinutes ?? 30),
+  );
+  pickerIdle.name = 'pickerIdleMinutes';
   const defaultQuality = select(
     [
       ['original', 'Original'],
@@ -760,11 +1282,70 @@ async function serverTab(el) {
   const vaapiDevice = h('input', { value: s.vaapiDevice });
   const previewsOn = h('input', { type: 'checkbox', checked: s.previewsEnabled });
   const introsOn = h('input', { type: 'checkbox', checked: s.introDetection });
+  const trailersOn = h('input', { type: 'checkbox', checked: s.onlineTrailers !== false });
+  const lyricsOn = h('input', { type: 'checkbox', checked: s.onlineLyrics !== false });
+
+  // Casting: the switch, the address TVs fetch from, and the devices (found, or added by address).
+  const castOn = toggle('Casting', s.castEnabled !== false, null, { hint: 'Play on Chromecasts and DLNA TVs on your home network, with this page or a phone as the remote.' });
+  const castInput = castOn.querySelector('input');
+  const castBase = h('input', { name: 'castBaseUrl', value: s.castBaseUrl || '', placeholder: castInfo?.baseUrl || 'http://192.168.1.20:8787', inputmode: 'url', spellcheck: 'false', autocomplete: 'off' });
+  const castList = h('div', { class: 'cast-devices', 'aria-live': 'polite' });
+  async function drawCastDevices(refresh = false) {
+    clear(castList).append(h('p', { class: 'muted' }, 'Looking for devices…'));
+    const r = await api.get(`/api/cast/devices${refresh ? '?refresh=1' : ''}`).catch((err) => ({ error: err.message }));
+    clear(castList);
+    if (r.error) return castList.append(h('p', { class: 'error-text' }, r.error));
+    if (!r.enabled) return castList.append(h('p', { class: 'muted' }, 'Casting is off. Turn it on and save to look for devices.'));
+    if (!r.devices.length) castList.append(h('p', { class: 'muted' }, 'No devices found on your network. Atomix and the TV must be on the same network; Atomix in Docker needs network_mode: host to see them.'));
+    for (const d of r.devices) {
+      const removable = d.id.startsWith('manual:');
+      castList.append(
+        h(
+          'div',
+          { class: 'cast-device-row' },
+          icon(d.kind === 'chromecast' ? 'cast' : 'tv', { size: 24 }),
+          h('div', { class: 'cast-device-text' }, h('strong', {}, d.name), h('span', { class: 'muted' }, [d.kind === 'chromecast' ? 'Chromecast' : 'DLNA TV', d.model, d.id.startsWith('manual:') ? 'Added by address' : d.id.startsWith('env:') ? 'From ATOMIX_CAST_DEVICES' : null, d.busy ? 'In use' : null].filter(Boolean).join(' · '))),
+          removable
+            ? button('Remove', {
+                icon: 'trash',
+                variant: 'ghost',
+                onClick: async () => {
+                  if (!(await confirmDialog(`Remove ${d.name}?`, 'It goes off the list. Devices on your network come back when Atomix finds them.', { confirm: 'Remove', danger: true }))) return;
+                  await save(() => api.del(`/api/cast/devices/${encodeURIComponent(d.id)}`), 'Removed');
+                  drawCastDevices();
+                },
+              })
+            : null,
+        ),
+      );
+    }
+  }
+  const castPanel = h(
+    'section',
+    { class: 'panel cast-panel' },
+    h('h2', {}, 'Casting'),
+    castOn,
+    field('Address the TV uses', castBase, `Change this if your TV can't load videos (it must be this computer's address on your home network).${castInfo?.baseUrl && !s.castBaseUrl ? ` Found: ${castInfo.baseUrl}` : ''}`),
+    h('h3', { class: 'cast-devices-title' }, 'Devices'),
+    castList,
+    h(
+      'div',
+      { class: 'actions' },
+      button('Find devices again', { icon: 'refresh', onClick: () => drawCastDevices(true) }),
+      button('Add a device by address…', {
+        icon: 'plus',
+        onClick: async () => {
+          if (await addDeviceDialog()) drawCastDevices();
+        },
+      }),
+    ),
+  );
+  drawCastDevices();
 
   const form = h(
     'form',
     { class: 'stack' },
-    section('General', h('div', { class: 'form-grid' }, field('Server name', serverName), field('Default theme', defaultTheme, 'People can still pick their own in Profile.'), field('Sign-in page message', loginMessage), field('Rescan every (minutes)', scanInterval, '0 turns automatic scanning off.'))),
+    section('General', h('div', { class: 'form-grid' }, field('Server name', serverName), field('Default theme', defaultTheme, 'People can still pick their own in Profile.'), field("Ask who's watching after", pickerIdle, 'How long Atomix can sit untouched before it asks again. Playing a video or music counts as being there.'), field('Sign-in page message', loginMessage), field('Rescan every (minutes)', scanInterval, '0 turns automatic scanning off.'), field('Sync connected servers every (hours)', remoteSync, '0 turns automatic syncing off; Sync now in Libraries still works.'))),
     section(
       'Metadata',
       h(
@@ -800,11 +1381,17 @@ async function serverTab(el) {
         field('VAAPI device', vaapiDevice, 'Only used with VAAPI.'),
       ),
     ),
+    castPanel,
     section(
       'Background tasks',
       h('p', { class: 'muted' }, 'These run one at a time at low priority, and wait while someone watches a video the server is converting.'),
-      h('label', { class: 'check' }, previewsOn, h('span', {}, 'Seek-bar previews: small pictures above the seek bar (a few MB per film)')),
+      h('label', { class: 'check' }, previewsOn, h('span', {}, 'Seek-bar previews and extra thumbnails: small pictures above the seek bar and for extras (a few MB per film)')),
       h('label', { class: 'check' }, introsOn, h('span', {}, 'Find TV intros, so viewers can skip them')),
+    ),
+    section(
+      'Online extras',
+      h('label', { class: 'check' }, trailersOn, h('span', {}, "Online trailers: play the film's YouTube trailer when there is no local one (never on kids profiles)")),
+      h('label', { class: 'check' }, lyricsOn, h('span', {}, 'Online lyrics: ask LRCLIB for lyrics your files don’t have (only the song’s name, artist, album and length are sent)')),
     ),
     h('div', { class: 'actions sticky-actions' }, button('Save settings', { type: 'submit', variant: 'primary', icon: 'check' })),
   );
@@ -812,10 +1399,11 @@ async function serverTab(el) {
     e.preventDefault();
     await save(async () => {
       await api.put('/api/admin/settings', {
-        serverName: serverName.value.trim() || 'NodeFlix',
+        serverName: serverName.value.trim() || 'Atomix',
         loginMessage: loginMessage.value.trim(),
         defaultTheme: defaultTheme.value,
         scanIntervalMinutes: Number(scanInterval.value),
+        remoteSyncHours: Number(remoteSync.value),
         tmdbApiKey: tmdbKey.value.trim(),
         metadataLanguage: language.value.trim() || 'en-US',
         ratingCountry: ratingCountry.value,
@@ -824,10 +1412,16 @@ async function serverTab(el) {
         x264Preset: preset.value,
         maxTranscodes: Number(maxTranscodes.value),
         defaultQuality: defaultQuality.value,
+        pickerIdleMinutes: Number(pickerIdle.value),
         vaapiDevice: vaapiDevice.value.trim(),
         previewsEnabled: previewsOn.checked,
         introDetection: introsOn.checked,
+        onlineTrailers: trailersOn.checked,
+        onlineLyrics: lyricsOn.checked,
+        castEnabled: castInput.checked,
+        castBaseUrl: castBase.value.trim(),
       });
+      drawCastDevices();
       state.status = await api.get('/api/status');
       applyTheme();
       document.querySelector('.brand-name').textContent = state.status.serverName;
@@ -856,5 +1450,18 @@ export async function render(el, params) {
       content,
     ),
   );
-  return RENDERERS[tab.id](content);
+  // On phones the sections are a chip row: keep the chosen chip in view (the row is rebuilt on every tab change).
+  // The view is put on the page once the section has rendered, so the scroll waits for the frame after that.
+  const showChip = () => {
+    const cur = el.querySelector('.settings-tab[aria-current="page"]');
+    const nav = cur?.parentElement;
+    if (!nav || nav.scrollWidth <= nav.clientWidth) return;
+    const c = cur.getBoundingClientRect();
+    const n = nav.getBoundingClientRect();
+    nav.scrollLeft += c.left - n.left - (n.width - c.width) / 2;
+  };
+  return Promise.resolve(RENDERERS[tab.id](content)).then((result) => {
+    requestAnimationFrame(showChip);
+    return result;
+  });
 }

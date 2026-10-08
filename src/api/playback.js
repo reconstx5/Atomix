@@ -1,5 +1,6 @@
 // Playback session, streaming and add-on (plugin source) endpoints.
 import { HttpError } from '../http/router.js';
+import { resolveSource } from '../remote/index.js';
 import { serializeItem } from './serialize.js';
 import { listSubtitles } from '../stream/subtitles.js';
 import { QUALITIES } from '../stream/playback.js';
@@ -18,12 +19,24 @@ function parseCaps(input = {}) {
   };
 }
 
+/** A connected server's title → its stream URL and headers; a local file → null. 502 when the server is gone. */
+export async function remoteSourceFor(core, item) {
+  const src = await resolveSource({ db: core.db, providers: core.remote.providers }, item);
+  if (!src.remote) return null;
+  if (!src.server) throw new HttpError(404, 'The server this title came from is no longer connected.');
+  if (src.server.status === 'unauthorized') throw new HttpError(502, `Can't reach ${src.server.name}: sign in again in Settings.`);
+  if (!src.file || !parseJson(item.media, null)) throw new HttpError(404, `${src.server.name} has no playable file for this title.`);
+  return src;
+}
+
 export function registerPlaybackRoutes(r, core) {
   const { library, playback, plugins, settings, auth } = core;
 
+  const remoteSource = (item) => remoteSourceFor(core, item);
+
   r.post('/api/items/:id/playback', async (ctx) => {
     const item = library.get(ctx.params.id);
-    if (!item || !['movie', 'episode', 'track'].includes(item.kind) || !library.canSee(ctx.viewer, item)) throw new HttpError(404, 'Nothing to play here');
+    if (!item || !['movie', 'episode', 'track', 'extra'].includes(item.kind) || !library.canSee(ctx.viewer, item)) throw new HttpError(404, 'Nothing to play here');
     const body = await ctx.body();
     const media = parseJson(item.media, null);
     const quality = String(body.quality || settings.get('defaultQuality') || 'original');
@@ -45,6 +58,7 @@ export function registerPlaybackRoutes(r, core) {
       profile: ctx.profile,
       item,
       caps: parseCaps(body.caps),
+      source: await remoteSource(item),
       start,
       audioIndex: body.audioIndex != null && body.audioIndex !== '' ? Number(body.audioIndex) : null,
       quality,
@@ -54,10 +68,14 @@ export function registerPlaybackRoutes(r, core) {
       clientIp: auth.clientIp(ctx.req),
     });
 
-    const next = item.kind === 'track' ? null : library.nextEpisode(item);
+    const listId = body.listId ? Number(body.listId) : null;
+    const list = listId ? core.lists.get(listId) : null;
+    const next = item.kind === 'track' || item.kind === 'extra' ? null : list && core.lists.visibleTo(list, ctx.viewer) ? core.lists.nextIn(list.id, item.id, ctx.viewer) : library.nextEpisode(item);
     const show = item.show_id ? library.get(item.show_id) : null;
+    const parent = item.kind === 'extra' ? library.get(item.parent_id) : null;
     return {
       sessionId: session.id,
+      parent: parent ? { id: parent.id, title: parent.title, kind: parent.kind } : undefined,
       mode: session.mode,
       delivery: session.delivery,
       url,
@@ -73,6 +91,7 @@ export function registerPlaybackRoutes(r, core) {
       item: serializeItem(item, { progress }),
       show: show ? serializeItem(show) : null,
       next: next ? serializeItem(next) : null,
+      listId: list && core.lists.visibleTo(list, ctx.viewer) ? list.id : null,
       previews: item.kind === 'track' ? null : core.extras.previewManifest(item),
       markers: item.kind === 'episode' ? core.extras.playbackMarkers(item.id) : { intro: null, credits: null },
     };
@@ -90,8 +109,15 @@ export function registerPlaybackRoutes(r, core) {
     return { ok: true };
   });
 
-  r.get('/api/stream/:sid', (ctx) => playback.streamProgressive(ctx, ctx.params.sid));
-  r.get('/api/hls/:sid/:file', (ctx) => playback.serveHls(ctx, ctx.params.sid, ctx.params.file));
+  r.get('/api/stream/:sid', (ctx) => playback.streamProgressive(ctx, ctx.params.sid), { cast: 'stream' });
+  r.get('/api/hls/:sid/:file', (ctx) => playback.serveHls(ctx, ctx.params.sid, ctx.params.file), { cast: 'stream' });
+
+  // AirPlay: the Apple TV fetches the media itself, so the player swaps to a cast link for its own session.
+  r.post('/api/playback/:sid/cast-link', (ctx) => {
+    const s = playback.sessions.get(ctx.params.sid);
+    if (!s || s.userId !== ctx.user.id) throw new HttpError(404, 'No such playback session.');
+    return { token: core.cast.links.issue({ sessionId: s.id, itemId: s.itemId, userId: ctx.user.id, profileId: ctx.profile?.id ?? null }) };
+  });
 
   // ---- Add-on sources registered by plugins ----
   // Add-on content isn't age-rated, so Kids profiles only get it if a parent allows unrated titles.

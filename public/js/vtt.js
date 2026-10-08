@@ -1,4 +1,4 @@
-// WebVTT parsing for the player. Subtitles are drawn by NodeFlix itself so they
+// WebVTT parsing for the player. Subtitles are drawn by Atomix itself so they
 // can be styled and follow the stream's logical timeline.
 export function parseTime(t) {
   const parts = t.trim().split(':').map(Number);

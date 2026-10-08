@@ -4,7 +4,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { hasFfmpeg, tempDir, makeVideo, startNodeFlix, client, waitForScan, fakeServer } from './helpers.js';
+import { hasFfmpeg, tempDir, makeVideo, startAtomix, client, waitForScan, fakeServer } from './helpers.js';
 import { movieHash } from '../plugins/opensubtitles/index.js';
 
 const skip = !hasFfmpeg && 'ffmpeg not installed';
@@ -49,7 +49,7 @@ before(async () => {
   if (!hasFfmpeg) return;
   makeVideo(path.join(media, 'Movies', 'Heat (1995)', 'Heat (1995).mp4'), { seconds: 12 });
   fs.writeFileSync(path.join(media, 'Movies', 'Heat (1995)', 'Heat (1995).nfo'), '<movie><title>Heat</title><uniqueid type="tmdb">949</uniqueid><uniqueid type="imdb">tt0113277</uniqueid></movie>');
-  nf = await startNodeFlix({ NODEFLIX_OPENSUBTITLES_BASE: `${os.url}/api/v1` });
+  nf = await startAtomix({ ATOMIX_OPENSUBTITLES_BASE: `${os.url}/api/v1` });
   admin = client(nf.base);
   await admin.post('/api/setup', { username: 'admin', password: 'password123' });
   ids.lib = (await admin.post('/api/libraries', { name: 'Movies', type: 'movies', paths: [path.join(media, 'Movies')] })).data.id;
@@ -104,7 +104,7 @@ test('search and download through OpenSubtitles', { skip }, async () => {
 
   const search = calls.find((c) => c.path === '/api/v1/subtitles');
   assert.equal(search.headers['api-key'], 'KEY123');
-  assert.match(search.headers['user-agent'], /^NodeFlix v\d/);
+  assert.match(search.headers['user-agent'], /^Atomix v\d/);
   const params = new URLSearchParams(search.query);
   assert.equal(params.get('tmdb_id'), '949');
   assert.equal(params.get('languages'), 'en');

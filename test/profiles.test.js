@@ -3,7 +3,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { hasFfmpeg, tempDir, makeVideo, startNodeFlix, client, waitForScan, fakeServer } from './helpers.js';
+import { hasFfmpeg, tempDir, makeVideo, startAtomix, client, waitForScan, fakeServer } from './helpers.js';
 
 const skip = !hasFfmpeg && 'ffmpeg not installed';
 const media = tempDir();
@@ -41,7 +41,7 @@ before(async () => {
     return send({ results: [] });
   });
 
-  nf = await startNodeFlix({ NODEFLIX_TMDB_BASE: `${tmdb.url}/3`, TMDB_API_KEY: '0123456789abcdef0123456789abcdef' });
+  nf = await startAtomix({ ATOMIX_TMDB_BASE: `${tmdb.url}/3`, TMDB_API_KEY: '0123456789abcdef0123456789abcdef' });
   admin = client(nf.base);
   await admin.post('/api/setup', { username: 'parent', password: 'password123' });
   ids.movies = (await admin.post('/api/libraries', { name: 'Movies', type: 'movies', paths: [m] })).data.id;

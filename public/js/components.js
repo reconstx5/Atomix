@@ -1,5 +1,6 @@
 // Reusable UI pieces: cards, rows, hero banner, dialogs, toasts.
-import { h, icon, clear, hueFor, episodeLabel, formatRuntime } from './dom.js';
+import { h, icon, clear, hueFor, episodeLabel, formatRuntime, formatClock, MARK } from './dom.js';
+import { listCard } from './lists.js';
 
 // ---- Artwork ----
 export function art(src, title, { kind = 'poster', eager = false, alt = '' } = {}) {
@@ -71,14 +72,47 @@ export function squareCard(item) {
   ), item);
 }
 
-const cardFor = (style, item, opts) => (style === 'landscape' ? landscapeCard(item, opts) : style === 'square' ? squareCard(item) : posterCard(item));
+const cardFor = (style, item, opts) => (style === 'list' ? listCard(item) : style === 'landscape' ? landscapeCard(item, opts) : style === 'square' ? squareCard(item) : posterCard(item));
+
+/** Captions for a wide card: the classic line, and Orbit's "S1 · E4, 23m left" (its top area names the episode). */
+/**
+ * What an episode card says under its title: "Watched", "<n> min left" (past 30 s and not finished), or its length.
+ * Returns '' when nothing is known.
+ */
+export function episodeCaption(ep) {
+  const p = ep.progress;
+  if (p?.watched) return 'Watched';
+  const dur = p?.duration || ep.duration;
+  if (p && p.position > 30 && dur) return `${Math.max(1, Math.ceil((dur - p.position) / 60))} min left`;
+  return formatRuntime(ep.runtime || (ep.duration ? ep.duration / 60 : null)) || '';
+}
+
+export function wideCaption(item) {
+  if (item.extraKind) {
+    const sub = [item.caption, item.duration ? (item.duration < 60 ? formatClock(item.duration) : formatRuntime(item.duration / 60)) : null].filter(Boolean).join(' · ');
+    return { title: item.title, sub, left: sub };
+  }
+  const isEp = item.kind === 'episode';
+  const label = isEp ? episodeLabel(item) : '';
+  const title = isEp ? item.showTitle || item.title : item.title;
+  const sub = isEp ? `${label} · ${item.title}` : String(item.year || '');
+  const p = item.progress;
+  const dur = p?.duration || item.duration;
+  if (isEp) {
+    // Episodes carry the same caption as the season row: Watched, or how much is left (never the plain length here).
+    const state = p?.watched ? 'Watched' : p && p.position > 30 && dur ? episodeCaption(item) : '';
+    return { title, sub, left: [label, state].filter(Boolean).join(', ') };
+  }
+  const left = p && !p.watched && p.position > 30 && dur ? `${formatRuntime(Math.max(1, (dur - p.position) / 60))} left` : '';
+  return { title, sub, left: left || sub };
+}
 
 /** Wide card for "continue watching" and episodes. Clicking resumes playback. */
 export function landscapeCard(item, { play = true } = {}) {
   const isEp = item.kind === 'episode';
-  const image = isEp ? item.poster || item.showBackdrop : item.backdrop || item.poster;
-  const title = isEp ? item.showTitle || item.title : item.title;
-  const sub = isEp ? `${episodeLabel(item)} · ${item.title}` : item.year || '';
+  const image = isEp ? item.poster || item.showBackdrop : item.backdrop || item.poster || item.ownerBackdrop;
+  const cap = wideCaption(item);
+  const title = cap.title;
   const href = item.href || (play ? `#/play/${item.id}` : itemHref(item));
   return remember(h(
     'a',
@@ -92,20 +126,23 @@ export function landscapeCard(item, { play = true } = {}) {
       badge(item),
       progressBar(item),
     ),
-    h('div', { class: 'card-meta' }, h('span', { class: 'card-title' }, title), sub ? h('span', { class: 'card-sub' }, String(sub)) : null),
+    h('div', { class: 'card-meta' }, h('span', { class: 'card-title' }, title), cap.sub ? h('span', { class: 'card-sub' }, cap.sub) : null, cap.left ? h('span', { class: 'card-sub card-sub-orbit' }, cap.left) : null),
   ), item);
 }
 
 /** Horizontal scrolling row with keyboard-friendly scroll buttons. */
-export function row({ title, items, style = 'poster', href }) {
+export function row({ title, subtitle, items, style = 'poster', href, id, inMenu = false }) {
   const scroller = h('div', { class: `row-scroller row-${style}` });
   for (const item of items) scroller.append(cardFor(style, item));
   const scrollBy = (dir) => scroller.scrollBy({ left: dir * scroller.clientWidth * 0.85, behavior: 'smooth' });
-  const heading = href ? h('a', { href, class: 'row-title-link' }, title, icon('forward', { size: 18 })) : title;
+  // Orbit's remote moves between cards, so a heading whose page is also in the menu (Home's rows) is for a mouse there;
+  // a heading that is the only way somewhere (Part of <collection> on a film) stays in the remote's path.
+  const heading = href ? h('a', { href, class: 'row-title-link', tabindex: inMenu && document.body.dataset.layout === 'orbit' ? '-1' : null }, title, icon('forward', { size: 18 })) : title;
   return h(
     'section',
-    { class: 'row' },
+    { class: 'row', dataset: id ? { row: id } : {} },
     h('h2', { class: 'row-title' }, heading),
+    subtitle ? h('p', { class: 'row-subtitle muted' }, subtitle) : null,
     h(
       'div',
       { class: 'row-body' },
@@ -193,7 +230,8 @@ export function spotlight(initial, { onShow } = {}) {
   const resumeBar = h('div', { class: 'spot-resume', hidden: true }, h('div', { class: 'spot-resume-track' }, h('span')), h('span', { class: 'spot-resume-text' }));
   const primary = h('a', { class: 'btn btn-primary', 'data-autofocus': true }, icon('play'), h('span', {}, 'Play'));
   const secondary = h('a', { class: 'btn btn-secondary' }, icon('info'), h('span', {}, 'More info'));
-  const inner = h('div', { class: 'spot-inner' }, eyebrow, logo, title, meta, genres, overview, resumeBar, h('div', { class: 'actions spot-actions' }, primary, secondary));
+  const trailerBtn = h('a', { class: 'btn btn-ghost', hidden: true }, icon('film'), h('span', {}, 'Trailer'));
+  const inner = h('div', { class: 'spot-inner' }, eyebrow, logo, title, meta, genres, overview, resumeBar, h('div', { class: 'actions spot-actions' }, primary, secondary, trailerBtn));
   const el = h('section', { class: 'spotlight', 'aria-label': 'Spotlight' }, inner);
   let logoFor = null;
   const setLogo = (src, name, { isEpisode }) => {
@@ -253,6 +291,9 @@ export function spotlight(initial, { onShow } = {}) {
       resumeBar.querySelector('.spot-resume-text').textContent = `${formatRuntime(Math.max(1, (dur - item.progress.position) / 60))} left`;
     }
     const detail = item.href || itemHref(item);
+    // The featured title's trailer (cards don't carry one).
+    trailerBtn.hidden = !item.trailer;
+    if (item.trailer) trailerBtn.href = item.trailer.kind === 'local' ? `#/play/${item.trailer.itemId}?from=${item.id}` : `#/trailer/${item.id}`;
     if (playable) {
       setBtn(primary, resume ? 'Resume' : 'Play', `#/play/${item.id}`, 'play');
       setBtn(secondary, isEp ? 'Go to show' : 'More info', isEp && item.showId ? `#/item/${item.showId}` : detail, 'info');
@@ -284,9 +325,13 @@ export function emptyState({ title, text, action }) {
   return h('div', { class: 'empty-state' }, h('div', { class: 'empty-icon' }, icon('film', { size: 40 })), h('h2', {}, title), text ? h('p', {}, text) : null, action || null);
 }
 
-const LOADER = `<svg viewBox="0 0 32 32" width="44" height="44"><path d="M11 9.5 L23 16 L11 22.5 Z" fill="none" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.6" stroke-linejoin="round"/><circle class="n1" cx="11" cy="9.5" r="2.6"/><circle class="n2" cx="23" cy="16" r="2.6"/><circle class="n3" cx="11" cy="22.5" r="2.6"/></svg>`;
+const LOADER = `<svg viewBox="0 0 32 32" width="44" height="44" fill="currentColor" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+  <g class="n1"><path d="${MARK.orbits[1]}" fill="none" stroke-width="1.7"/><circle cx="${MARK.electron.cx}" cy="${MARK.electron.cy}" r="${MARK.electron.r}" stroke="none"/></g>
+  <path class="n2" d="${MARK.orbits[0]}" fill="none" stroke-width="1.7"/>
+  <path class="n3" d="${MARK.nucleus}" stroke-width="1.6"/>
+</svg>`;
 
-/** Loading indicator: the NodeFlix mark's three nodes lighting up in turn. */
+/** Loading indicator: the Atomix mark (no tile) with its orbits, then the nucleus, lighting up in turn. */
 export function spinner(label = 'Loading') {
   return h('div', { class: 'spinner-wrap', role: 'status' }, h('span', { class: 'loader', 'aria-hidden': 'true', html: LOADER }), h('span', { class: 'visually-hidden' }, label));
 }
@@ -381,6 +426,26 @@ export async function confirmDialog(title, text, { confirm = 'OK', danger = fals
   return v === 'ok';
 }
 
+/**
+ * A short list of actions in a small panel: the "…" menu, a song's menu. Items are
+ * { label, icon, onSelect } or, for links, { label, icon, href, download }. Falsy items are skipped;
+ * the first one has the focus, and choosing one closes the panel.
+ */
+export function openSheet(title, items) {
+  const entry = (it, i) => {
+    const content = [icon(it.icon, { size: 22 }), h('span', {}, it.label)];
+    const close = (e) => e.currentTarget.closest('dialog')?.close('done');
+    if (it.href) return h('a', { class: 'sheet-item', href: it.href, download: it.download || null, 'data-autofocus': i === 0 || null, onClick: close }, content);
+    return h('button', { type: 'button', class: 'sheet-item', 'data-autofocus': i === 0 || null, onClick: (e) => (close(e), it.onSelect()) }, content);
+  };
+  return openDialog({ title, body: h('div', { class: 'sheet' }, items.filter(Boolean).map(entry)), actions: [] });
+}
+
+/** A round "…" button that opens `items` in a sheet (see openSheet). */
+export function moreButton(title, items) {
+  return button('', { icon: 'more', title: 'More', onClick: () => openSheet(title, items), attrs: { 'aria-haspopup': 'dialog' } });
+}
+
 export function field(label, input, hint) {
   const id = input.id || `f-${Math.random().toString(36).slice(2, 9)}`;
   input.id = id;
@@ -389,10 +454,12 @@ export function field(label, input, hint) {
   return h('div', { class: 'field' }, h('label', { for: id }, label), hint ? h('p', { class: 'hint', id: hintId }, hint) : null, input);
 }
 
-export function toggle(label, checked, onChange) {
+/** A switch. `hint` adds a line under the label saying what it does. */
+export function toggle(label, checked, onChange, { hint } = {}) {
   const id = `t-${Math.random().toString(36).slice(2, 9)}`;
-  const input = h('input', { type: 'checkbox', id, role: 'switch', checked, onChange: (e) => onChange?.(e.target.checked) });
-  return h('label', { class: 'toggle', for: id }, input, h('span', { class: 'toggle-track', 'aria-hidden': 'true' }), h('span', {}, label));
+  const input = h('input', { type: 'checkbox', id, role: 'switch', checked, 'aria-describedby': hint ? `${id}-hint` : null, onChange: (e) => onChange?.(e.target.checked) });
+  const text = hint ? h('span', { class: 'toggle-text' }, h('span', {}, label), h('span', { class: 'toggle-hint', id: `${id}-hint` }, hint)) : h('span', {}, label);
+  return h('label', { class: 'toggle', for: id }, input, h('span', { class: 'toggle-track', 'aria-hidden': 'true' }), text);
 }
 
 export { clear };

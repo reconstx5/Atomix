@@ -5,7 +5,8 @@ import { tileFor } from './previews.js';
 export function seekPreview(track) {
   const img = h('div', { class: 'seek-preview-img' });
   const time = h('span', { class: 'seek-preview-time' });
-  const el = h('div', { class: 'seek-preview', hidden: true, 'aria-hidden': 'true' }, img, time);
+  const step = h('span', { class: 'seek-preview-step', hidden: true });
+  const el = h('div', { class: 'seek-preview', hidden: true, 'aria-hidden': 'true' }, img, h('span', { class: 'seek-preview-line' }, time, step));
   track.append(el);
   let manifest = null;
   const loaded = new Set();
@@ -44,6 +45,12 @@ export function seekPreview(track) {
     },
     hide() {
       el.hidden = true;
+      step.hidden = true;
+    },
+    /** "+30 s" beside the time while a held arrow moves faster; null clears it. */
+    setStep(text) {
+      step.textContent = text || '';
+      step.hidden = !text;
     },
   };
 }

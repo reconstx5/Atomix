@@ -28,6 +28,6 @@ export function setup(api) {
   });
 
   api.log.info('Ready');
-  // Returning a function lets NodeFlix clean up when the plugin is disabled.
+  // Returning a function lets Atomix clean up when the plugin is disabled.
   return () => api.log.info('Stopped');
 }

@@ -39,7 +39,7 @@ export async function render(el) {
     h(
       'div',
       { class: 'picker-page' },
-      h('div', { class: 'picker-brand' }, logoMark(36), h('span', {}, state.status?.serverName || 'NodeFlix')),
+      h('div', { class: 'picker-brand' }, logoMark(36), h('span', {}, state.status?.serverName || 'Atomix')),
       h('h1', {}, "Who's watching?"),
       h(
         'ul',

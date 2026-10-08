@@ -1,0 +1,357 @@
+/* Orbit layout — for themes with "layout": "orbit" (themes/orbit is the default).
+   The page fills the screen over its own artwork, a glass menu floats in a rail on the left, and phones
+   get a dock at the bottom. This file is the structure: where things go and how big they are. The
+   theme's theme.css gives the look (colours, glass, type, selection).
+
+   Sizes come from the mockups at 1920×1080 and are written as N × --px, so they scale with the screen:
+   --px is 1px on a 1080p TV and never less than 0.72px (laptops). Phones and portrait screens
+   (narrower than 1000px, or taller than wide) have no rail and use --px: 0.4px. */
+
+/* ---------- Sizes ---------- */
+html[data-layout="orbit"] {
+  --px: clamp(0.72px, calc(100vw / 1920), 2px);
+  font-size: max(12px, calc(22 * var(--px)));
+}
+@media not all and (min-width: 1000px) and (orientation: landscape) {
+  html[data-layout="orbit"] { --px: 0.4px; font-size: 16px; }
+}
+
+/* ---------- The rail: the page fills the screen; the menu floats in a rail on the left (TVs 168, laptops 112) ---------- */
+html[data-layout="orbit"] {
+  --win-l: 0px; /* the rail's width; 0 on phones and portrait screens (their menu is a dock) */
+  --menu-w: calc(88 * var(--px));
+  --menu-open-w: calc(300 * var(--px));
+}
+@media (min-width: 1000px) and (orientation: landscape) {
+  html[data-layout="orbit"] { --win-l: 112px; }
+}
+@media (min-width: 1600px) and (orientation: landscape) {
+  html[data-layout="orbit"] { --win-l: calc(168 * var(--px)); }
+}
+body[data-layout="orbit"] { --gutter: calc(96 * var(--px)); --header-h: 0px; }
+@media (min-width: 1000px) and (orientation: landscape) {
+  body[data-layout="orbit"][data-view="page"] { overflow: hidden; }
+  /* main is still the scroll box (rows keep their selected card in view with scroll-padding); its left padding
+     keeps the rail clear, so the page's text edge is --win-l + 16px from the screen edge (a fixed 16px: on laptops 16 × --px would be 11.5px and too close to the pill). */
+  body[data-layout="orbit"] { --rail-pad: calc(var(--win-l) - var(--gutter) + 16px); }
+  body[data-layout="orbit"][data-view="page"] main {
+    position: fixed; inset: 0; padding-left: var(--rail-pad);
+    min-height: 0; overflow: hidden auto; overscroll-behavior: contain; scrollbar-width: none;
+    scroll-padding: calc(128 * var(--px)) 0 calc(48 * var(--px));
+  }
+  body[data-layout="orbit"][data-view="page"] main::-webkit-scrollbar { display: none; }
+  /* The crisp artwork fills the screen, under the page. */
+  body[data-layout="orbit"][data-view="page"] .backdrop { inset: 0; }
+  /* Nothing shows round the page any more; the environment stays for the sign-in and profile screens. */
+  html[data-layout="orbit"] body[data-view="page"]:not(:has(.music-header, .nowplaying-view)) .environment { display: none; }
+  /* Rows slide under the pill to the screen's edge rather than being chopped mid-pill; their first card still sits
+     on the text edge, and the mouse-only scroll arrow starts where the rail ends. */
+  body[data-layout="orbit"][data-view="page"] .row-scroller { margin-left: calc(-1 * var(--rail-pad)); padding-left: calc(var(--gutter) + var(--rail-pad)); scroll-padding-inline-start: calc(var(--gutter) + var(--rail-pad)); }
+  body[data-layout="orbit"][data-view="page"] .episode-browser .row-scroller { margin-left: calc(-1 * (var(--gutter) + var(--rail-pad))); }
+  body[data-layout="orbit"][data-view="page"] .row-prev { left: calc(var(--gutter) - 16px); }
+  /* Music is a pill bottom-right: Settings' Save button keeps above it. */
+  html.has-mini body[data-layout="orbit"] .sticky-actions { bottom: calc(150 * var(--px)); }
+  html.has-cast body[data-layout="orbit"] .sticky-actions { bottom: calc(150 * var(--px)); }
+  html.has-mini.has-cast body[data-layout="orbit"] .sticky-actions { bottom: calc(262 * var(--px)); }
+}
+body[data-layout="orbit"][data-view="page"] .view { padding: calc(128 * var(--px)) 0 calc(64 * var(--px)); animation: orbit-in 240ms var(--ease); }
+@keyframes orbit-in { from { opacity: 0; transform: translateX(calc(24 * var(--px))); } to { opacity: 1; transform: none; } }
+
+/* ---------- The environment: the artwork behind the sign-in and profile screens ---------- */
+html[data-layout="orbit"] .environment { display: block; position: fixed; inset: 0; z-index: -2; overflow: hidden; pointer-events: none; }
+html[data-layout="orbit"] body[data-view="player"] .environment { display: none; }
+html[data-layout="orbit"] .environment canvas { position: absolute; inset: -4%; width: 108%; height: 108%; opacity: 0; transition: opacity 600ms var(--ease); }
+html[data-layout="orbit"] .environment canvas.is-on { opacity: 1; }
+html[data-layout="orbit"] .environment::after { content: ""; position: absolute; inset: 0; }
+
+/* ---------- The mark, the floating menu and the clock ---------- */
+body[data-layout="orbit"] .app-header { position: fixed; inset: 0; z-index: 40; pointer-events: none; }
+body[data-layout="orbit"] .nav { display: block; height: 0; }
+body[data-layout="orbit"] .nav > * { pointer-events: auto; }
+/* While the remote is in the menu the page dims a little. */
+body[data-layout="orbit"] .app-header::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity 220ms var(--ease);
+  background: linear-gradient(90deg, rgba(4, 4, 14, 0.6) 0%, rgba(4, 4, 14, 0.3) 22%, rgba(4, 4, 14, 0.28) 34%);
+}
+html.menu-open body[data-layout="orbit"] .app-header::before { opacity: 1; }
+body[data-layout="orbit"] .brand {
+  position: fixed; z-index: 2; top: calc(44 * var(--px)); left: calc((var(--win-l) - 48 * var(--px)) / 2);
+  display: flex; align-items: center; gap: calc(14 * var(--px)); padding: 0;
+}
+body[data-layout="orbit"] .brand .logo-mark svg { width: calc(48 * var(--px)); height: calc(48 * var(--px)); }
+body[data-layout="orbit"] .brand-name { display: none; font-size: calc(26 * var(--px)); font-weight: 600; }
+html.menu-open body[data-layout="orbit"] .brand-name { display: inline; }
+body[data-layout="orbit"] .orbit-menu {
+  position: fixed; z-index: 2; top: 50%; left: calc((var(--win-l) - var(--menu-w)) / 2); transform: translateY(-50%);
+  width: var(--menu-w); max-height: calc(100vh - 220 * var(--px)); overflow: hidden auto; scrollbar-width: none;
+  display: flex; flex-direction: column; gap: calc(8 * var(--px)); margin: 0; padding: calc(12 * var(--px)); list-style: none;
+  border-radius: calc(44 * var(--px));
+  transition: width 220ms var(--ease), padding 220ms var(--ease);
+}
+body[data-layout="orbit"] .orbit-menu::-webkit-scrollbar { display: none; }
+body[data-layout="orbit"] .orbit-menu > li { flex: none; }
+body[data-layout="orbit"] .orbit-menu .nav-link {
+  position: relative; height: max(44px, calc(64 * var(--px))); padding: 0 calc(19 * var(--px)); gap: calc(16 * var(--px));
+  border-radius: 999px; font-size: var(--t-body); overflow: hidden;
+}
+body[data-layout="orbit"] .orbit-menu .nav-link .icon { flex: none; width: calc(26 * var(--px)); height: calc(26 * var(--px)); }
+body[data-layout="orbit"] .orbit-menu .nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: 0; transition: opacity 220ms var(--ease); }
+/* Open (the remote is in it) or under a mouse: it grows and shows the names. */
+/* Open with the remote (html.menu-open), under a mouse, or with keyboard focus in it (html.kbd: Tab); names show and
+   the page doesn't dim. Only keyboard focus counts, so a mouse click doesn't leave it open. */
+html.menu-open body[data-layout="orbit"] .orbit-menu, body[data-layout="orbit"] .orbit-menu:hover, html.kbd body[data-layout="orbit"] .orbit-menu:focus-within { width: var(--menu-open-w); padding: calc(14 * var(--px)); }
+html.menu-open body[data-layout="orbit"] .orbit-menu .nav-label, body[data-layout="orbit"] .orbit-menu:hover .nav-label, html.kbd body[data-layout="orbit"] .orbit-menu:focus-within .nav-label { opacity: 1; }
+body[data-layout="orbit"] .orbit-divider { height: 1px; margin: calc(6 * var(--px)) calc(16 * var(--px)); }
+/* The page you're on: a small dot. */
+body[data-layout="orbit"] .orbit-menu .nav-link[aria-current="page"]::after {
+  content: ""; position: absolute; top: calc(10 * var(--px)); right: calc(8 * var(--px)); width: calc(8 * var(--px)); height: calc(8 * var(--px)); border-radius: 50%;
+}
+html.menu-open body[data-layout="orbit"] .orbit-menu .nav-link[aria-current="page"]::after,
+body[data-layout="orbit"] .orbit-menu:hover .nav-link[aria-current="page"]::after,
+html.kbd body[data-layout="orbit"] .orbit-menu:focus-within .nav-link[aria-current="page"]::after { top: calc(50% - 4 * var(--px)); right: calc(22 * var(--px)); }
+body[data-layout="orbit"] .orbit-cluster {
+  position: fixed; z-index: 2; top: calc(36 * var(--px)); right: calc(52 * var(--px));
+  display: flex; align-items: center; gap: calc(16 * var(--px)); height: max(44px, calc(56 * var(--px))); padding: 0 calc(8 * var(--px)) 0 calc(24 * var(--px)); border-radius: 999px;
+}
+body[data-layout="orbit"] .orbit-cluster .nav-clock { padding: 0; flex-direction: row; font-size: var(--t-meta); }
+body[data-layout="orbit"] .orbit-cluster .nav-clock-date { display: none; }
+body[data-layout="orbit"] :is(.orbit-profile, .orbit-tool) { text-decoration: none; }
+body[data-layout="orbit"] .orbit-tool { display: none; }
+body[data-layout="orbit"] .orbit-profile { display: grid; border-radius: 50%; }
+body[data-layout="orbit"] .orbit-profile .avatar { width: max(32px, calc(40 * var(--px))); height: max(32px, calc(40 * var(--px))); border-radius: 50%; font-size: max(14px, calc(18 * var(--px))); }
+
+/* ---------- Phones and portrait screens: no frame; the menu is a dock at the bottom ---------- */
+@media not all and (min-width: 1000px) and (orientation: landscape) {
+  body[data-layout="orbit"] { --gutter: 20px; }
+  body[data-layout="orbit"].signed-in main { padding-bottom: calc(110px + env(safe-area-inset-bottom)); }
+  body[data-layout="orbit"][data-view="page"] .view { padding-top: calc(72px + env(safe-area-inset-top)); }
+  body[data-layout="orbit"] .backdrop { inset: 0 0 auto 0; height: 64vh; }
+  html[data-layout="orbit"] .environment canvas { display: none; }
+  body[data-layout="orbit"] .brand, body[data-layout="orbit"] .app-header::before { display: none; }
+  body[data-layout="orbit"] .orbit-menu {
+    top: auto; bottom: calc(14px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
+    width: max-content; max-width: calc(100vw - 24px); max-height: none; flex-direction: row; overflow: auto hidden; padding: 8px; gap: 4px; border-radius: 999px;
+  }
+  html.menu-open body[data-layout="orbit"] .orbit-menu, body[data-layout="orbit"] .orbit-menu:hover, html.kbd body[data-layout="orbit"] .orbit-menu:focus-within { width: max-content; padding: 8px; }
+  body[data-layout="orbit"] .orbit-menu .nav-link { height: 48px; padding: 0 14px; gap: 8px; }
+  body[data-layout="orbit"] .orbit-menu .nav-link .icon { width: 22px; height: 22px; }
+  body[data-layout="orbit"] .orbit-menu .nav-label { display: none; opacity: 1; }
+  body[data-layout="orbit"] .orbit-menu .nav-link[aria-current="page"] .nav-label { display: inline; }
+  body[data-layout="orbit"] .orbit-menu .nav-link[aria-current="page"]::after { display: none; }
+  body[data-layout="orbit"] .orbit-extra { display: none; }
+  body[data-layout="orbit"] .orbit-cluster { top: calc(12px + env(safe-area-inset-top)); right: 12px; height: 48px; padding: 0 4px; gap: 4px; }
+  body[data-layout="orbit"] .orbit-cluster .nav-clock { display: none; }
+  body[data-layout="orbit"] .orbit-tool { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; }
+  /* Settings: the sections are a row of chips you can swipe, the panel is full width, Save clears the dock. */
+  body[data-layout="orbit"] .settings-layout { grid-template-columns: 1fr; gap: 16px; }
+  body[data-layout="orbit"] .settings-tabs { position: static; flex-direction: row; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 0 calc(-1 * var(--gutter)); padding: 4px var(--gutter); }
+  body[data-layout="orbit"] .settings-tabs::-webkit-scrollbar { display: none; }
+  body[data-layout="orbit"] .settings-tab { flex: none; min-height: 40px; padding: 0 14px; }
+  body[data-layout="orbit"] .settings-tab[aria-current="page"] { box-shadow: none; }
+  body[data-layout="orbit"] .settings-content { max-width: none; }
+  body[data-layout="orbit"] .sticky-actions { bottom: calc(96px + env(safe-area-inset-bottom)); }
+  html.has-mini body[data-layout="orbit"] .sticky-actions { bottom: calc(190px + env(safe-area-inset-bottom)); }
+  html.has-cast body[data-layout="orbit"] .sticky-actions { bottom: calc(190px + env(safe-area-inset-bottom)); }
+  html.has-mini.has-cast body[data-layout="orbit"] .sticky-actions { bottom: calc(286px + env(safe-area-inset-bottom)); }
+}
+
+/* ---------- Home and rows ---------- */
+body[data-layout="orbit"] { --poster-w: calc(196 * var(--px)); --card-w: var(--poster-w); --wide-w: calc(336 * var(--px)); --square-w: calc(220 * var(--px)); }
+body[data-layout="orbit"] :is(.row-poster, .row-list) { grid-auto-columns: var(--poster-w); }
+body[data-layout="orbit"] .row-landscape { grid-auto-columns: var(--wide-w); }
+body[data-layout="orbit"] .row-square { grid-auto-columns: var(--square-w); }
+body[data-layout="orbit"] .grid-poster { grid-template-columns: repeat(auto-fill, minmax(var(--poster-w), 1fr)); }
+body[data-layout="orbit"] .grid-square { grid-template-columns: repeat(auto-fill, minmax(var(--square-w), 1fr)); }
+body[data-layout="orbit"] .grid-landscape { grid-template-columns: repeat(auto-fill, minmax(var(--wide-w), 1fr)); }
+@media (min-width: 1000px) and (orientation: landscape) {
+  body[data-layout="orbit"] :is(.grid-poster, .grid-square, .grid-landscape) { column-gap: calc(20 * var(--px)); }
+}
+body[data-layout="orbit"] .rows { gap: calc(30 * var(--px)); padding-top: 0; }
+/* Room above and below for a selected card: it grows 8% and gets a 9px ring. */
+body[data-layout="orbit"] .row-scroller { gap: calc(24 * var(--px)); padding-top: calc(30 * var(--px)); padding-bottom: calc(26 * var(--px)); }
+@media (min-width: 1000px) and (orientation: landscape) {
+  body[data-layout="orbit"][data-view="page"] .home-view:not(.no-spotlight) { --spot-h: clamp(calc(360 * var(--px)), calc(100vh - 440 * var(--px)), calc(600 * var(--px))); --spot-h: clamp(calc(360 * var(--px)), calc(100dvh - 440 * var(--px)), calc(600 * var(--px))); height: 100%; padding: 0; }
+  body[data-layout="orbit"][data-view="page"] .home-view.is-compact:not(.no-spotlight) { --spot-h: calc(340 * var(--px)); }
+  body[data-layout="orbit"] .home-view:not(.no-spotlight) .spotlight { padding: calc(96 * var(--px)) var(--gutter) calc(28 * var(--px)); }
+  body[data-layout="orbit"] .home-view:not(.no-spotlight) .home-rows { -webkit-mask-image: none; mask-image: none; scroll-padding: calc(64 * var(--px)) 0 calc(24 * var(--px)); padding-bottom: calc(48 * var(--px)); } /* the row's heading stays in view above its selected card */
+  body[data-layout="orbit"] .home-view:not(.no-spotlight) .row-square .card-meta { display: flex; }
+}
+/* A short window (a desktop browser, a 1366×768 laptop) or a very wide one (21:9) has little height for the hero:
+   it keeps its logo small, drops the genres and clamps its lines, so it never runs off the top of the screen. */
+@media ((min-width: 1000px) and (orientation: landscape)) and ((max-height: 900px) or (min-aspect-ratio: 2/1)) {
+  body[data-layout="orbit"] .home-view:not(.no-spotlight) .spot-logo { max-height: calc(80 * var(--px)); margin-bottom: calc(14 * var(--px)); }
+  body[data-layout="orbit"] .home-view:not(.no-spotlight) .spot-eyebrow { display: none; }
+  body[data-layout="orbit"] .home-view:not(.no-spotlight) .spot-title { -webkit-line-clamp: 1; margin-bottom: calc(12 * var(--px)); }
+  body[data-layout="orbit"] .home-view:not(.no-spotlight) .spot-overview { -webkit-line-clamp: 1; }
+  body[data-layout="orbit"] .home-view:not(.no-spotlight) .spot-genres { display: none; }
+  body[data-layout="orbit"] .home-view:not(.no-spotlight) .spotlight { padding-top: calc(72 * var(--px)); }
+}
+@media (min-width: 1000px) and (orientation: landscape) and (max-height: 700px) {
+  body[data-layout="orbit"] .home-view:not(.no-spotlight) .spot-overview { display: none; }
+  body[data-layout="orbit"] .home-view:not(.no-spotlight) .spot-logo { max-height: calc(72 * var(--px)); }
+}
+@media not all and (min-width: 1000px) and (orientation: landscape) {
+  body[data-layout="orbit"] { --poster-w: 116px; --wide-w: 240px; --square-w: 132px; }
+  body[data-layout="orbit"] .home-view:not(.no-spotlight) { height: auto; display: block; overflow: visible; }
+  body[data-layout="orbit"] .home-view:not(.no-spotlight) .home-rows { overflow: visible; -webkit-mask-image: none; mask-image: none; }
+}
+
+/* ---------- Show, movie, episode, album and artist pages ---------- */
+body[data-layout="orbit"] .detail-header { min-height: 0; margin-top: 0; padding-top: 0; }
+body[data-layout="orbit"] .detail-inner { display: block; padding: 0 var(--gutter) calc(36 * var(--px)); }
+body[data-layout="orbit"] .detail-header:not(.music-header) .detail-poster { display: none; }
+body[data-layout="orbit"] .detail-info { max-width: calc(1100 * var(--px)); }
+body[data-layout="orbit"] .music-header .detail-inner { display: flex; align-items: flex-end; gap: calc(56 * var(--px)); }
+body[data-layout="orbit"] .music-header .detail-poster { flex: none; width: calc(400 * var(--px)); }
+body[data-layout="orbit"] .detail-body { padding: 0 var(--gutter); gap: calc(36 * var(--px)); }
+body[data-layout="orbit"] .detail-body-flush { padding: 0; }
+body[data-layout="orbit"] .season-tabs { gap: calc(10 * var(--px)); padding: calc(14 * var(--px)); margin: 0 calc(-14 * var(--px)); overflow: auto hidden; scrollbar-width: none; }
+body[data-layout="orbit"] .episode-browser .row-scroller { margin: 0 calc(-1 * var(--gutter)); }
+body[data-layout="orbit"] .episode-row { grid-auto-columns: calc(320 * var(--px)); }
+body[data-layout="orbit"] .episode-about { display: flex; align-items: center; gap: calc(28 * var(--px)); max-width: calc(1200 * var(--px)); margin-top: calc(8 * var(--px)); }
+body[data-layout="orbit"] .episode-about .btn { flex: none; }
+body[data-layout="orbit"] .tracks { max-width: calc(1080 * var(--px)); }
+/* Music pages: the window shows the cover softly (the environment through a light shade), not a sharp copy. */
+body[data-layout="orbit"]:has(.music-header) .backdrop { background: rgba(8, 8, 20, 0.3); }
+body[data-layout="orbit"]:has(.music-header) .backdrop img { opacity: 0 !important; }
+@media not all and (min-width: 1000px) and (orientation: landscape) {
+  body[data-layout="orbit"] .music-header .detail-inner { flex-direction: column; align-items: flex-start; gap: 20px; }
+  body[data-layout="orbit"] .music-header .detail-poster { width: 200px; }
+  body[data-layout="orbit"] .episode-row { grid-auto-columns: 240px; }
+  body[data-layout="orbit"] .episode-about { flex-direction: column; align-items: flex-start; }
+}
+
+/* ---------- Player: a floating control bar; menus open as a tall panel on the right ---------- */
+body[data-layout="orbit"] .player-top { padding: calc(40 * var(--px)) calc(56 * var(--px)) calc(90 * var(--px)); gap: calc(18 * var(--px)); }
+body[data-layout="orbit"] .player-clock { margin-left: auto; }
+body[data-layout="orbit"] .player-controls {
+  left: calc(48 * var(--px)); right: calc(48 * var(--px)); bottom: calc(40 * var(--px));
+  padding: calc(26 * var(--px)) calc(34 * var(--px)) calc(22 * var(--px)); border-radius: calc(38 * var(--px)); background: none;
+}
+body[data-layout="orbit"] .player-controls::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none; }
+body[data-layout="orbit"] .control-row { margin-top: calc(14 * var(--px)); }
+body[data-layout="orbit"] .control-group { gap: calc(10 * var(--px)); }
+body[data-layout="orbit"] .player-controls .player-ends { margin-left: calc(14 * var(--px)); }
+body[data-layout="orbit"] .pbtn { width: max(42px, calc(64 * var(--px))); height: max(42px, calc(64 * var(--px))); }
+body[data-layout="orbit"] .pbtn .icon { width: calc(28 * var(--px)); height: calc(28 * var(--px)); min-width: 20px; min-height: 20px; }
+body[data-layout="orbit"] .player-menu {
+  position: fixed; top: calc(48 * var(--px)); right: calc(48 * var(--px)); bottom: calc(48 * var(--px)); left: auto;
+  width: calc(560 * var(--px)); max-width: calc(100vw - 32px); max-height: none; margin: 0;
+  display: flex; flex-direction: column; gap: calc(6 * var(--px)); overflow-y: auto;
+  padding: calc(36 * var(--px)) calc(26 * var(--px)); border-radius: calc(38 * var(--px));
+}
+body[data-layout="orbit"] .player-menu[hidden] { display: none; }
+body[data-layout="orbit"] .skip-intro, body[data-layout="orbit"] .upnext, body[data-layout="orbit"] .player-notice { right: calc(56 * var(--px)); }
+body[data-layout="orbit"] .skip-intro { bottom: calc(240 * var(--px)); }
+body[data-layout="orbit"] .player[data-controls="hidden"] .skip-intro { bottom: calc(56 * var(--px)); }
+body[data-layout="orbit"] .player-notice { top: auto; left: auto; bottom: calc(240 * var(--px)); transform: none; }
+body[data-layout="orbit"] .player[data-controls="visible"] .subtitle-layer { bottom: max(8%, calc(260 * var(--px))); }
+@media not all and (min-width: 1000px) and (orientation: landscape) {
+  body[data-layout="orbit"] .player-controls { left: 10px; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); padding: 14px 14px 10px; border-radius: 26px; }
+  body[data-layout="orbit"] .player-menu { top: auto; left: 10px; right: 10px; bottom: 10px; width: auto; max-height: 70vh; border-radius: 26px; }
+}
+
+/* ---------- Up next ---------- */
+body[data-layout="orbit"] .upnext { bottom: calc(240 * var(--px)); width: calc(520 * var(--px)); max-width: calc(100vw - 32px); padding: calc(18 * var(--px)) calc(18 * var(--px)) calc(26 * var(--px)); }
+body[data-layout="orbit"] .upnext-art { display: block; margin: 0 0 calc(18 * var(--px)); }
+body[data-layout="orbit"] .upnext-meta { display: block; }
+body[data-layout="orbit"] .upnext .btn-primary { position: relative; }
+body[data-layout="orbit"] .upnext-ring { display: block; position: absolute; left: calc(21 * var(--px)); top: 50%; width: calc(40 * var(--px)); height: calc(40 * var(--px)); margin-top: calc(-20 * var(--px)); border-radius: 50%; pointer-events: none; }
+@media not all and (min-width: 1000px) and (orientation: landscape) {
+  body[data-layout="orbit"] .upnext { left: 10px; right: 10px; width: auto; bottom: 150px; }
+}
+
+/* ---------- Mini-player: a floating pill; with the remote (or a mouse) on it, the full controls ---------- */
+body[data-layout="orbit"] .mini {
+  left: auto; right: calc(40 * var(--px)); bottom: calc(36 * var(--px));
+  width: calc(460 * var(--px)); height: auto; min-height: calc(96 * var(--px));
+  grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "now center"; gap: calc(16 * var(--px));
+  padding: calc(14 * var(--px)); border: 0; border-radius: calc(30 * var(--px)); overflow: visible;
+}
+body[data-layout="orbit"] .mini-now { grid-area: now; min-width: 0; }
+body[data-layout="orbit"] .mini-center { grid-area: center; }
+body[data-layout="orbit"] .mini:not(:focus-within, :hover) :is(.mini-seek, .mini-side, .mini-buttons > :not(.mbtn-play)) { display: none; }
+body[data-layout="orbit"] .mini:is(:focus-within, :hover) { width: calc(560 * var(--px)); grid-template-columns: minmax(0, 1fr); grid-template-areas: "now" "center" "side"; row-gap: calc(12 * var(--px)); padding: calc(20 * var(--px)); }
+body[data-layout="orbit"] .mini:is(:focus-within, :hover) .mini-side { grid-area: side; justify-content: center; }
+body[data-layout="orbit"] .mini-line { display: block; position: absolute; top: auto; left: calc(98 * var(--px)); right: calc(86 * var(--px)); bottom: calc(14 * var(--px)); height: max(3px, calc(4 * var(--px))); border-radius: 2px; overflow: hidden; }
+body[data-layout="orbit"] .mini:is(:focus-within, :hover) .mini-line { display: none; }
+/* Room at the bottom of the page so the pill never covers the last row. */
+html.has-mini body[data-layout="orbit"].signed-in main { padding-bottom: 0; }
+html.has-mini body[data-layout="orbit"] :is(.view:not(.home-view), .home-rows) { padding-bottom: calc(150 * var(--px)); }
+@media not all and (min-width: 1000px) and (orientation: landscape) {
+  body[data-layout="orbit"] .mini { left: 12px !important; right: 12px; bottom: calc(80px + env(safe-area-inset-bottom)); width: auto; }
+  body[data-layout="orbit"] .mini:is(:focus-within, :hover) { width: auto; }
+  html.has-mini body[data-layout="orbit"].signed-in main { padding-bottom: calc(190px + env(safe-area-inset-bottom)); }
+}
+
+/* ---------- Lists: a list page is a column of rows the remote walks; the Lists page is poster grids ---------- */
+body[data-layout="orbit"] .list-items { gap: calc(10 * var(--px)); padding-top: calc(12 * var(--px)); }
+body[data-layout="orbit"] .list-item { grid-template-columns: max(28px, calc(48 * var(--px))) minmax(0, 1fr) auto; gap: calc(18 * var(--px)); padding: calc(10 * var(--px)) calc(16 * var(--px)) calc(10 * var(--px)) calc(8 * var(--px)); }
+body[data-layout="orbit"] .list-item .card-art { width: max(56px, calc(96 * var(--px))); }
+body[data-layout="orbit"] .list-item .landscape-card .card-art { width: max(100px, calc(170 * var(--px))); }
+body[data-layout="orbit"] .list-item .card:hover .card-art { transform: none; }
+body[data-layout="orbit"] .list-item .card-meta { padding: 0; }
+body[data-layout="orbit"] .list-item .card-art .card-play { width: max(28px, calc(44 * var(--px))); height: max(28px, calc(44 * var(--px))); }
+body[data-layout="orbit"] .row-subtitle { padding: 0 var(--gutter); font-size: var(--t-caption); }
+body[data-layout="orbit"] .missing-list { gap: calc(6 * var(--px)) calc(28 * var(--px)); font-size: var(--t-caption); }
+body[data-layout="orbit"] .list-mosaic > .icon { width: calc(48 * var(--px)); height: calc(48 * var(--px)); padding: calc(10 * var(--px)); }
+
+/* ---------- The trailer page ---------- */
+body[data-layout="orbit"] .trailer-view { padding: calc(60 * var(--px)) var(--gutter); gap: calc(20 * var(--px)); }
+@media (min-width: 1000px) and (orientation: landscape) {
+  body[data-layout="orbit"] .trailer-frame { max-width: calc((100dvh - 260 * var(--px)) * 16 / 9); }
+}
+
+/* ---------- Now Playing ---------- */
+@media (min-width: 1000px) and (orientation: landscape) {
+  body[data-layout="orbit"] .nowplaying-view { min-height: calc(100dvh - 192 * var(--px)); gap: calc(24 * var(--px)); }
+  body[data-layout="orbit"] .np-main { grid-template-columns: calc(360 * var(--px)) minmax(0, 1fr) calc(420 * var(--px)); gap: calc(48 * var(--px)); }
+  body[data-layout="orbit"] .lyric-line { font-size: max(14px, calc(30 * var(--px))); padding: calc(4 * var(--px)) calc(14 * var(--px)); }
+  body[data-layout="orbit"] .lyric-line.is-current { font-size: max(16px, calc(40 * var(--px))); }
+  body[data-layout="orbit"] .np-title { font-size: var(--t-section); }
+}
+@media not all and (min-width: 1000px) and (orientation: landscape) {
+  /* The transport stays in view above the dock while the lyrics scroll. */
+  body[data-layout="orbit"] .nowplaying-view { min-height: 0; }
+  body[data-layout="orbit"] .np-transport { position: sticky; bottom: calc(80px + env(safe-area-inset-bottom)); padding-top: 8px; padding-bottom: 8px; background: var(--bg); z-index: 2; }
+}
+
+/* ---------- Casting: the pill floats where the mini-player does (above it when both show); the Remote is a TV page ---------- */
+body[data-layout="orbit"] .cast-pill {
+  right: calc(40 * var(--px)); bottom: calc(36 * var(--px)); max-width: calc(520 * var(--px)); min-height: calc(84 * var(--px)); gap: calc(14 * var(--px));
+  padding: calc(12 * var(--px)) calc(16 * var(--px)) calc(12 * var(--px)) calc(12 * var(--px)); border: 0;
+  background: var(--glass-tinted); -webkit-backdrop-filter: var(--blur-tinted); backdrop-filter: var(--blur-tinted);
+  box-shadow: inset 0 0 0 1px var(--glass-tinted-edge), inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 calc(20 * var(--px)) calc(50 * var(--px)) rgba(0, 0, 0, 0.5);
+}
+html.has-mini body[data-layout="orbit"] .cast-pill { bottom: calc(36 * var(--px) + 112 * var(--px)); }
+body[data-layout="orbit"] .cast-pill-art { width: max(40px, calc(60 * var(--px))); height: max(40px, calc(60 * var(--px))); }
+body[data-layout="orbit"] .cast-pill-label { font-size: var(--t-caption); color: rgba(226, 230, 255, 0.8); }
+body[data-layout="orbit"] .cast-pill-title { font-size: max(13px, calc(18 * var(--px))); }
+body[data-layout="orbit"] .cast-pill-open:focus-visible { outline: none; box-shadow: var(--ring); }
+html.has-cast body[data-layout="orbit"] :is(.view:not(.home-view), .home-rows) { padding-bottom: calc(150 * var(--px)); }
+body[data-layout="orbit"] .cast-device { min-height: max(48px, calc(72 * var(--px))); padding: 0 calc(20 * var(--px)); border-radius: calc(20 * var(--px)); font-size: var(--t-body); }
+body[data-layout="orbit"] .cast-device:focus-visible { outline: none; background: #ffffff; color: #0b0b16; }
+body[data-layout="orbit"] .cast-device:focus-visible .muted { color: rgba(11, 11, 22, 0.7); }
+body[data-layout="orbit"] .remote-main { grid-template-columns: calc(420 * var(--px)) minmax(0, 1fr); gap: calc(64 * var(--px)); padding-block: calc(40 * var(--px)); }
+body[data-layout="orbit"] .remote-title { font-size: var(--t-page, 2.6rem); }
+body[data-layout="orbit"] .rbtn { width: max(48px, calc(76 * var(--px))); height: max(48px, calc(76 * var(--px))); background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.9); }
+body[data-layout="orbit"] .rbtn-play { width: max(64px, calc(100 * var(--px))); height: max(64px, calc(100 * var(--px))); background: rgba(255, 255, 255, 0.92); color: #0b0b16; }
+body[data-layout="orbit"] .rbtn:focus-visible { outline: none; background: #ffffff; color: #0b0b16; box-shadow: var(--ring); }
+body[data-layout="orbit"] .remote-upnext { background: var(--glass-tinted); box-shadow: inset 0 0 0 1px var(--glass-tinted-edge); border-radius: calc(24 * var(--px)); padding: calc(22 * var(--px)); }
+@media not all and (min-width: 1000px) and (orientation: landscape) {
+  body[data-layout="orbit"] .cast-pill { left: 12px; right: 12px; bottom: calc(80px + env(safe-area-inset-bottom)); max-width: none; }
+  html.has-mini body[data-layout="orbit"] .cast-pill { bottom: calc(80px + 96px + env(safe-area-inset-bottom)); }
+  html.has-cast body[data-layout="orbit"].signed-in main { padding-bottom: calc(190px + env(safe-area-inset-bottom)); }
+  body[data-layout="orbit"] .remote-main { grid-template-columns: 1fr; gap: 18px; padding-block: 12px; }
+  body[data-layout="orbit"] .remote-art { width: min(220px, 56vw); margin-inline: auto; }
+}
+/* The Remote's words sit on a dark glass panel: the artwork behind can be any brightness. */
+body[data-layout="orbit"] .remote-body { padding: calc(32 * var(--px)); border-radius: calc(32 * var(--px)); background: rgba(8, 10, 24, 0.62); -webkit-backdrop-filter: blur(24px) saturate(1.2); backdrop-filter: blur(24px) saturate(1.2); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+body[data-layout="orbit"] .remote-device { color: rgba(226, 230, 255, 0.92); }
+body[data-layout="orbit"] .remote-sub, body[data-layout="orbit"] .remote-status { color: rgba(226, 230, 255, 0.78); }
+
+/* ---------- Up next: the ring sweeps the 10 s down in one motion (Reduce motion keeps the per-second steps) ---------- */
+@property --left { syntax: '<number>'; inherits: false; initial-value: 1; }
+@keyframes upnext-sweep { from { --left: 1; } to { --left: 0; } }
+body[data-layout="orbit"] .upnext.is-live .upnext-ring { animation: upnext-sweep 10s linear forwards; }
+html.reduce-motion body[data-layout="orbit"] .upnext.is-live .upnext-ring { animation: none; } /* the per-second steps show instead */

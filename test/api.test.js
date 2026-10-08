@@ -9,7 +9,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { execFileSync } from 'node:child_process';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nodeflix-test-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'atomix-test-'));
 const mediaDir = path.join(tmp, 'media');
 let hasFfmpeg = true;
 try {
@@ -79,8 +79,8 @@ before(async () => {
     fs.mkdirSync(path.join(mediaDir, 'TV'), { recursive: true });
   }
   await new Promise((r) => tmdb.listen(0, '127.0.0.1', r));
-  process.env.NODEFLIX_DATA_DIR = path.join(tmp, 'data');
-  process.env.NODEFLIX_TMDB_BASE = `http://127.0.0.1:${tmdb.address().port}/3`;
+  process.env.ATOMIX_DATA_DIR = path.join(tmp, 'data');
+  process.env.ATOMIX_TMDB_BASE = `http://127.0.0.1:${tmdb.address().port}/3`;
   process.env.TMDB_API_KEY = '0123456789abcdef0123456789abcdef';
   const { createApp } = await import('../src/app.js');
   app = await createApp({ port: 0, host: '127.0.0.1', skipStartupScan: true, logLevel: 'error', trustProxy: true });
@@ -247,18 +247,31 @@ test('settings hide secrets and themes are listed', async () => {
   assert.equal(again.serverName, 'Renamed');
   const themeList = (await call('GET', '/api/themes')).data;
   const themes = themeList.map((t) => t.id);
-  for (const id of ['arctic', 'arctic-side', 'midnight', 'harbour', 'daylight', 'obsidian']) assert.ok(themes.includes(id), id);
-  // The Arctic look is the default; its Horizon variant puts the menu down the side.
-  assert.equal((await call('GET', '/api/status')).data.defaultTheme, 'arctic');
+  for (const id of ['orbit', 'arctic', 'arctic-side', 'midnight', 'harbour', 'daylight', 'obsidian']) assert.ok(themes.includes(id), id);
+  // Orbit is the default look: a full-screen page with a floating glass menu (its own layout).
+  assert.equal((await call('GET', '/api/status')).data.defaultTheme, 'orbit');
+  assert.equal(themeList.find((t) => t.id === 'orbit').layout, 'orbit');
   assert.equal(themeList.find((t) => t.id === 'arctic').layout, 'top');
   assert.equal(themeList.find((t) => t.id === 'arctic-side').layout, 'side');
-  // Its typeface ships with NodeFlix (no internet needed), with the font licence alongside.
-  const font = await fetch(base + '/fonts/roboto-condensed-latin.woff2');
-  assert.equal(font.status, 200);
-  assert.equal(font.headers.get('content-type'), 'font/woff2');
-  assert.equal((await fetch(base + '/fonts/OFL.txt')).status, 200);
+  // The typefaces ship with Atomix (no internet needed), with their licences alongside.
+  for (const f of ['roboto-condensed-latin.woff2', 'sora-latin-400.woff2', 'sora-latin-ext-700.woff2']) {
+    const font = await fetch(base + '/fonts/' + f);
+    assert.equal(font.status, 200, f);
+    assert.equal(font.headers.get('content-type'), 'font/woff2', f);
+  }
+  for (const f of ['OFL.txt', 'OFL-sora.txt']) assert.equal((await fetch(base + '/fonts/' + f)).status, 200, f);
   for (const t of themeList) assert.equal((await fetch(base + t.css)).status, 200, `${t.id} stylesheet`);
   const index = await fetch(base + '/library/1');
   assert.equal(index.status, 200, 'SPA fallback');
   assert.equal((await fetch(base + '/themes/../package.json')).status, 404);
+  // "Ask who's watching after": 30 minutes by default; only the five choices are kept.
+  assert.equal((await call('GET', '/api/status')).data.pickerIdleMinutes, 30);
+  for (const v of [0, 15, 30, 60, 240]) {
+    await call('PUT', '/api/admin/settings', { pickerIdleMinutes: v });
+    assert.equal((await call('GET', '/api/status')).data.pickerIdleMinutes, v, String(v));
+  }
+  for (const bad of [7, -1, 'soon', null]) {
+    await call('PUT', '/api/admin/settings', { pickerIdleMinutes: bad });
+    assert.equal((await call('GET', '/api/status')).data.pickerIdleMinutes, 30, String(bad));
+  }
 });

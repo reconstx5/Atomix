@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 
 // Schema migrations. Append new entries; never edit old ones.
-const MIGRATIONS = [
+export const MIGRATIONS = [
   `
   CREATE TABLE users (
     id INTEGER PRIMARY KEY,
@@ -243,6 +243,147 @@ const MIGRATIONS = [
     PRIMARY KEY (item_id, kind)
   );
   `,
+
+  // 7: NodeFlix is now Atomix. The setup screen filled in "NodeFlix" as the server's
+  //    name, so that moves over too; a name someone typed themselves stays.
+  `
+  UPDATE settings SET value = '"Atomix"' WHERE key = 'serverName' AND value = '"NodeFlix"';
+  `,
+
+  // 8: the Orbit look replaces Arctic as the server default, as migration 4 did for Midnight.
+  //    A theme a person picked for their own profile is left alone.
+  `
+  UPDATE settings SET value = '"orbit"' WHERE key = 'defaultTheme' AND value = '"arctic"';
+  `,
+
+  // 9: collections (TMDB film series and hand-made), playlists and the Watchlist (lists), and the
+  //    keywords/people TMDB gives us, which the picks are scored on. collections.parts keeps TMDB's
+  //    list of a series' films in release order, so a page can grey out the ones you don't own.
+  `
+  ALTER TABLE items ADD COLUMN keywords TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE items ADD COLUMN people TEXT NOT NULL DEFAULT '[]';
+  CREATE TABLE collections (
+    id INTEGER PRIMARY KEY,
+    tmdb_id INTEGER UNIQUE,
+    name TEXT NOT NULL,
+    overview TEXT,
+    poster TEXT,
+    backdrop TEXT,
+    manual INTEGER NOT NULL DEFAULT 0,
+    hidden INTEGER NOT NULL DEFAULT 0,
+    parts TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE collection_items (
+    collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    PRIMARY KEY (collection_id, item_id)
+  );
+  CREATE INDEX collection_items_item ON collection_items(item_id);
+  CREATE TABLE lists (
+    id INTEGER PRIMARY KEY,
+    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('watchlist', 'video', 'music')),
+    name TEXT NOT NULL,
+    shared INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE UNIQUE INDEX lists_watchlist ON lists(profile_id) WHERE kind = 'watchlist';
+  CREATE TABLE list_items (
+    list_id INTEGER NOT NULL REFERENCES lists(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    added_at INTEGER NOT NULL,
+    PRIMARY KEY (list_id, item_id)
+  );
+  CREATE INDEX list_items_item ON list_items(item_id);
+  `,
+  // 10: extras (trailers, featurettes… under a film or show), the TMDB/YouTube trailer, and lyrics. media_jobs is
+  //     rebuilt so it can also record the 'thumb' job (a still frame for each extra).
+  `
+  CREATE TABLE media_jobs_new (
+    item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    job TEXT NOT NULL CHECK (job IN ('previews', 'intros', 'thumb')),
+    status TEXT NOT NULL CHECK (status IN ('done', 'none', 'failed')),
+    data TEXT,
+    error TEXT,
+    source_size INTEGER,
+    source_mtime INTEGER,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (item_id, job)
+  );
+  INSERT INTO media_jobs_new SELECT item_id, job, status, data, error, source_size, source_mtime, updated_at FROM media_jobs;
+  DROP TABLE media_jobs;
+  ALTER TABLE media_jobs_new RENAME TO media_jobs;
+  ALTER TABLE items ADD COLUMN extra_kind TEXT;
+  ALTER TABLE items ADD COLUMN trailer TEXT;
+  CREATE INDEX items_extras ON items(parent_id, extra_kind) WHERE extra_kind IS NOT NULL;
+  CREATE TABLE lyrics (
+    item_id INTEGER PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+    source TEXT NOT NULL CHECK (source IN ('file', 'tags', 'lrclib', 'none')),
+    synced INTEGER NOT NULL DEFAULT 0,
+    text TEXT,
+    file_mtime INTEGER,
+    fetched_at INTEGER NOT NULL
+  );
+  `,
+  // 11: connected servers (Jellyfin, Emby, another Atomix): their libraries are synced in as ordinary libraries whose
+  //     items carry the server's id and a `remote:` path.
+  `
+  CREATE TABLE servers (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('jellyfin', 'emby', 'atomix')),
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    username TEXT,
+    secret TEXT,
+    remote_user_id TEXT,
+    status TEXT NOT NULL DEFAULT 'ok',
+    status_detail TEXT,
+    last_sync INTEGER,
+    created_at INTEGER NOT NULL
+  );
+  ALTER TABLE libraries ADD COLUMN server_id INTEGER REFERENCES servers(id) ON DELETE CASCADE;
+  ALTER TABLE libraries ADD COLUMN remote_id TEXT;
+  ALTER TABLE items ADD COLUMN remote_id TEXT;
+  CREATE INDEX items_remote ON items(library_id, remote_id);
+  `,
+  // 12: Plex as a connected server (servers is rebuilt so its kind CHECK allows 'plex'), servers.extra for
+  //     provider state no route returns, and items.remote_updated (the server's own "last changed" time).
+  `
+  CREATE TABLE servers_new (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('jellyfin', 'emby', 'atomix', 'plex')),
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    username TEXT,
+    secret TEXT,
+    remote_user_id TEXT,
+    status TEXT NOT NULL DEFAULT 'ok',
+    status_detail TEXT,
+    last_sync INTEGER,
+    created_at INTEGER NOT NULL,
+    extra TEXT
+  );
+  INSERT INTO servers_new (id, kind, name, url, username, secret, remote_user_id, status, status_detail, last_sync, created_at)
+    SELECT id, kind, name, url, username, secret, remote_user_id, status, status_detail, last_sync, created_at FROM servers;
+  DROP TABLE servers;
+  ALTER TABLE servers_new RENAME TO servers;
+  ALTER TABLE items ADD COLUMN remote_updated INTEGER;
+  `,
+  // 13: casting — the devices an admin added by address (found ones live in memory).
+  `
+  CREATE TABLE cast_devices (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('chromecast', 'dlna')),
+    name TEXT NOT NULL,
+    address TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 /**
@@ -250,16 +391,7 @@ const MIGRATIONS = [
  * @param {{upTo?: number}} [opts] upTo: stop after this migration (used by tests)
  */
 export function openDatabase(file, { upTo = MIGRATIONS.length } = {}) {
-  // node:sqlite still prints an ExperimentalWarning on Node 22/24. Hide just that one.
-  const original = process.emitWarning;
-  process.emitWarning = function (warning, ...rest) {
-    const text = typeof warning === 'string' ? warning : warning?.message;
-    if (text && /SQLite/i.test(text)) return;
-    return original.call(process, warning, ...rest);
-  };
-  const { DatabaseSync } = require('node:sqlite');
-  process.emitWarning = original;
-
+  const DatabaseSync = sqlite();
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
 
@@ -311,6 +443,35 @@ export function openDatabase(file, { upTo = MIGRATIONS.length } = {}) {
     },
     close: () => db.close(),
   };
+}
+
+/** node:sqlite's DatabaseSync. It still prints an ExperimentalWarning on Node 22/24; this hides just that one. */
+function sqlite() {
+  const original = process.emitWarning;
+  process.emitWarning = function (warning, ...rest) {
+    const text = typeof warning === 'string' ? warning : warning?.message;
+    if (text && /SQLite/i.test(text)) return;
+    return original.call(process, warning, ...rest);
+  };
+  try {
+    return require('node:sqlite').DatabaseSync;
+  } finally {
+    process.emitWarning = original;
+  }
+}
+
+/**
+ * Opens and closes a database file without changing it. When nothing else has it open,
+ * closing folds its write-ahead log into the main file and removes the -wal file.
+ */
+export function settleDatabase(file) {
+  const DatabaseSync = sqlite();
+  const db = new DatabaseSync(file);
+  try {
+    db.prepare('SELECT count(*) FROM sqlite_master').get();
+  } finally {
+    db.close();
+  }
 }
 
 export function parseJson(text, fallback) {

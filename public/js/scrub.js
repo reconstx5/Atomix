@@ -24,6 +24,7 @@ export class Scrubber {
     this.dir = 0;
     this.heldSince = 0;
     this.lastPress = -Infinity;
+    this.lastStep = 0; // seconds the last press moved by (10, 30 or 60), so the player can show it
   }
 
   /** An arrow press: `dir` is −1 or +1, `from` the playing position when a scrub begins. */
@@ -37,6 +38,7 @@ export class Scrubber {
     this.dir = dir;
     this.lastPress = now;
     const step = STEPS.find(([ms]) => now - this.heldSince >= ms)[1];
+    this.lastStep = step;
     const total = this.duration();
     const max = total > 0 ? Math.max(0, total - 1) : Infinity;
     this.target = Math.max(0, Math.min(max, this.target + dir * step));

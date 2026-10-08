@@ -3,7 +3,7 @@
   "name": "OpenSubtitles",
   "version": "1.0.0",
   "description": "Finds and downloads missing subtitles from OpenSubtitles.com — from the player's subtitle menu, or automatically for new titles.",
-  "author": "NodeFlix",
+  "author": "Atomix",
   "homepage": "https://www.opensubtitles.com",
   "main": "index.js",
   "enabledByDefault": false,

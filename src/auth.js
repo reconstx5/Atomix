@@ -6,7 +6,9 @@ import { parseJson } from './db.js';
 
 const scrypt = promisify(crypto.scrypt);
 const SCRYPT = { N: 16384, r: 8, p: 1, keylen: 64 };
-export const SESSION_COOKIE = 'nf_session';
+export const SESSION_COOKIE = 'atomix_session';
+// The cookie's name from before the rename (NodeFlix), still accepted so nobody is signed out.
+export const OLD_SESSION_COOKIE = 'nf_session';
 
 export async function hashPassword(password) {
   const salt = crypto.randomBytes(16);
@@ -130,7 +132,8 @@ export class Auth {
   tokenFrom(req) {
     const header = req.headers.authorization;
     if (header && header.startsWith('Bearer ')) return header.slice(7).trim();
-    return parseCookies(req.headers.cookie)[SESSION_COOKIE] || null;
+    const cookies = parseCookies(req.headers.cookie);
+    return cookies[SESSION_COOKIE] || cookies[OLD_SESSION_COOKIE] || null;
   }
 
   /** Returns the signed-in user row for a request, or null. */
@@ -169,7 +172,7 @@ export class Auth {
   logout(ctx) {
     const token = this.tokenFrom(ctx.req);
     if (token) this.db.run('DELETE FROM sessions WHERE token_hash = ?', sha256(token));
-    ctx.setCookie(serializeCookie(SESSION_COOKIE, '', { maxAge: 0, secure: this.isSecure(ctx.req) }));
+    for (const name of [SESSION_COOKIE, OLD_SESSION_COOKIE]) ctx.setCookie(serializeCookie(name, '', { maxAge: 0, secure: this.isSecure(ctx.req) }));
   }
 
   revokeUserSessions(userId, exceptToken) {

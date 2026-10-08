@@ -1,11 +1,15 @@
 // Library browsing, item details, artwork, progress and scanning endpoints.
 import fs from 'node:fs';
+import { recordProgress } from '../library/progress.js';
 import path from 'node:path';
 import { HttpError } from '../http/router.js';
 import { sendFile, mimeFor } from '../http/static.js';
 import { serializeItem, serializeLibrary } from './serialize.js';
 import { listSubtitles, getSubtitleVtt, saveDownloaded, deleteDownloaded } from '../stream/subtitles.js';
 import { parseJson } from '../db.js';
+import { isRemotePath, resolveSource } from '../remote/index.js';
+import { fetchFollowing } from '../remote/provider.js';
+import { Readable } from 'node:stream';
 import { logger } from '../log.js';
 
 const log = logger('api');
@@ -41,11 +45,20 @@ async function withTimeout(promise, ms, fallback) {
 /** Library options an admin can set. Only known keys are kept, as booleans. */
 function cleanOptions(input, current = {}) {
   const previews = input && typeof input === 'object' && 'previews' in input ? Boolean(input.previews) : current.previews;
-  return { previews: previews ?? true };
+  return { previews: previews ?? true, ...(current.remoteGone ? { remoteGone: true } : {}) }; // the sync's flag is not the admin's to set
 }
 
 export function registerLibraryRoutes(r, core) {
-  const { db, library, scanner, metadata, config, images, plugins } = core;
+  const { db, library, scanner, metadata, config, images, plugins, settings } = core;
+
+  /** What the Trailer button plays: a local trailer the viewer may see, else the YouTube one (not for kids, and only with the switch on). */
+  function trailerFor(row, ctx) {
+    const local = db.get("SELECT id, kind, min_age, library_id, show_id FROM items WHERE kind = 'extra' AND extra_kind = 'trailer' AND parent_id = ? ORDER BY sort_title COLLATE NOCASE LIMIT 1", row.id);
+    if (local && library.canSee(ctx.viewer, local)) return { kind: 'local', itemId: local.id };
+    const t = parseJson(row.trailer, null);
+    if (t?.site === 'youtube' && settings.get('onlineTrailers') && !ctx.profile?.kids) return { kind: 'youtube', key: t.key, name: t.name || 'Trailer' };
+    return null;
+  }
 
   const counts = () =>
     Object.fromEntries(
@@ -177,6 +190,11 @@ export function registerLibraryRoutes(r, core) {
       return true;
     });
     if (cont.length) rows.push({ id: 'continue', title: 'Continue watching', style: 'landscape', items: library.withProgress(cont, viewer) });
+    // The Watchlist (newest first) and the profile's playlists, when they have anything in them.
+    const wlRows = core.lists.rows(core.lists.watchlist(viewer.profileId).id).filter((i) => library.canSee(viewer, i)).sort((a, b) => b.list_added_at - a.list_added_at);
+    if (wlRows.length) rows.push({ id: 'watchlist', title: 'My Watchlist', style: 'poster', items: library.withProgress(wlRows, viewer) });
+    const myLists = core.lists.forProfile(ctx.profile, viewer).filter((l) => l.kind !== 'watchlist' && l.count > 0);
+    if (myLists.length) rows.push({ id: 'lists', title: 'Playlists', style: 'list', items: myLists });
 
     const libs = library.visibleLibraries(viewer);
     for (const lib of libs) {
@@ -191,6 +209,8 @@ export function registerLibraryRoutes(r, core) {
         if (albums.length) rows.push({ id: `recent-${lib.id}`, title: `New albums in ${lib.name}`, style: 'square', libraryId: lib.id, items: library.withProgress(albums, viewer) });
       }
     }
+
+    for (const p of core.picks.becauseYouWatched(viewer)) rows.push({ id: `picks-${p.seed.id}`, title: `Because you watched ${p.seed.title}`, style: 'poster', seed: p.seed, items: p.items });
 
     for (const row of plugins.homeRows) {
       try {
@@ -217,7 +237,10 @@ export function registerLibraryRoutes(r, core) {
       Date.now() - 14 * 86400 * 1000,
     ) || db.get(`SELECT * FROM items i WHERE i.kind IN ('movie','show') AND ${vis.sql} ORDER BY RANDOM() LIMIT 1`, ...vis.params);
     const hero = heroRow ? serializeItem(heroRow, { full: false, progress: library.progressFor(viewer.profileId, [heroRow.id]).get(heroRow.id) || null }) : null;
-    if (hero) hero.tagline = heroRow.tagline;
+    if (hero) {
+      hero.tagline = heroRow.tagline;
+      hero.trailer = trailerFor(heroRow, ctx);
+    }
     return { hero, rows, libraries: libs.map((l) => serializeLibrary(l)) };
   });
 
@@ -252,6 +275,7 @@ export function registerLibraryRoutes(r, core) {
     const row = requireItem(core, ctx.params.id, viewer);
     const progress = library.progressFor(viewer.profileId, [row.id]).get(row.id) || null;
     const item = serializeItem(row, { full: true, progress });
+    if (item.remote) item.serverName = db.get('SELECT s.name FROM libraries l JOIN servers s ON s.id = l.server_id WHERE l.id = ?', row.library_id)?.name || null;
     const out = { item };
     if (row.show_id) {
       const show = library.get(row.show_id);
@@ -305,7 +329,30 @@ export function registerLibraryRoutes(r, core) {
         if (season) out.season = serializeItem(season);
       }
     }
+    if (row.kind === 'movie' || row.kind === 'show') {
+      out.collection = core.collections.forItem(row.id, viewer);
+      // "Part of": the film you're on is marked, so its card isn't a link to this page.
+      if (out.collection) out.collection.items = out.collection.items.map((i) => ({ ...i, isCurrent: i.id === row.id }));
+      const c = core.lists.contains(viewer.profileId, row.id);
+      out.inWatchlist = c.watchlist;
+      out.inLists = c.lists;
+      out.similar = core.picks.similar(row.id, viewer);
+      out.extras = library.withProgress(library.extrasOf(row.id, viewer), viewer);
+      out.trailer = trailerFor(row, ctx);
+    }
+    if (row.kind === 'extra') {
+      const parent = library.get(row.parent_id);
+      out.parent = parent ? { id: parent.id, title: parent.title, kind: parent.kind } : null;
+    }
     return out;
+  });
+
+  // Lyrics are found when first asked for (a .lrc beside the song, its tags, then LRCLIB); 204 when there are none.
+  r.get('/api/items/:id/lyrics', async (ctx) => {
+    const row = requireItem(core, ctx.params.id, ctx.viewer);
+    if (row.kind !== 'track') throw new HttpError(404, 'Only songs have lyrics');
+    const r = await core.lyrics.get(row);
+    return r || undefined;
   });
 
   r.get('/api/items/:id/children', (ctx) => {
@@ -322,21 +369,78 @@ export function registerLibraryRoutes(r, core) {
     let ref = row[type];
     // Tracks use their album's cover.
     if (!ref && row.kind === 'track' && row.parent_id) ref = library.get(row.parent_id)?.[type];
+    // A connected server's artwork is fetched with that server's sign-in and cached here, never redirected to.
+    if (isRemotePath(row.path) && /^https?:\/\//i.test(ref || '')) {
+      const src = await resolveSource({ db, providers: core.remote.providers }, row);
+      // The sign-in only goes to the server's own host: an image a Plex agent left on a CDN gets no token.
+      const cached = src.provider ? await images.download(ref, src.provider.imageHeaders(src.server, ref)).catch(() => null) : null;
+      if (!cached) throw new HttpError(404, 'No image');
+      const ok = await sendFile(ctx.req, ctx.res, images.resolve(cached).file, { cacheControl: 'private, max-age=604800' });
+      if (!ok) throw new HttpError(404, 'Image missing');
+      return;
+    }
     const resolved = images.resolve(ref);
     if (!resolved) throw new HttpError(404, 'No image');
     if (resolved.url) return ctx.redirect(resolved.url);
     const ok = await sendFile(ctx.req, ctx.res, resolved.file, { cacheControl: 'private, max-age=604800' });
     if (!ok) throw new HttpError(404, 'Image missing');
-  });
+  }, { cast: 'image' });
 
   // Direct play: the original file, with range requests.
+  /** The bytes of a connected server's title, passed through with Range so seeking works; the TV never sees the server. */
+  async function proxyRemote(ctx, row) {
+    const src = await resolveSource({ db, providers: core.remote.providers }, row);
+    if (!src.file) throw new HttpError(404, src.server ? `${src.server.name} has no playable file for this title.` : 'The server this title came from is no longer connected.');
+    const ac = new AbortController();
+    ctx.req.on('close', () => ac.abort());
+    // Bytes as they are on the server (no gzip: the Range offsets must mean the file's own bytes).
+    const headers = { ...src.headers, 'accept-encoding': 'identity' };
+    for (const h of ['range', 'if-range']) if (ctx.req.headers[h]) headers[h] = ctx.req.headers[h];
+    let up;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      ac.abort();
+    }, core.remote.proxyHeaderTimeoutMs ?? 15000);
+    try {
+      up = await fetchFollowing(src.file, { method: ctx.req.method === 'HEAD' ? 'HEAD' : 'GET', headers, signal: ac.signal, sameOriginOnly: true });
+    } catch (err) {
+      if (timedOut) throw new HttpError(504, `${src.server.name} didn't answer in time`);
+      if (ac.signal.aborted) return;
+      if (err.code === 'ECROSSORIGIN') throw new HttpError(502, `${src.server.name} sent this title to another address; Atomix only plays from the server itself.`);
+      throw new HttpError(502, `Can't reach ${src.server.name}: ${err.cause?.code || err.message}`);
+    } finally {
+      clearTimeout(timer);
+    }
+    if (up.status === 416) {
+      await up.body?.cancel().catch(() => {});
+      ctx.res.writeHead(416, { 'content-range': up.headers.get('content-range') || '', 'Cache-Control': 'private, no-cache' });
+      return void ctx.res.end();
+    }
+    if (up.status === 401) {
+      db.run("UPDATE servers SET status = 'unauthorized', status_detail = 'The sign-in was refused while playing' WHERE id = ?", src.server.id);
+      throw new HttpError(502, `Can't reach ${src.server.name}: sign in again in Settings.`);
+    }
+    if (up.status === 403) throw new HttpError(502, `${src.server.name} refused to play this title (403).`);
+    if (!up.ok && up.status !== 206) throw new HttpError(502, `Can't reach ${src.server.name}: it answered ${up.status}.`);
+    const out = { 'Cache-Control': 'private, no-cache' };
+    for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges']) if (up.headers.get(h)) out[h] = up.headers.get(h);
+    ctx.res.writeHead(up.status, out);
+    if (ctx.req.method === 'HEAD' || !up.body) return void ctx.res.end();
+    const body = Readable.fromWeb(up.body);
+    body.on('error', () => ctx.res.destroy());
+    body.pipe(ctx.res);
+    await new Promise((resolve) => { ctx.res.on('close', resolve); ctx.res.on('finish', resolve); });
+  }
+
   r.get('/api/items/:id/file', async (ctx) => {
     const row = requireItem(core, ctx.params.id, ctx.viewer);
-    if (!row.path || !['movie', 'episode', 'track'].includes(row.kind)) throw new HttpError(400, 'Not a playable item');
+    if (!row.path || !['movie', 'episode', 'track', 'extra'].includes(row.kind)) throw new HttpError(400, 'Not a playable item');
+    if (isRemotePath(row.path)) return proxyRemote(ctx, row);
     const type = mimeFor(row.path);
     const ok = await sendFile(ctx.req, ctx.res, row.path, { cacheControl: 'private, no-cache', contentType: type });
     if (!ok) throw new HttpError(404, 'The file is missing on the server — try rescanning the library.');
-  });
+  }, { cast: 'file' });
 
   // Saving a copy of the file is for grown-up profiles only (Kids profiles can still watch).
   r.get(
@@ -344,6 +448,7 @@ export function registerLibraryRoutes(r, core) {
     async (ctx) => {
       const row = requireItem(core, ctx.params.id, ctx.viewer);
       if (!row.path || !['movie', 'episode', 'track'].includes(row.kind)) throw new HttpError(400, 'Not a playable item');
+      if (isRemotePath(row.path)) throw new HttpError(400, 'Downloads come from the server that holds the file.');
       ctx.res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(path.basename(row.path))}`);
       const ok = await sendFile(ctx.req, ctx.res, row.path, { cacheControl: 'private, no-cache', contentType: 'application/octet-stream' });
       if (!ok) throw new HttpError(404, 'File missing');
@@ -396,6 +501,7 @@ export function registerLibraryRoutes(r, core) {
     const got = await provider.download(row, String(body.id || ''), { viewer: ctx.viewer, show: row.show_id ? library.get(row.show_id) : null });
     if (!got?.content) throw new HttpError(502, 'The provider sent back an empty subtitle.');
     const subtitle = saveDownloaded(config, row, { ...got, provider: provider.key });
+    core.cast?.manager?.subtitlesChanged(row.id); // a live cast of this title can pick it
     return { subtitle, subtitles: listSubtitles(row, config) };
   });
 
@@ -405,6 +511,7 @@ export function registerLibraryRoutes(r, core) {
       const row = requireItem(core, ctx.params.id, ctx.viewer);
       if (!/^d\d+$/.test(ctx.params.sub)) throw new HttpError(400, 'Only downloaded subtitles can be removed.');
       if (!deleteDownloaded(config, row, ctx.params.sub)) throw new HttpError(404, 'Subtitle not found');
+      core.cast?.manager?.subtitlesChanged(row.id);
       return { ok: true, subtitles: listSubtitles(row, config) };
     },
     { auth: 'admin' },
@@ -414,11 +521,11 @@ export function registerLibraryRoutes(r, core) {
     const row = requireItem(core, ctx.params.id, ctx.viewer);
     const subId = ctx.params.sub.replace(/\.vtt$/, '');
     if (!/^[sed]\d+$/.test(subId)) throw new HttpError(400, 'Bad subtitle id');
-    const vtt = await getSubtitleVtt(row, subId, config);
+    const vtt = await getSubtitleVtt(row, subId, config, isRemotePath(row.path) ? await resolveSource({ db, providers: core.remote.providers }, row) : null);
     if (vtt == null) throw new HttpError(404, 'Subtitle not found');
     ctx.res.writeHead(200, { 'Content-Type': 'text/vtt; charset=utf-8', 'Cache-Control': 'private, max-age=3600' });
     ctx.res.end(vtt);
-  });
+  }, { cast: 'subtitle' });
 
   r.post('/api/items/:id/watched', async (ctx) => {
     const row = requireItem(core, ctx.params.id, ctx.viewer);
@@ -431,9 +538,7 @@ export function registerLibraryRoutes(r, core) {
     const row = requireItem(core, ctx.params.id, ctx.viewer);
     const body = await ctx.body();
     if (body.sessionId) core.playback.heartbeat(body.sessionId, ctx.user, body);
-    const result = library.saveProgress(ctx.viewer.profileId, row, body.position, body.duration);
-    await core.hooks.emit('playback:progress', { user: ctx.user, viewer: ctx.viewer, item: row, position: Number(body.position), watched: result.watched });
-    return result;
+    return recordProgress(core, { user: ctx.user, viewer: ctx.viewer, item: row, position: body.position, duration: body.duration, sessionId: body.sessionId ? String(body.sessionId) : null });
   });
 
   // ---- Metadata fixes (admin) ----
@@ -441,9 +546,10 @@ export function registerLibraryRoutes(r, core) {
     '/api/items/:id/refresh',
     async (ctx) => {
       const row = requireItem(core, ctx.params.id, ctx.viewer);
+      if (isRemotePath(row.path)) throw new HttpError(400, 'This title comes from a connected server; its details live there.');
       let updated = await metadata.refresh(row, { force: true });
       if (row.kind === 'show' || row.kind === 'season') {
-        const kids = db.all(`SELECT * FROM items WHERE ${row.kind === 'show' ? 'show_id' : 'parent_id'} = ? ORDER BY season, episode`, row.id);
+        const kids = db.all(`SELECT * FROM items WHERE ${row.kind === 'show' ? 'show_id' : 'parent_id'} = ? AND kind IN ('season', 'episode') ORDER BY season, episode`, row.id);
         for (const k of kids) await metadata.refresh(k, { force: true });
         updated = library.get(row.id);
       }
@@ -456,6 +562,7 @@ export function registerLibraryRoutes(r, core) {
     '/api/items/:id/identify',
     async (ctx) => {
       const row = requireItem(core, ctx.params.id, ctx.viewer);
+      if (isRemotePath(row.path)) throw new HttpError(400, 'This title comes from a connected server; its details live there.');
       if (!['movie', 'show'].includes(row.kind)) throw new HttpError(400, 'Only movies and shows can be identified.');
       if (!metadata.tmdb.enabled()) throw new HttpError(400, 'Add a TMDB API key in Settings → Server → Metadata first.');
       const query = String(ctx.query.query || row.title);
@@ -469,12 +576,13 @@ export function registerLibraryRoutes(r, core) {
     '/api/items/:id/identify',
     async (ctx) => {
       const row = requireItem(core, ctx.params.id, ctx.viewer);
+      if (isRemotePath(row.path)) throw new HttpError(400, 'This title comes from a connected server; its details live there.');
       const body = await ctx.body();
       const tmdbId = Number(body.tmdbId);
       if (!tmdbId) throw new HttpError(400, 'Pick a match');
       let updated = await metadata.refresh(row, { force: true, tmdbId, clear: true });
       if (row.kind === 'show') {
-        const kids = db.all(`SELECT * FROM items WHERE show_id = ? ORDER BY season, episode`, row.id);
+        const kids = db.all(`SELECT * FROM items WHERE show_id = ? AND kind IN ('season', 'episode') ORDER BY season, episode`, row.id);
         for (const k of kids) await metadata.refresh(k, { force: true, clear: true });
         updated = library.get(row.id);
       }

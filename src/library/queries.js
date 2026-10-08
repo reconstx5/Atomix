@@ -4,6 +4,7 @@
 //   { userId, profileId, kids, maxAge, allowUnrated, libraryIds }
 // so library access and Kids-profile age limits are applied in one place.
 import { serializeItem } from '../api/serialize.js';
+import { EXTRA_CAPTIONS } from './parser.js';
 
 const SORTS = {
   title: 'i.sort_title COLLATE NOCASE ASC, i.year ASC',
@@ -45,6 +46,13 @@ export class Library {
     return { sql: parts.length ? parts.join(' AND ') : '1', params };
   }
 
+  /** A film's or show's extras the viewer may see, in kind order then title. */
+  extrasOf(ownerId, viewer) {
+    const vis = this.visibility(viewer);
+    const order = Object.keys(EXTRA_CAPTIONS).map((k, i) => `WHEN '${k}' THEN ${i}`).join(' ');
+    return this.db.all(`SELECT i.* FROM items i WHERE i.kind = 'extra' AND i.parent_id = ? AND ${vis.sql} ORDER BY CASE i.extra_kind ${order} ELSE 99 END, i.sort_title COLLATE NOCASE`, ownerId, ...vis.params);
+  }
+
   /** Same rules as visibility(), for a single row already loaded. */
   canSee(viewer, row) {
     if (!row) return false;
@@ -59,7 +67,7 @@ export class Library {
   }
 
   visibleLibraries(viewer) {
-    const libs = this.db.all('SELECT * FROM libraries ORDER BY name');
+    const libs = this.db.all('SELECT l.*, s.name AS server_name FROM libraries l LEFT JOIN servers s ON s.id = l.server_id ORDER BY l.name');
     return viewer?.libraryIds ? libs.filter((l) => viewer.libraryIds.includes(l.id)) : libs;
   }
 
@@ -201,7 +209,7 @@ export class Library {
     for (const { show_id } of shows) {
       const last = this.db.get(
         `SELECT i.season, i.episode FROM progress p JOIN items i ON i.id = p.item_id
-         WHERE p.profile_id = ? AND i.show_id = ? AND p.watched = 1 ORDER BY p.updated_at DESC LIMIT 1`,
+         WHERE p.profile_id = ? AND i.show_id = ? AND i.kind = 'episode' AND p.watched = 1 ORDER BY p.updated_at DESC LIMIT 1`,
         viewer.profileId,
         show_id,
       );

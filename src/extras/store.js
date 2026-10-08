@@ -6,11 +6,16 @@ import { parseJson } from '../db.js';
 const RANK = { audio: 1, chapter: 2, manual: 3 };
 // A job is needed when it never ran for this file, or the file changed since.
 const STALE = '(j.item_id IS NULL OR j.source_size IS NOT i.size OR j.source_mtime IS NOT i.mtime)';
-const PREVIEWABLE = `i.kind IN ('movie', 'episode') AND i.path IS NOT NULL AND i.duration > 0
+const PREVIEWABLE = `i.kind IN ('movie', 'episode') AND i.path IS NOT NULL AND i.path NOT LIKE 'remote:%' AND i.duration > 0
   AND json_extract(i.media, '$.video') IS NOT NULL
   AND COALESCE(json_extract(l.options, '$.previews'), 1) != 0`;
-const CHECKABLE = "i.kind = 'episode' AND i.path IS NOT NULL AND i.duration > 0";
+const CHECKABLE = "i.kind = 'episode' AND i.path IS NOT NULL AND i.path NOT LIKE 'remote:%' AND i.duration > 0";
+// Extras with no picture yet, in libraries that make previews (the same switch).
+const THUMBABLE = `i.kind = 'extra' AND i.path IS NOT NULL AND i.path NOT LIKE 'remote:%' AND i.duration > 0 AND i.poster IS NULL
+  AND COALESCE(json_extract(l.options, '$.previews'), 1) != 0`;
 const ONLY = 'AND i.id IN (SELECT value FROM json_each(?))';
+const LYRICS_PENDING = `i.kind = 'track' AND i.path IS NOT NULL AND i.path NOT LIKE 'remote:%' AND i.media IS NOT NULL
+  AND json_extract(i.media, '$.tags.lyrics') IS NULL AND json_extract(i.media, '$.tags.lyricsChecked') IS NULL`;
 
 const pad = (n) => String(n ?? 0).padStart(2, '0');
 function label({ kind, title, season, episode }, showTitle) {
@@ -66,6 +71,29 @@ export class ExtrasStore {
          LEFT JOIN media_jobs j ON j.item_id = i.id AND j.job = 'previews'
          WHERE ${PREVIEWABLE} AND ${STALE} ${onlyIds ? ONLY : ''}
          ORDER BY i.id LIMIT 1`,
+        ...(onlyIds ? [JSON.stringify(onlyIds)] : []),
+      ) || null
+    );
+  }
+
+  /** Oldest extra still without a picture. */
+  nextThumbItem(onlyIds = null) {
+    return (
+      this.db.get(
+        `SELECT i.* FROM items i JOIN libraries l ON l.id = i.library_id
+         LEFT JOIN media_jobs j ON j.item_id = i.id AND j.job = 'thumb'
+         WHERE ${THUMBABLE} AND ${STALE} ${onlyIds ? ONLY : ''}
+         ORDER BY i.id LIMIT 1`,
+        ...(onlyIds ? [JSON.stringify(onlyIds)] : []),
+      ) || null
+    );
+  }
+
+  /** A song probed before 0.10 (no lyrics key in its tags and never checked since): its tags are read once more. */
+  nextLyricsItem(onlyIds = null) {
+    return (
+      this.db.get(
+        `SELECT i.* FROM items i WHERE ${LYRICS_PENDING} ${onlyIds ? ONLY : ''} ORDER BY i.id LIMIT 1`,
         ...(onlyIds ? [JSON.stringify(onlyIds)] : []),
       ) || null
     );
@@ -143,7 +171,12 @@ export class ExtrasStore {
       `SELECT COUNT(DISTINCT i.parent_id) AS n FROM items i
        LEFT JOIN media_jobs j ON j.item_id = i.id AND j.job = 'intros' WHERE ${CHECKABLE} AND ${STALE}`,
     ).n;
-    return { previews, intros };
+    const thumbs = this.db.get(
+      `SELECT COUNT(*) AS n FROM items i JOIN libraries l ON l.id = i.library_id
+       LEFT JOIN media_jobs j ON j.item_id = i.id AND j.job = 'thumb' WHERE ${THUMBABLE} AND ${STALE}`,
+    ).n;
+    const lyrics = this.db.get(`SELECT COUNT(*) AS n FROM items i WHERE ${LYRICS_PENDING}`).n;
+    return { previews, intros, thumbs, lyrics };
   }
 
   // ---- Previews ----

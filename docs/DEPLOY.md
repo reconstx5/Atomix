@@ -1,4 +1,4 @@
-# Deploying NodeFlix
+# Deploying Atomix
 
 ## 1. On your own PC (simplest)
 
@@ -6,13 +6,13 @@ Follow the Quick start in the README: install Node.js LTS and ffmpeg, then `npm 
 To keep it running in the background on Windows you can create a Task Scheduler task that runs
 `start-windows.bat` "At log on", or use a service wrapper such as NSSM.
 
-To only allow this computer (not your network), set `NODEFLIX_HOST=127.0.0.1`.
+To only allow this computer (not your network), set `ATOMIX_HOST=127.0.0.1`.
 
 ## 2. On your home network (Docker)
 
 ```sh
 cp .env.example .env
-# edit MEDIA_MOVIES / MEDIA_TV / MEDIA_MUSIC to your folders, set NODEFLIX_TRUST_PROXY=false
+# edit MEDIA_MOVIES / MEDIA_TV / MEDIA_MUSIC to your folders, set ATOMIX_TRUST_PROXY=false
 docker compose up -d
 ```
 
@@ -39,25 +39,25 @@ sudo ufw allow 80,443/tcp
 sudo ufw allow 443/udp
 sudo ufw enable
 
-# 3. Get NodeFlix onto the server (git, or scp the folder)
-cd /opt && sudo git clone <your repo> nodeflix && cd nodeflix
+# 3. Get Atomix onto the server (git, or scp the folder)
+cd /opt && sudo git clone <your repo> atomix && cd atomix
 
 # 4. Configure
 sudo cp .env.example .env
-sudo nano .env          # NODEFLIX_DOMAIN, NODEFLIX_TRUST_PROXY=true, MEDIA_MOVIES, MEDIA_TV, MEDIA_MUSIC, TMDB_API_KEY
+sudo nano .env          # ATOMIX_DOMAIN, ATOMIX_TRUST_PROXY=true, MEDIA_MOVIES, MEDIA_TV, MEDIA_MUSIC, TMDB_API_KEY
 
-# 5. Start NodeFlix + Caddy (automatic HTTPS)
+# 5. Start Atomix + Caddy (automatic HTTPS)
 sudo docker compose --profile https up -d
 sudo docker compose logs -f
 ```
 
 Visit `https://media.example.com` and create the admin account. Because the page is public, setup from another
-device asks for a one-time **setup code** — find it with `sudo docker compose logs nodeflix | grep "setup code"`.
+device asks for a one-time **setup code** — find it with `sudo docker compose logs atomix | grep "setup code"`.
 
 Hardening tips:
 
-- Remove the `ports: - "8787:8787"` lines from `docker-compose.yml` so NodeFlix is only reachable through Caddy.
-- Leave `NODEFLIX_TRUST_PROXY=true` only when a proxy is in front — otherwise clients could fake their IP.
+- Remove the `ports: - "8787:8787"` lines from `docker-compose.yml` so Atomix is only reachable through Caddy.
+- Leave `ATOMIX_TRUST_PROXY=true` only when a proxy is in front — otherwise clients could fake their IP.
 - Give each person their own **Viewer** account; keep only yourself as **Admin**.
 - Set **Max simultaneous conversions** and a default quality of 720p in **Settings → Server** to protect a small VPS
   and slow connections.
@@ -75,21 +75,27 @@ Hardening tips:
 ### Using nginx instead of Caddy
 
 See `deploy/nginx.conf.example`. The important parts are `proxy_buffering off`, long timeouts, and passing
-`Host`/`X-Forwarded-*` headers. Set `NODEFLIX_TRUST_PROXY=true`.
+`Host`/`X-Forwarded-*` headers. Set `ATOMIX_TRUST_PROXY=true`.
 
 ## Backups and updates
 
-Everything NodeFlix knows lives in the data folder (`./data` or the `/data` volume):
+Everything Atomix knows lives in the data folder (`./data` or the `/data` volume):
 
-- `nodeflix.db` (+ `-wal`/`-shm`) — users, profiles, libraries, watch history, settings
+- `atomix.db` (+ `-wal`/`-shm`) — users, profiles, libraries, watch history, settings
 - `images/` — downloaded and extracted artwork (re-downloadable)
 - `subtitles/` — subtitles downloaded from the player or by the OpenSubtitles plugin
 - `plugin-data/` — plugin storage
 
-Back up `nodeflix.db` while NodeFlix is stopped, or with `sqlite3 nodeflix.db ".backup backup.db"` while it runs.
+Back up `atomix.db` while Atomix is stopped, or with `sqlite3 atomix.db ".backup backup.db"` while it runs.
 
 To update: replace the code (e.g. `git pull`), then `docker compose build && docker compose --profile https up -d`
 (or just restart `npm start`). Database migrations run automatically.
+
+Updating from NodeFlix (Atomix's old name): the Compose service and containers are now called `atomix` and
+`atomix-caddy`, so add `--remove-orphans` the first time (`docker compose --profile https up -d --remove-orphans`)
+to replace the old `nodeflix` ones. Your `.env` can keep its `NODEFLIX_` names, or rename them to `ATOMIX_`.
+The database file is renamed to `atomix.db` on the first start. Caddy keeps its certificates only if the folder
+(and so the Compose project name) stays the same; otherwise it simply fetches new ones.
 
 ## A word on content
 

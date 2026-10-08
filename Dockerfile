@@ -1,4 +1,4 @@
-# NodeFlix — small image with Node.js LTS + ffmpeg. No npm install needed.
+# Atomix — small image with Node.js LTS + ffmpeg. No npm install needed.
 FROM node:24-alpine
 
 # ffmpeg for probing/transcoding, tini to forward signals, tzdata for logs.
@@ -14,9 +14,9 @@ COPY themes ./themes
 COPY scripts ./scripts
 
 ENV NODE_ENV=production \
-    NODEFLIX_HOST=0.0.0.0 \
-    NODEFLIX_PORT=8787 \
-    NODEFLIX_DATA_DIR=/data
+    ATOMIX_HOST=0.0.0.0 \
+    ATOMIX_PORT=8787 \
+    ATOMIX_DATA_DIR=/data
 
 RUN mkdir -p /data && chown -R node:node /data
 USER node

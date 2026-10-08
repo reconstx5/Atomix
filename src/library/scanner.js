@@ -9,8 +9,9 @@ import { removeAllDownloaded } from '../stream/subtitles.js';
 import { AUDIO_EXTS, parseTrack, normaliseTags } from './music.js';
 import { run } from './probe.js';
 import crypto from 'node:crypto';
+import { isRemotePath } from '../remote/index.js';
 import {
-  VIDEO_EXTS, EXTRAS_DIRS, parseMovie, parseEpisode, parseSeasonFolder, splitTitleYear, sortTitle,
+  VIDEO_EXTS, SKIP_MEDIA_DIRS, EXTRA_DIR_KINDS, extraKindOf, parseMovie, parseEpisode, parseSeasonFolder, splitTitleYear, sortTitle,
 } from './parser.js';
 
 const log = logger('scanner');
@@ -27,7 +28,13 @@ export async function pool(items, size, fn) {
   await Promise.all(workers);
 }
 
-async function walk(root, out = [], seen = new Set(), exts = VIDEO_EXTS) {
+/** Whether any folder between the library root and the file is an extras folder (Featurettes/… or nested below one). */
+function underExtrasDir(root, file) {
+  const rel = path.relative(root, path.dirname(file)).split(path.sep).filter(Boolean);
+  return rel.some((seg) => EXTRA_DIR_KINDS.has(seg.toLowerCase()));
+}
+
+async function walk(root, out = [], seen = new Set(), exts = VIDEO_EXTS, top = root) {
   // Remember real paths so symlinked folders can't send us round in circles.
   try {
     const real = await fs.promises.realpath(root);
@@ -56,8 +63,8 @@ async function walk(root, out = [], seen = new Set(), exts = VIDEO_EXTS) {
     }
     if (isDir) {
       const lower = e.name.toLowerCase();
-      if (SKIP_DIRS.has(lower) || EXTRAS_DIRS.has(lower)) continue;
-      await walk(full, out, seen, exts);
+      if (SKIP_DIRS.has(lower) || SKIP_MEDIA_DIRS.has(lower)) continue;
+      await walk(full, out, seen, exts, top);
     } else if (e.isFile() || e.isSymbolicLink()) {
       const ext = path.extname(e.name).toLowerCase();
       if (!exts.has(ext)) continue;
@@ -67,8 +74,10 @@ async function walk(root, out = [], seen = new Set(), exts = VIDEO_EXTS) {
         // Scene-style sample clips: "movie.2019.1080p-sample.mkv", "sample-movie.mkv"
         const stem = path.parse(e.name).name;
         if ((/(^|[._-])sample$/i.test(stem) || /^sample[._-]/i.test(stem)) && st.size < 300 * 1024 * 1024) continue;
-        if (/-trailer$/i.test(stem)) continue; // Kodi/Plex local trailers
-        out.push({ file: full, size: st.size, mtime: Math.floor(st.mtimeMs) });
+        const extra = exts === VIDEO_EXTS ? extraKindOf(full) : null;
+        // A file under an extras folder that isn't itself an extra (nested deeper) is nothing.
+        if (!extra && exts === VIDEO_EXTS && underExtrasDir(top, full)) continue;
+        out.push({ file: full, size: st.size, mtime: Math.floor(st.mtimeMs), extra });
       } catch {
         /* broken symlink etc. */
       }
@@ -92,17 +101,27 @@ export class Scanner {
 
   schedule() {
     clearInterval(this.timer);
+    clearInterval(this.remoteTimer);
+    this.timer = null;
+    this.remoteTimer = null;
     const minutes = Number(this.settings.get('scanIntervalMinutes')) || 0;
     if (minutes > 0) {
-      this.timer = setInterval(() => this.scanAll().catch((e) => log.error(e)), minutes * 60 * 1000);
+      this.timer = setInterval(() => this.scanAll({ local: true }).catch((e) => log.error(e)), minutes * 60 * 1000);
       this.timer.unref();
+    }
+    const hours = Number(this.settings.get('remoteSyncHours')) || 0;
+    if (hours > 0) {
+      this.remoteTimer = setInterval(() => this.scanAll({ remote: true }).catch((e) => log.error(e)), hours * 3600 * 1000);
+      this.remoteTimer.unref();
     }
   }
 
   /** Queue a scan; concurrent requests are merged. */
+  /** Every library, or only folder ones ({ local: true }) / connected-server ones ({ remote: true }). */
   scanAll(opts = {}) {
-    const libs = this.db.all('SELECT * FROM libraries ORDER BY id');
-    return Promise.all(libs.map((l) => this.enqueue(l.id, opts)));
+    const { local, remote, ...rest } = opts;
+    const libs = this.db.all('SELECT * FROM libraries ORDER BY id').filter((l) => (local ? !l.server_id : remote ? Boolean(l.server_id) : true));
+    return Promise.all(libs.map((l) => this.enqueue(l.id, rest)));
   }
 
   enqueue(libraryId, opts = {}) {
@@ -149,6 +168,26 @@ export class Scanner {
     log.info(`Scanning "${lib.name}" (${roots.length} folder${roots.length === 1 ? '' : 's'})`);
     await this.hooks.emit('scan:start', { library: lib });
 
+    // A connected server's library: the sync reads the server instead of folders.
+    if (lib.server_id) {
+      if (!this.remote) throw new Error('Connected servers are not set up');
+      const scanId = Date.now();
+      const firstScan = !lib.last_scan;
+      const newItems = [];
+      this.setPhase('Reading the server');
+      const r = await this.remote.syncLibrary(lib, { scanId, firstScan, newItems, status: this.status });
+      this.status.added = newItems.length;
+      this.status.removed = r.removed;
+      this.db.run('UPDATE libraries SET last_scan = ? WHERE id = ?', Date.now(), lib.id);
+      for (const id of newItems) {
+        const item = this.db.get('SELECT * FROM items WHERE id = ?', id);
+        if (item) await this.hooks.emit('item:added', { item, library: lib, firstScan });
+      }
+      log.info(`Finished "${lib.name}": ${r.files} titles from the server, ${newItems.length} new, ${r.removed} removed`);
+      await this.hooks.emit('scan:complete', { library: lib, added: newItems.length, removed: r.removed, firstScan });
+      return { files: r.files, added: newItems.length, removed: r.removed };
+    }
+
     this.setPhase('Finding files');
     const reachable = [];
     const files = [];
@@ -166,14 +205,30 @@ export class Scanner {
     const scanId = Date.now();
     const firstScan = !lib.last_scan;
     const newItems = [];
+    const extrasFound = lib.type === 'music' ? [] : files.filter((f) => f.extra);
+    const mainFiles = lib.type === 'music' ? files : files.filter((f) => !f.extra);
     if (lib.type === 'music') {
-      newItems.push(...(await this.scanMusic(lib, files, scanId, firstScan)));
+      newItems.push(...(await this.scanMusic(lib, mainFiles, scanId, firstScan)));
     } else {
-      this.setPhase('Updating library', files.length);
+      this.setPhase('Updating library', mainFiles.length);
       this.db.transaction(() => {
-        for (const f of files) {
+        for (const f of mainFiles) {
           const added = lib.type === 'movies' ? this.upsertMovie(lib, f, scanId, firstScan) : this.upsertEpisode(lib, f, scanId, firstScan);
           if (added) newItems.push(added);
+          this.status.done++;
+        }
+      });
+    }
+    if (extrasFound.length) {
+      this.setPhase('Finding extras', extrasFound.length);
+      this.db.transaction(() => {
+        for (const f of extrasFound) {
+          const owner = this.ownerOf(lib, f, mainFiles);
+          if (!owner) {
+            log.debug(`No owner for extra ${f.file}`);
+            continue;
+          }
+          this.upsertExtra(lib, f, owner, scanId); // never "new content": not counted, not announced
           this.status.done++;
         }
       });
@@ -197,6 +252,59 @@ export class Scanner {
     log.info(`Finished "${lib.name}": ${files.length} files, ${newItems.length} new, ${removed} removed`);
     await this.hooks.emit('scan:complete', { library: lib, added: newItems.length, removed, firstScan });
     return { files: files.length, added: newItems.length, removed };
+  }
+
+  /** The movie or show row an extra belongs to (spec §4.2), or null. */
+  ownerOf(lib, f, mainFiles) {
+    const extraDir = path.dirname(f.file);
+    const isFolderExtra = EXTRA_DIR_KINDS.has(path.basename(extraDir).toLowerCase());
+    if (lib.type === 'movies') {
+      const folder = isFolderExtra ? path.dirname(extraDir) : extraDir;
+      const films = mainFiles.filter((x) => path.dirname(x.file) === folder);
+      let file = null;
+      if (films.length === 1) file = films[0];
+      else if (!isFolderExtra && films.length > 1) {
+        // The film whose name the extra carries: an exact match on the suffix-stripped name, else the longest
+        // film name the extra's name starts with (so "Toy Story 2-trailer" goes to Toy Story 2, not Toy Story).
+        const stem = path.parse(f.file).name.toLowerCase();
+        const stripped = stem.replace(/-[a-z]+$/, '');
+        const named = films.map((x) => ({ x, name: path.parse(x.file).name.toLowerCase() }));
+        file = named.find((n) => n.name === stripped)?.x
+          || named.filter((n) => stem.startsWith(n.name)).sort((a, b) => b.name.length - a.name.length)[0]?.x
+          || null;
+      }
+      return file ? this.db.get("SELECT * FROM items WHERE library_id = ? AND kind = 'movie' AND path = ?", lib.id, file.file) : null;
+    }
+    // TV: the show is the first folder under the root.
+    const rel = path.relative(f.root, f.file).split(path.sep);
+    if (rel.length < 2) return null;
+    const showPath = path.join(f.root, rel[0]);
+    return this.db.get("SELECT * FROM items WHERE library_id = ? AND kind = 'show' AND path = ?", lib.id, showPath) || null;
+  }
+
+  upsertExtra(lib, f, owner, scanId) {
+    const now = Date.now();
+    const showId = owner.kind === 'show' ? owner.id : null;
+    const r = this.upsertItem({
+      library_id: lib.id,
+      kind: 'extra',
+      extra_kind: f.extra.kind,
+      parent_id: owner.id,
+      show_id: showId,
+      path: f.file,
+      title: f.extra.title,
+      sort_title: sortTitle(f.extra.title),
+      size: f.size,
+      mtime: f.mtime,
+      certification: owner.certification,
+      min_age: owner.min_age,
+      added_at: now,
+      updated_at: now,
+      seen_scan: scanId,
+    });
+    // The owner's rating can change between scans; keep extras in step.
+    this.db.run('UPDATE items SET parent_id = ?, show_id = ?, certification = ?, min_age = ? WHERE id = ?', owner.id, showId, owner.certification, owner.min_age, r.id);
+    return r.created ? r.id : null;
   }
 
   upsertItem(fields) {
@@ -373,6 +481,8 @@ export class Scanner {
                  parent_id = ?, show_id = ?, updated_at = ?, seen_scan = ? WHERE id = ?`,
               ...values, old.id,
             );
+            // A re-tagged song may have lyrics now: a stored "none" (or old tag lyrics) is read again on the next open.
+            this.db.run("DELETE FROM lyrics WHERE item_id = ? AND source IN ('none', 'tags')", old.id);
           } else {
             const res = this.db.run(
               `INSERT INTO items (title, sort_title, artist, year, season, episode, duration, media, size, mtime, parent_id, show_id, updated_at, seen_scan,
@@ -413,11 +523,11 @@ export class Scanner {
   }
 
   prune(lib, reachable, scanId, roots = reachable) {
-    const within = (list) => (p) => list.some((r) => p === r || p.startsWith(r.endsWith(path.sep) ? r : r + path.sep));
+    const within = (list) => (p) => list.some((r) => p === r || p.startsWith(r.endsWith(path.sep) || isRemotePath(r) ? r : r + path.sep));
     const underReachable = within(reachable);
     const underAnyRoot = within(roots);
     const stale = this.db
-      .all(`SELECT id, path FROM items WHERE library_id = ? AND kind IN ('movie','episode','track') AND (seen_scan IS NULL OR seen_scan != ?)`, lib.id, scanId)
+      .all(`SELECT id, path FROM items WHERE library_id = ? AND kind IN ('movie','episode','track','extra') AND (seen_scan IS NULL OR seen_scan != ?)`, lib.id, scanId)
       .filter((row) => row.path && (underReachable(row.path) || !underAnyRoot(row.path)));
     if (!stale.length && !reachable.length) return 0;
     for (const row of stale) removeAllDownloaded(this.config, row.id); // subtitles fetched for it
@@ -426,13 +536,16 @@ export class Scanner {
       // Containers left empty: seasons/albums first, then shows/artists.
       this.db.run(`DELETE FROM items WHERE library_id = ? AND kind IN ('season','album') AND NOT EXISTS (SELECT 1 FROM items c WHERE c.parent_id = items.id)`, lib.id);
       this.db.run(`DELETE FROM items WHERE library_id = ? AND kind IN ('show','artist') AND NOT EXISTS (SELECT 1 FROM items c WHERE c.parent_id = items.id)`, lib.id);
+      // A show left with only extras (its episodes went) goes too, extras and all; it comes back with an episode.
+      this.db.run(`DELETE FROM items WHERE library_id = ? AND kind = 'show' AND NOT EXISTS (SELECT 1 FROM items e WHERE e.show_id = items.id AND e.kind = 'episode')`, lib.id);
+      this.db.run(`DELETE FROM items WHERE library_id = ? AND kind IN ('season','extra') AND show_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM items s WHERE s.id = items.show_id)`, lib.id);
     });
     return stale.length;
   }
 
   async probePending(libraryId) {
     if (!this.tools.ffprobe?.available) return;
-    const rows = this.db.all(`SELECT id, path FROM items WHERE library_id = ? AND kind IN ('movie','episode') AND media IS NULL`, libraryId);
+    const rows = this.db.all(`SELECT id, path FROM items WHERE library_id = ? AND kind IN ('movie','episode','extra') AND media IS NULL`, libraryId);
     if (!rows.length) return;
     this.setPhase('Reading media info', rows.length);
     await pool(rows, 3, async (row) => {

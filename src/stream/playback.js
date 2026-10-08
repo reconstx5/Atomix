@@ -16,6 +16,7 @@ import { parseJson } from '../db.js';
 import { HttpError } from '../http/router.js';
 import { sendFile, safeJoin } from '../http/static.js';
 import { IMAGE_SUB_CODECS } from './subtitles.js';
+import { headerArgs, redactArgs } from './ffheaders.js';
 
 const log = logger('playback');
 
@@ -109,6 +110,7 @@ export function buildFfmpegArgs(plan, settings, output) {
   const webm = plan.target === 'webm';
   const hw = plan.mode === 'transcode' && !webm ? settings.hwAccel : 'none';
   if (hw === 'vaapi') args.push('-vaapi_device', settings.vaapiDevice || '/dev/dri/renderD128');
+  if (plan.headers) args.push(...headerArgs(plan.headers));
   if (plan.start > 0) args.push('-ss', plan.start.toFixed(3));
   args.push('-i', plan.file);
 
@@ -125,6 +127,13 @@ export function buildFfmpegArgs(plan, settings, output) {
     const burnCodec = plan.media?.subtitles?.find((s) => s.index === plan.burnSubtitle)?.codec;
     if (plan.burnSubtitle != null && IMAGE_SUB_CODECS.has(burnCodec)) {
       filters.push(`[0:v:0][0:s:${plan.burnSubtitle}]overlay[burned]`);
+      videoLabel = '[burned]';
+    } else if (plan.burnTextFile) {
+      // A text subtitle drawn on for a TV that can't show it (DLNA). With -ss before -i the video starts at 0, so the
+      // timestamps go back to the file's own while the subtitle is drawn. ffmpeg runs in the subtitle's folder, so
+      // the filter gets a bare file name (made by Atomix: hex and a dot) and no path needs filter escaping.
+      const at = (plan.start || 0).toFixed(3);
+      filters.push(`[0:v:0]setpts=PTS+${at}/TB,subtitles=filename=${path.basename(plan.burnTextFile)},setpts=PTS-STARTPTS[burned]`);
       videoLabel = '[burned]';
     }
     const scale = hw === 'vaapi' ? `format=nv12,hwupload,scale_vaapi=w=-2:h=${targetHeight}` : `scale=-2:${targetHeight}`;
@@ -194,6 +203,7 @@ export function buildFfmpegArgs(plan, settings, output) {
 
 function buildAudioArgs(plan, output) {
   const args = ['-hide_banner', '-loglevel', 'error', '-nostdin'];
+  if (plan.headers) args.push(...headerArgs(plan.headers));
   if (plan.start > 0) args.push('-ss', plan.start.toFixed(3));
   args.push('-i', plan.file, '-map', `0:a:${plan.audio?.index ?? 0}`, '-vn', '-sn', '-dn', '-map_metadata', '-1');
   if (plan.target === 'webm') args.push('-c:a', 'libopus', '-b:a', '160k', '-ac', '2');
@@ -228,20 +238,27 @@ export class PlaybackManager {
   }
 
   /** Start (or replace) a playback session. */
-  create({ user, profile, item, caps, start = 0, audioIndex = null, quality = 'original', burnSubtitle = null, forceTranscode = false, replaces, clientIp }) {
+  /**
+   * Start (or replace) a playback session. Casting adds `castDevice` (the TV's name), `extraHeaders` (sent with a
+   * converted stream: DLNA's transferMode/contentFeatures) and `burnTextFile` (a .vtt drawn onto the video).
+   */
+  create({ user, profile, item, source = null, caps, start = 0, audioIndex = null, quality = 'original', burnSubtitle = null, burnTextFile = null, forceTranscode = false, replaces, clientIp, castDevice = null, extraHeaders = null }) {
     if (replaces) {
       const old = this.sessions.get(replaces);
       if (old && old.userId === user.id) this.stop(old.id, 'replaced');
     }
     const settings = this.settings.all();
     const media = parseJson(item.media, null);
+    // A connected server's title: the stream URL stands in for the file; the container is what decide() needs a name for.
+    const file = source?.file || item.path;
+    const decideName = source?.remote ? `remote.${(media?.container || '').split(',')[0].trim() || 'bin'}` : file;
     const plan = decide({
-      file: item.path,
+      file: decideName,
       media,
       caps,
       audioIndex,
       quality,
-      burnSubtitle,
+      burnSubtitle: burnSubtitle ?? (burnTextFile ? -1 : null),
       forceTranscode,
       transcodingEnabled: settings.transcodingEnabled,
     });
@@ -257,7 +274,8 @@ export class PlaybackManager {
       username: profile && profile.name !== (user.display_name || user.username) ? `${profile.name} (${user.username})` : user.display_name || user.username,
       itemId: item.id,
       title: item.title,
-      file: item.path,
+      file,
+      headers: source?.headers || null,
       media,
       mode: plan.mode,
       target: plan.target,
@@ -268,6 +286,9 @@ export class PlaybackManager {
       audioCopy: plan.audioCopy,
       quality,
       burnSubtitle,
+      burnTextFile: burnTextFile || null,
+      castDevice,
+      extraHeaders,
       reasons: plan.reasons,
       createdAt: Date.now(),
       lastSeen: Date.now(),
@@ -302,8 +323,9 @@ export class PlaybackManager {
 
   spawn(session, output) {
     const args = buildFfmpegArgs(session, this.settings.all(), output);
-    log.debug(`ffmpeg ${args.join(' ')}`);
-    const proc = spawn(this.config.ffmpegPath, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    log.debug(`ffmpeg ${redactArgs(args).join(' ')}`);
+    const cwd = session.burnTextFile ? path.dirname(session.burnTextFile) : undefined;
+    const proc = spawn(this.config.ffmpegPath, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], cwd });
     const errors = [];
     proc.stderr.on('data', (c) => {
       errors.push(c);
@@ -323,8 +345,9 @@ export class PlaybackManager {
     const session = this.get(id, ctx.user);
     if (session.delivery !== 'progressive') throw new HttpError(400, 'Wrong delivery type');
     const type = `${session.audioOnly ? 'audio' : 'video'}/${session.target === 'webm' ? 'webm' : 'mp4'}`;
+    const extra = session.extraHeaders || {};
     if (ctx.req.method === 'HEAD') {
-      ctx.res.writeHead(200, { 'Content-Type': type, 'Accept-Ranges': 'none' }).end();
+      ctx.res.writeHead(200, { 'Content-Type': type, 'Accept-Ranges': 'none', ...extra }).end();
       return;
     }
     if (session.proc) {
@@ -334,7 +357,7 @@ export class PlaybackManager {
     this.checkCapacity(session);
     const proc = this.spawn(session, { type: 'progressive' });
     const { res } = ctx;
-    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store', 'Accept-Ranges': 'none' });
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store', 'Accept-Ranges': 'none', ...extra });
     proc.stdout.pipe(res);
     const cleanup = () => {
       if (proc.exitCode == null) proc.kill('SIGKILL');
@@ -367,6 +390,16 @@ export class PlaybackManager {
       if (!session.proc && !fs.existsSync(file)) throw new HttpError(500, 'Transcoder stopped unexpectedly');
       await sleep(250);
     }
+    // Fetched with a cast link (AirPlay: the Apple TV has no cookie): every playlist entry carries the link too,
+    // since relative URLs drop the query string.
+    const token = ctx.castLink && ctx.query?.cast;
+    if (token && name === 'index.m3u8') {
+      const add = (u) => `${u}${u.includes('?') ? '&' : '?'}cast=${encodeURIComponent(token)}`;
+      const text = fs.readFileSync(file, 'utf8').split('\n').map((line) => (line && !line.startsWith('#') ? add(line.trim()) : line.replace(/URI="([^"]+)"/g, (_, u) => `URI="${add(u)}"`))).join('\n');
+      ctx.res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-cache' });
+      ctx.res.end(text);
+      return;
+    }
     await sendFile(ctx.req, ctx.res, file, { cacheControl: 'no-cache' });
   }
 
@@ -383,6 +416,7 @@ export class PlaybackManager {
     if (!s) return;
     if (s.proc) s.proc.kill('SIGKILL');
     if (s.dir) fs.rm(s.dir, { recursive: true, force: true }, () => {});
+    if (s.burnTextFile) fs.rm(s.burnTextFile, { force: true }, () => {});
     this.sessions.delete(id);
     this.hooks.emit('playback:stop', { session: this.publicSession(s), reason });
   }
@@ -410,6 +444,7 @@ export class PlaybackManager {
       reasons: s.reasons,
       startedAt: s.createdAt,
       clientIp: s.clientIp,
+      castDevice: s.castDevice || null,
       transcoding: Boolean(s.proc),
     };
   }

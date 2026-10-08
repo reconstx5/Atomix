@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// NodeFlix — start with `npm start` (or `node server.js`).
+// Atomix — start with `npm start` (or `node server.js`).
 import os from 'node:os';
 
 const [major, minor] = process.versions.node.split('.').map(Number);
 if (major < 22 || (major === 22 && minor < 13)) {
-  console.error(`NodeFlix needs Node.js 22.13 or newer (you have ${process.version}).`);
+  console.error(`Atomix needs Node.js 22.13 or newer (you have ${process.version}).`);
   console.error('Download the current LTS from https://nodejs.org and try again.');
   process.exit(1);
 }
@@ -24,11 +24,11 @@ try {
       }
     }
   }
-  console.log(`\n  NodeFlix ${app.core.version} is running\n\n${lines.join('\n')}\n`);
+  console.log(`\n  Atomix ${app.core.version} is running\n\n${lines.join('\n')}\n`);
   console.log(`  Data folder: ${app.config.dataDir}\n  Press Ctrl+C to stop.\n`);
 } catch (err) {
   if (err.code === 'EADDRINUSE') {
-    console.error(`Port ${err.port} is already in use. Stop the other program or set NODEFLIX_PORT to another port.`);
+    console.error(`Port ${err.port} is already in use. Stop the other program or set ATOMIX_PORT to another port.`);
   } else {
     console.error(err);
   }

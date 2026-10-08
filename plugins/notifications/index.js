@@ -16,7 +16,7 @@ function link(publicUrl, id) {
  * Turn a list of new items into subject / plain text / Discord text.
  * items: [{ id, kind, title, year, season, episode, show: { id, title } }]
  */
-export function buildMessage({ serverName = 'NodeFlix', publicUrl = '', items }) {
+export function buildMessage({ serverName = 'Atomix', publicUrl = '', items }) {
   const movies = items.filter((i) => i.kind === 'movie');
   const shows = new Map();
   for (const e of items.filter((i) => i.kind === 'episode')) {

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { hasFfmpeg, tempDir, makeAudio, makeImage, startNodeFlix, client, waitForScan } from './helpers.js';
+import { hasFfmpeg, tempDir, makeAudio, makeImage, startAtomix, client, waitForScan } from './helpers.js';
 import { normaliseTags, parseTrack } from '../src/library/music.js';
 import { decide, buildFfmpegArgs } from '../src/stream/playback.js';
 
@@ -76,7 +76,7 @@ before(async () => {
   // A format browsers can't play
   makeAudio(path.join(music, 'Old', 'Legacy.wma'), { tags: { title: 'Legacy', artist: 'Old Timer', album: 'Archive' }, codec: 'wmav2' });
 
-  nf = await startNodeFlix();
+  nf = await startAtomix();
   admin = client(nf.base);
   await admin.post('/api/setup', { username: 'admin', password: 'password123' });
   const r = await admin.post('/api/libraries', { name: 'Music', type: 'music', paths: [music] });

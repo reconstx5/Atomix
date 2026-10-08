@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseEpisode, splitTitleYear, parseMovie, parseSeasonFolder, parseSubtitleName, sortTitle } from '../src/library/parser.js';
+import path from 'node:path';
+import { parseEpisode, splitTitleYear, parseMovie, parseSeasonFolder, parseSubtitleName, sortTitle, extraKindOf, EXTRA_CAPTIONS } from '../src/library/parser.js';
 
 test('movie titles and years', () => {
   const cases = [
@@ -66,4 +67,23 @@ test('subtitle sidecar names', () => {
 test('sort titles ignore articles', () => {
   assert.equal(sortTitle('The Matrix'), 'matrix');
   assert.equal(sortTitle('A Quiet Place'), 'quiet place');
+});
+
+test('extraKindOf: Kodi folders and suffixes name the kind; the title loses the suffix', () => {
+  const p = (s) => extraKindOf(s.replace(/\//g, path.sep));
+  assert.deepEqual(p('/m/Film (2019)/Featurettes/Making Of.mkv'), { kind: 'featurette', title: 'Making Of' });
+  assert.deepEqual(p('/m/Film (2019)/Behind The Scenes/on_set.mp4'), { kind: 'behindthescenes', title: 'on set' });
+  assert.deepEqual(p('/m/Film (2019)/Extras/Bloopers.mkv'), { kind: 'other', title: 'Bloopers' });
+  assert.deepEqual(p('/m/Film (2019)/Film (2019)-trailer.mp4'), { kind: 'trailer', title: 'Film (2019)' });
+  assert.deepEqual(p('/m/Film-Deleted.mkv'), { kind: 'deleted', title: 'Film' });
+  assert.deepEqual(p('/m/Film.2019.1080p-behindthescenes.mkv'), { kind: 'behindthescenes', title: 'Film 2019 1080p' });
+  assert.equal(p('/m/Film (2019)/Film (2019).mkv'), null);
+  assert.equal(p('/m/Film (2019)/Samples/x.mkv'), null, 'samples are not extras');
+  assert.equal(p('/m/Film (2019)/Featurettes/Nested/Deep.mkv'), null, 'only files directly in the folder count');
+  assert.equal(EXTRA_CAPTIONS.behindthescenes, 'Behind the scenes');
+  // Only a hyphen marks a suffix (Kodi/Plex): titles that merely end in one of the words are not extras.
+  assert.equal(p('/tv/Show/Season 1/Show - S01E02 - The Interview.mkv'), null);
+  assert.equal(p('/m/The Interview.mkv'), null);
+  assert.equal(p('/m/The.Other.mkv'), null);
+  assert.equal(p('/m/Short Film_short.mkv'), null);
 });

@@ -7,7 +7,7 @@ const cache = new Map();
 async function getJson(api, url, ttlMs = 30 * 60 * 1000) {
   const hit = cache.get(url);
   if (hit && hit.expires > Date.now()) return hit.data;
-  const res = await api.fetch(url, { headers: { Accept: 'application/json', 'User-Agent': 'NodeFlix (self-hosted media hub)' }, signal: AbortSignal.timeout(20000) });
+  const res = await api.fetch(url, { headers: { Accept: 'application/json', 'User-Agent': 'Atomix (self-hosted media hub)' }, signal: AbortSignal.timeout(20000) });
   if (!res.ok) throw new api.HttpError(502, `archive.org answered ${res.status}. Try again in a minute.`);
   const data = await res.json();
   cache.set(url, { data, expires: Date.now() + ttlMs });

@@ -11,8 +11,27 @@ import { certToAge, pickMovieCertification, pickTvCertification } from './rating
 const log = logger('metadata');
 const FIELDS = [
   'title', 'originalTitle', 'year', 'overview', 'tagline', 'genres', 'rating', 'runtime', 'airDate',
-  'poster', 'backdrop', 'logo', 'tmdbId', 'imdbId', 'certification',
+  'poster', 'backdrop', 'logo', 'tmdbId', 'imdbId', 'certification', 'keywords', 'people', 'collection', 'trailer',
 ];
+/** The YouTube trailer to offer: official first, the metadata language, then English, then the newest. */
+export function pickTrailer(videos, language = 'en-US') {
+  const lang = String(language || 'en').slice(0, 2).toLowerCase();
+  const yt = (videos || []).filter((x) => x.site === 'YouTube' && x.key);
+  const trailers = yt.filter((x) => x.type === 'Trailer');
+  const pool = trailers.length ? trailers : yt.filter((x) => x.type === 'Teaser');
+  if (!pool.length) return null;
+  const rank = (x) => (x.official ? 0 : 4) + (x.iso_639_1 === lang ? 0 : x.iso_639_1 === 'en' ? 1 : 2);
+  pool.sort((a, b) => rank(a) - rank(b) || String(b.published_at || '').localeCompare(String(a.published_at || '')));
+  return { site: 'youtube', key: pool[0].key, name: pool[0].name || 'Trailer' };
+}
+/** TMDB keyword names, lower-cased, at most 30. */
+const keywordNames = (list) => [...new Set((list || []).map((k) => String(k.name || '').trim().toLowerCase()).filter(Boolean))].slice(0, 30);
+/** The director(s) or creator(s) first, then the top 8 of the cast. */
+function people(leads, role, cast) {
+  const out = (leads || []).filter(Boolean).map((name) => ({ name, role }));
+  for (const c of [...(cast || [])].sort((a, b) => (a.order ?? 99) - (b.order ?? 99)).slice(0, 8)) if (c.name) out.push({ name: c.name, role: 'cast' });
+  return out;
+}
 // Kodi calls the transparent title artwork "clearlogo"; Plex/Jellyfin use "logo".
 const LOGO_NAMES = ['clearlogo', 'logo'];
 
@@ -144,7 +163,8 @@ export class TmdbProvider {
     return Boolean(this.key);
   }
 
-  async request(pathname, params = {}) {
+  /** @param {{ fresh?: boolean }} opts  fresh: skip the response cache (a refresh someone asked for) */
+  async request(pathname, params = {}, { fresh = false } = {}) {
     const key = this.key;
     if (!key) return null;
     // After a rejected key, pause for a minute instead of failing once per item.
@@ -158,7 +178,7 @@ export class TmdbProvider {
     for (const [k, v] of Object.entries(params)) if (v != null && v !== '') url.searchParams.set(k, v);
 
     const cacheKey = url.toString().replace(/api_key=[^&]+/, '');
-    const hit = this.cache.get(cacheKey);
+    const hit = fresh ? null : this.cache.get(cacheKey);
     if (hit && hit.expires > Date.now()) return hit.data;
 
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -221,6 +241,29 @@ export class TmdbProvider {
     return hit?.id || null;
   }
 
+  /** The film series a movie belongs to, with its parts in release order (one extra request, cached per run). */
+  async collectionOf(ref, { fresh = false } = {}) {
+    if (!ref?.id) return null;
+    this.collectionCache ||= new Map();
+    if (fresh) this.collectionCache.delete(ref.id);
+    if (!this.collectionCache.has(ref.id)) {
+      let c = null;
+      try {
+        c = await this.request(`/collection/${ref.id}`, {}, { fresh });
+      } catch {
+        c = null;
+      }
+      const parts = (c?.parts || [])
+        .filter((p) => p.release_date)
+        .sort((a, b) => a.release_date.localeCompare(b.release_date))
+        .map((p) => ({ tmdbId: p.id, title: p.title, year: Number(p.release_date.slice(0, 4)) }));
+      const series = { tmdbId: ref.id, name: c?.name || ref.name, overview: c?.overview || null, poster: this.img(c?.poster_path || ref.poster_path, 'w500'), backdrop: this.img(c?.backdrop_path || ref.backdrop_path, 'w1280'), parts };
+      if (!c) return series; // a failed call isn't remembered: the next refresh asks again
+      this.collectionCache.set(ref.id, series);
+    }
+    return this.collectionCache.get(ref.id);
+  }
+
   async fetch(item, ctx) {
     if (!this.enabled()) return null;
     if (item.kind === 'movie') {
@@ -231,9 +274,13 @@ export class TmdbProvider {
         id = results[0]?.tmdbId;
       }
       if (!id) return null;
-      const m = await this.request(`/movie/${id}`, { append_to_response: 'release_dates,images', include_image_language: this.imageLanguages() });
+      const m = await this.request(`/movie/${id}`, { append_to_response: 'release_dates,images,keywords,credits,videos', include_image_language: this.imageLanguages() }, { fresh: Boolean(ctx.force) });
       if (!m) return null;
       return {
+        keywords: keywordNames(m.keywords?.keywords),
+        people: people((m.credits?.crew || []).filter((c) => c.job === 'Director').map((c) => c.name), 'director', m.credits?.cast),
+        collection: await this.collectionOf(m.belongs_to_collection, { fresh: Boolean(ctx.force) }),
+        trailer: pickTrailer(m.videos?.results, this.settings.get('metadataLanguage')),
         tmdbId: m.id,
         imdbId: m.imdb_id || null,
         title: m.title,
@@ -259,9 +306,12 @@ export class TmdbProvider {
         id = results[0]?.tmdbId;
       }
       if (!id) return null;
-      const s = await this.request(`/tv/${id}`, { append_to_response: 'external_ids,content_ratings,images', include_image_language: this.imageLanguages() });
+      const s = await this.request(`/tv/${id}`, { append_to_response: 'external_ids,content_ratings,images,keywords,aggregate_credits,videos', include_image_language: this.imageLanguages() }, { fresh: Boolean(ctx.force) });
       if (!s) return null;
       return {
+        keywords: keywordNames(s.keywords?.results),
+        people: people((s.created_by || []).map((c) => c.name), 'creator', s.aggregate_credits?.cast),
+        trailer: pickTrailer(s.videos?.results, this.settings.get('metadataLanguage')),
         tmdbId: s.id,
         imdbId: s.external_ids?.imdb_id || null,
         title: s.name,
@@ -333,6 +383,64 @@ export class MetadataManager {
     return this.providers.map((p) => ({ id: p.id, name: p.name || p.id, priority: p.priority, owner: p.owner || 'core' }));
   }
 
+  setCollections(collections) {
+    this.collections = collections;
+  }
+
+  /** Write what TMDB adds for the picks and collections (keywords, people, the film series) for one title. */
+  async applyEnrichment(item, m) {
+    if (m.keywords !== undefined || m.people !== undefined) {
+      this.db.run('UPDATE items SET keywords = ?, people = ? WHERE id = ?', JSON.stringify(m.keywords || parseJson(item.keywords, [])), JSON.stringify(m.people || parseJson(item.people, [])), item.id);
+    }
+    if (this.collections && item.kind === 'movie') {
+      const fresh = this.db.get('SELECT * FROM items WHERE id = ?', item.id);
+      if (m.collection) {
+        const [poster, backdrop] = await Promise.all([this.images.store(m.collection.poster), this.images.store(m.collection.backdrop)]);
+        this.collections.upsertTmdb({ ...m.collection, poster, backdrop }, fresh);
+      } else if (m.tmdbId) this.collections.detach(item.id); // re-matched, or TMDB no longer lists it in a series
+    }
+  }
+
+  /**
+   * Titles matched before keywords, people and collections existed: fetch just those, one at a time, in the
+   * background. A title TMDB has nothing for is marked (people = [{"role":"none"}]) so it isn't asked again.
+   */
+  async enrichMissing() {
+    if (this.enriching) return { done: 0, busy: true };
+    if (!this.tmdb.enabled()) {
+      if (!this.warnedNoKey) {
+        log.info('No TMDB key: keywords, cast and film series stay empty.');
+        this.warnedNoKey = true;
+      }
+      return { done: 0 };
+    }
+    this.enriching = true;
+    let done = 0;
+    try {
+      const rows = this.db.all("SELECT * FROM items WHERE kind IN ('movie', 'show') AND tmdb_id IS NOT NULL AND ((keywords = '[]' AND people = '[]') OR trailer IS NULL) AND (path IS NULL OR path NOT LIKE 'remote:%') ORDER BY added_at DESC");
+      for (const item of rows) {
+        try {
+          const result = await this.tmdb.fetch(item, { merged: {}, tmdbId: item.tmdb_id, libraryRoots: [], db: this.db });
+          if (!result) continue;
+          const peopleOut = result.people?.length ? result.people : [{ name: '', role: 'none' }];
+          if (parseJson(item.keywords, []).length === 0 && parseJson(item.people, []).length === 0) {
+            await this.applyEnrichment(item, { keywords: result.keywords || [], people: peopleOut, collection: result.collection || null, tmdbId: item.tmdb_id });
+          }
+          // A title TMDB has no trailer for is marked so it isn't asked again.
+          this.db.run('UPDATE items SET trailer = ? WHERE id = ?', JSON.stringify(result.trailer || { site: 'none' }), item.id);
+          done++;
+          await new Promise((r) => setTimeout(r, this.enrichPauseMs ?? 250));
+        } catch (err) {
+          log.warn(`Couldn't fetch keywords for "${item.title}": ${err.message}`);
+        }
+      }
+    } finally {
+      this.enriching = false;
+    }
+    if (done) log.info(`Fetched keywords and cast for ${done} title${done === 1 ? '' : 's'}.`);
+    return { done };
+  }
+
   libraryRoots(libraryId) {
     const lib = this.db.get('SELECT paths FROM libraries WHERE id = ?', libraryId);
     return parseJson(lib?.paths, []);
@@ -373,7 +481,7 @@ export class MetadataManager {
     this.db.run(
       `UPDATE items SET title = ?, original_title = ?, year = ?, overview = ?, tagline = ?, genres = ?, rating = ?,
          runtime = ?, air_date = ?, poster = ?, backdrop = ?, logo = ?, tmdb_id = ?, imdb_id = ?, metadata_at = ?, updated_at = ?,
-         metadata_locked = ?, certification = ?, min_age = ?
+         metadata_locked = ?, certification = ?, min_age = ?, trailer = ?
        WHERE id = ?`,
       m.title || item.title,
       pick(m.originalTitle, item.original_title),
@@ -394,12 +502,16 @@ export class MetadataManager {
       opts.tmdbId ? 1 : item.metadata_locked,
       certification,
       minAge,
+      JSON.stringify(pick(m.trailer, keepOld ? parseJson(item.trailer, null) : null)),
       item.id,
     );
+    await this.applyEnrichment(item, m);
     const updated = this.db.get('SELECT * FROM items WHERE id = ?', item.id);
     if (m.title && item.kind !== 'season') {
       this.db.run('UPDATE items SET sort_title = ? WHERE id = ?', sortTitle(updated.title), item.id);
     }
+    // Extras take their owner's rating (a kids profile sees an extra exactly when it sees the film).
+    this.db.run("UPDATE items SET certification = ?, min_age = ? WHERE kind = 'extra' AND parent_id = ?", updated.certification, updated.min_age, item.id);
     await this.hooks?.emit('metadata:updated', { item: updated });
     return updated;
   }

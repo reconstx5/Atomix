@@ -1,0 +1,8 @@
+{
+  "name": "Orbit",
+  "description": "The default. Your artwork fills the screen behind the page, with a glass menu floating beside it. Made for a TV and a remote.",
+  "author": "Atomix",
+  "layout": "orbit",
+  "colorScheme": "dark",
+  "preview": { "background": "#05050c", "surface": "#1c1c2a", "accent": "#8fe9ff" }
+}

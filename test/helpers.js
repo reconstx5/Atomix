@@ -14,7 +14,7 @@ export const hasFfmpeg = (() => {
   }
 })();
 
-export function tempDir(prefix = 'nodeflix-test-') {
+export function tempDir(prefix = 'atomix-test-') {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
@@ -84,12 +84,12 @@ export async function fakeServer(handler) {
   return { server, url: `http://127.0.0.1:${server.address().port}`, close: () => new Promise((r) => server.close(r)) };
 }
 
-/** Boot NodeFlix with an isolated data folder. */
-export async function startNodeFlix(env = {}, overrides = {}) {
+/** Boot Atomix with an isolated data folder. */
+export async function startAtomix(env = {}, overrides = {}) {
   const dataDir = path.join(tempDir(), 'data');
   // Each test file runs in its own process, so it's fine to leave these set
   // (plugins enabled later in a test read them too).
-  for (const [k, v] of Object.entries({ NODEFLIX_DATA_DIR: dataDir, ...env })) process.env[k] = v;
+  for (const [k, v] of Object.entries({ ATOMIX_DATA_DIR: dataDir, ...env })) process.env[k] = v;
   const { createApp } = await import('../src/app.js');
   const app = await createApp({ port: 0, host: '127.0.0.1', skipStartupScan: true, logLevel: 'error', ...overrides });
   const addr = await app.start();

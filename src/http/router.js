@@ -44,6 +44,8 @@ export class Router {
       // Blocked while a Kids profile is active (admin routes always are).
       adult: options.adult ?? false,
       owner: options.owner,
+      // A media route a TV may fetch with a cast link instead of a session cookie ('file'|'stream'|'subtitle'|'image').
+      cast: options.cast,
     };
     this.routes.push(route);
     return route;

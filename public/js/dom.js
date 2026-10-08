@@ -45,7 +45,7 @@ export function clear(el) {
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
-// ---- Icons (simple 24×24 strokes, drawn for NodeFlix) ----
+// ---- Icons (simple 24×24 strokes, drawn for Atomix) ----
 const PATHS = {
   play: '<path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/>',
   pause: '<rect x="6" y="4.5" width="4" height="15" rx="1" fill="currentColor" stroke="none"/><rect x="14" y="4.5" width="4" height="15" rx="1" fill="currentColor" stroke="none"/>',
@@ -63,6 +63,7 @@ const PATHS = {
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
   replay: '<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4.5h4.5"/><text x="12" y="15.2" font-size="6.5" text-anchor="middle" fill="currentColor" stroke="none" font-family="system-ui,sans-serif" font-weight="700">10</text>',
   skip: '<path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v4.5h-4.5"/><text x="12" y="15.2" font-size="6.5" text-anchor="middle" fill="currentColor" stroke="none" font-family="system-ui,sans-serif" font-weight="700">30</text>',
+  forward10: '<path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v4.5h-4.5"/><text x="12" y="15.2" font-size="6.5" text-anchor="middle" fill="currentColor" stroke="none" font-family="system-ui,sans-serif" font-weight="700">10</text>',
   volume: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
   mute: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>',
   fullscreen: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
@@ -93,11 +94,16 @@ const PATHS = {
   album: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.5"/>',
   prev: '<path d="M19 5L9 12l10 7z" fill="currentColor"/><path d="M5 5v14"/>',
   queue: '<path d="M4 6h12M4 11h12M4 16h7"/><path d="M16 14v6l4-3z" fill="currentColor"/>',
+  list: '<path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/>',
+  eye: '<path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="M4 4l16 16"/><path d="M10.6 6.1A9.8 9.8 0 0 1 12 6c6 0 9.5 6 9.5 6a16 16 0 0 1-3.2 3.7M6.6 7.6A15.2 15.2 0 0 0 2.5 12s3.5 6 9.5 6a9.3 9.3 0 0 0 3.4-.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
   bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
   globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 3.5 5.4 3.5 8.5s-1 5.9-3.5 8.5c-2.5-2.6-3.5-5.4-3.5-8.5s1-5.9 3.5-8.5z"/>',
   repeat: '<path d="M5 11V9.5A2.5 2.5 0 0 1 7.5 7H19M16 4l3 3-3 3M19 13v1.5a2.5 2.5 0 0 1-2.5 2.5H5M8 20l-3-3 3-3"/>',
   repeatOne: '<path d="M5 11V9.5A2.5 2.5 0 0 1 7.5 7H19M16 4l3 3-3 3M19 13v1.5a2.5 2.5 0 0 1-2.5 2.5H5M8 20l-3-3 3-3"/><path d="M11 10.5l1.5-1v5" stroke-width="1.6"/>',
   up: '<path d="M6 15l6-6 6 6"/>',
+  cast: '<path d="M3 9V6.5A2.5 2.5 0 0 1 5.5 4h13A2.5 2.5 0 0 1 21 6.5v11a2.5 2.5 0 0 1-2.5 2.5H14"/><path d="M3 13a7 7 0 0 1 7 7M3 16.5A3.5 3.5 0 0 1 6.5 20"/><circle cx="3.6" cy="19.4" r="1" fill="currentColor" stroke="none"/>',
+  airplay: '<path d="M7 17H5.5A2.5 2.5 0 0 1 3 14.5v-8A2.5 2.5 0 0 1 5.5 4h13A2.5 2.5 0 0 1 21 6.5v8a2.5 2.5 0 0 1-2.5 2.5H17"/><path d="M12 14l4.5 6h-9z" fill="currentColor"/>',
   more: '<circle cx="5.5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.6" fill="currentColor" stroke="none"/>',
 };
 
@@ -123,34 +129,47 @@ export function icon(name, { size = 20, label } = {}) {
   return svg;
 }
 
-/** The NodeFlix mark: a play triangle drawn as three connected nodes. */
+/**
+ * The Atomix mark: a play button as the nucleus, with two orbits crossing in an X
+ * behind it and one electron. The orbits stop short of the nucleus rather than
+ * being masked, so the same paths work in the loader (components.js) and favicon.
+ */
+export const MARK = {
+  orbits: ['M8.57 14.11A12.6 4.6 45 0 1 14.29 8.68M23.51 18A12.6 4.6 45 0 1 16.27 22.32', 'M14.29 23.32A12.6 4.6 -45 0 1 8.57 17.89M16.27 9.68A12.6 4.6 -45 0 1 23.51 14'],
+  nucleus: 'M13.6 11.5L21.4 16L13.6 20.5Z',
+  electron: { cx: 24.91, cy: 7.09, r: 2.2 },
+};
+
 let logoCount = 0;
 export function logoMark(size = 28) {
   const wrap = document.createElement('span');
   wrap.className = 'logo-mark';
   // Themes can paint the tile with a gradient via --logo-a / --logo-b (both default to the accent).
-  const id = `nf-logo-${++logoCount}`;
+  const id = `atomix-logo-${++logoCount}`;
+  const ink = 'var(--accent-text)';
+  const { cx, cy, r } = MARK.electron;
   wrap.innerHTML = `<svg viewBox="0 0 32 32" width="${size}" height="${size}" aria-hidden="true">
     <defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" style="stop-color: var(--logo-a, var(--accent))"/><stop offset="1" style="stop-color: var(--logo-b, var(--accent))"/>
     </linearGradient></defs>
     <rect width="32" height="32" rx="8" fill="url(#${id})"/>
-    <path d="M11 9.5 L23 16 L11 22.5 Z" fill="none" stroke="var(--accent-text)" stroke-width="2" stroke-linejoin="round"/>
-    <circle cx="11" cy="9.5" r="2.6" fill="var(--accent-text)"/>
-    <circle cx="23" cy="16" r="2.6" fill="var(--accent-text)"/>
-    <circle cx="11" cy="22.5" r="2.6" fill="var(--accent-text)"/>
+    <path d="${MARK.orbits.join('')}" fill="none" stroke="${ink}" stroke-width="1.7" stroke-linecap="round"/>
+    <path d="${MARK.nucleus}" fill="${ink}" stroke="${ink}" stroke-width="1.6" stroke-linejoin="round"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="${ink}"/>
   </svg>`;
   return wrap;
 }
 
 // ---- Formatting ----
-export function formatClock(seconds) {
+export function formatClock(seconds, { tenths = false } = {}) {
   if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
   const s = Math.floor(seconds % 60);
   const m = Math.floor((seconds / 60) % 60);
   const hr = Math.floor(seconds / 3600);
   const pad = (n) => String(n).padStart(2, '0');
-  return hr ? `${hr}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+  // tenths: "0:42.5" when the value isn't whole (the intro editor), "0:42" when it is.
+  const frac = tenths && Math.round((seconds % 1) * 10) % 10 ? `.${Math.round((seconds % 1) * 10)}` : '';
+  return hr ? `${hr}:${pad(m)}:${pad(s)}${frac}` : `${m}:${pad(s)}${frac}`;
 }
 
 export function formatRuntime(minutes) {
