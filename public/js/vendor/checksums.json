@@ -1,0 +1,12 @@
+{
+  "versions": {
+    "preact": "11.0.1",
+    "htm": "3.1.1"
+  },
+  "files": {
+    "preact.module.js": "17598141bfddaf9bc74873b88e19e4cfee3605078752a3d693d15a57019865d4",
+    "hooks.module.js": "05c7f3fb9e18d49981672106420d5ca014a4023efee0439cabaebf0a6988e93b",
+    "htm.module.js": "ab33dd3f38059b9be4d5f5350128eefb2356639c4e0bbe9d9e8b3ba75847e9e4",
+    "htm-preact.module.js": "7a9a8e4d09574749924dbc5b5184f564fea8872dd7391edd360c3d931119cf88"
+  }
+}

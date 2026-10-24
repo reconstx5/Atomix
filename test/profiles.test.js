@@ -147,6 +147,17 @@ test('PINs protect a profile', { skip }, async () => {
   await kid.post(`/api/profiles/${ids.kid}/select`, {});
 });
 
+test('pinStamp changes with the PIN and is null without one', { skip }, async () => {
+  const kid = (await admin.get('/api/profiles')).data.find((p) => p.id === ids.kid);
+  assert.equal(kid.pinStamp, null);
+  const a = (await admin.patch(`/api/profiles/${ids.kid}`, { pin: '1111' })).data.pinStamp;
+  assert.match(a, /^[0-9a-f]{12}$/);
+  assert.equal((await admin.get('/api/profiles')).data.find((p) => p.id === ids.kid).pinStamp, a);
+  const b = (await admin.patch(`/api/profiles/${ids.kid}`, { pin: '1111' })).data.pinStamp;
+  assert.notEqual(a, b, 'set again (even the same PIN): a new stamp');
+  assert.equal((await admin.patch(`/api/profiles/${ids.kid}`, { pin: null })).data.pinStamp, null);
+});
+
 test('watch progress is kept per profile', { skip }, async () => {
   const kid = ids.kidClient;
   await kid.post(`/api/items/${ids.Cartoon}/progress`, { position: 60, duration: 600 });

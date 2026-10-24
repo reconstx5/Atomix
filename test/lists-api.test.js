@@ -179,3 +179,12 @@ test('a film TMDB drops from its series is detached on refresh', { skip }, async
     dropped = false;
   }
 });
+
+// ---- v0.21 tidy-up ----
+test('a Kids PATCH that is refused saves nothing', { skip }, async () => {
+  const mine = (await kid.post('/api/lists', { kind: 'video', name: 'Mine too' })).data;
+  const r = await kid.patch(`/api/lists/${mine.id}`, { name: 'Renamed', shared: true });
+  assert.equal(r.status, 403);
+  assert.equal((await kid.get(`/api/lists/${mine.id}`)).data.name, 'Mine too', 'not renamed either');
+  await kid.del(`/api/lists/${mine.id}`);
+});

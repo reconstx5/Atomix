@@ -48,6 +48,7 @@ export function serializeItem(row, extra = {}) {
     parentId: row.parent_id,
     showId: row.show_id,
     title: row.title,
+    sortTitle: row.sort_title ?? null, // v0.25: the A–Z rail's letters follow the list's own order
     year: row.year,
     season: row.season,
     episode: row.episode,
@@ -68,6 +69,15 @@ export function serializeItem(row, extra = {}) {
     out.caption = EXTRA_CAPTIONS[row.extra_kind] || 'Extra';
   }
   if (row.artist) out.artist = row.artist;
+  // v0.22: podcasts and audiobooks
+  if (row.author) out.author = row.author;
+  if (row.narrator) out.narrator = row.narrator;
+  if (row.published_at) out.publishedAt = row.published_at;
+  // v0.22 Plan D: books and comics
+  if (row.issue != null) out.issue = row.issue;
+  if (row.page_count != null) out.pageCount = row.page_count;
+  if (row.reading_dir) out.readingDir = row.reading_dir;
+  if (row.kind === 'comic' && row.page_count == null && /"format":"cb[r7]"/.test(row.media || '')) out.needsTool = 'Install 7-Zip to read this';
   if (row.album_title !== undefined) {
     out.albumTitle = row.album_title;
     out.albumPoster = row.album_poster ? `/api/items/${row.parent_id}/image/poster?v=${row.album_meta || 0}` : null;
@@ -82,6 +92,16 @@ export function serializeItem(row, extra = {}) {
   if (extra.progress !== undefined) {
     const p = extra.progress;
     out.progress = p ? { position: p.position, duration: p.duration, watched: Boolean(p.watched), updatedAt: p.updated_at } : null;
+    // v0.22: where in a book or comic, and on what kind of device it was read
+    if (p && (p.locator !== undefined || p.device !== undefined)) Object.assign(out.progress, { locator: parseJson(p.locator, null), device: p.device ?? null });
+  }
+  if (extra.mine) {
+    // The viewer's own numbers: counted plays (films, episodes and songs only), last played, stars and heart.
+    const m = extra.mine;
+    out.playCount = ['movie', 'episode', 'track'].includes(row.kind) ? m.playCount || 0 : null;
+    out.lastPlayed = m.lastPlayed ?? null;
+    out.stars = m.stars ?? null;
+    out.favourite = Boolean(m.favourite);
   }
   if (row.unwatched_count !== undefined && row.unwatched_count !== null) out.unwatched = row.unwatched_count;
   if (row.child_count !== undefined) out.childCount = row.child_count;
@@ -90,6 +110,7 @@ export function serializeItem(row, extra = {}) {
     out.originalTitle = row.original_title;
     out.tmdbId = row.tmdb_id;
     out.imdbId = row.imdb_id;
+    out.scores = parseJson(row.scores, null); // v0.23: outside scores from a metadata plugin
     out.media = mediaSummary(media);
     out.fileName = row.path && !row.path.includes('::') && !isRemotePath(row.path) ? row.path.split(/[\\/]/).pop() : null;
     out.size = row.size;
@@ -100,7 +121,7 @@ export function serializeItem(row, extra = {}) {
   return out;
 }
 
-export function serializeLibrary(row, counts = {}) {
+export function serializeLibrary(row, counts = {}, { recordingsId = null } = {}) {
   return {
     id: row.id,
     name: row.name,
@@ -112,5 +133,6 @@ export function serializeLibrary(row, counts = {}) {
     serverName: row.server_name || null,
     remoteId: row.remote_id || null,
     options: { previews: true, ...parseJson(row.options, {}) },
+    recordings: row.id === recordingsId, // the Live TV recordings library (its own icon in Orbit)
   };
 }

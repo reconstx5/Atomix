@@ -21,7 +21,6 @@
   --font-display: var(--font);
 }
 /* Keep artwork a little softer so dark text stays readable over it. */
-.hero-art img, .detail-backdrop img { opacity: 0.85; }
 
 /* Clear logos are usually drawn for dark screens (white lettering); give them an outline of shade here. */
 .spot-logo, .detail-logo { filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.75)) drop-shadow(0 2px 14px rgba(0, 0, 0, 0.45)); }

@@ -1,18 +1,25 @@
 // Playlists and the Watchlist. A list belongs to a profile; a video list holds movies and episodes, a music
 // list tracks, the Watchlist movies and shows. Shared lists are visible to the household; kids see a shared
-// list only when everything in it passes their age rule. Only the owner edits.
+// list only when everything in it passes their age rule. Only the owner edits. A smart playlist holds rules instead of
+// items (src/library/smart.js): it's worked out for whoever opens it, so a shared one is open to all and shows each
+// viewer only what they may see.
 import { HttpError } from './http/router.js';
 import { imageUrl } from './api/serialize.js';
+import { validateRules, smartRows } from './library/smart.js';
+import { parseJson } from './db.js';
 
-const TAKES = { watchlist: ['movie', 'show'], video: ['movie', 'episode'], music: ['track'] };
+const FILLS_ITSELF = 'A smart playlist fills itself — change its rules instead.';
 
-const PLAYABLE = new Set(['movie', 'episode', 'track']);
+const TAKES = { watchlist: ['movie', 'show'], video: ['movie', 'episode'], music: ['track', 'podcast_episode', 'audiobook'], reading: ['book', 'comic'] };
+
+const PLAYABLE = new Set(['movie', 'episode', 'track', 'podcast_episode', 'audiobook']);
 
 export class Lists {
   constructor({ db, library }) {
     this.db = db;
     this.library = library;
     this.listeners = [];
+    this.seeds = new Map(); // "<listId>:<profileId>" -> the shuffle a smart list was last opened with
   }
   onChange(fn) {
     this.listeners.push(fn);
@@ -30,14 +37,43 @@ export class Lists {
     const id = Number(this.db.run("INSERT INTO lists (profile_id, kind, name, created_at, updated_at) VALUES (?, 'watchlist', 'Watchlist', ?, ?)", profileId, now, now).lastInsertRowid);
     return this.get(id);
   }
-  create(profileId, { kind, name }) {
-    if (!['video', 'music'].includes(kind)) throw new HttpError(400, 'A playlist is for videos or for songs.');
+  create(profileId, { kind, name, media, rules }) {
+    if (!['video', 'music', 'smart', 'reading'].includes(kind)) throw new HttpError(400, 'A playlist is for videos, for songs or for reading.');
     const clean = String(name || '').trim().slice(0, 80);
     if (!clean) throw new HttpError(400, 'Give the playlist a name.');
+    const set = kind === 'smart' ? validateRules(media, rules) : null;
     const now = Date.now();
-    const id = Number(this.db.run('INSERT INTO lists (profile_id, kind, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)', profileId, kind, clean, now, now).lastInsertRowid);
+    const id = Number(
+      this.db.run('INSERT INTO lists (profile_id, kind, name, media, rules, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)', profileId, kind, clean, set ? media : null, set ? JSON.stringify(set) : null, now, now).lastInsertRowid,
+    );
     this.changed(id);
     return this.get(id);
+  }
+  /** A smart list's rules (and, with them, its media). */
+  setRules(id, { media, rules }) {
+    const list = this.get(id);
+    if (!list) throw new HttpError(404, 'No such list');
+    if (list.kind !== 'smart') throw new HttpError(400, 'Only a smart playlist has rules.');
+    const to = media === undefined ? list.media : media;
+    // Only the media changed: the rules it has stay (checked against the media again).
+    const set = validateRules(to, rules === undefined ? parseJson(list.rules, {}) || {} : rules);
+    this.db.run('UPDATE lists SET media = ?, rules = ?, updated_at = ? WHERE id = ?', to, JSON.stringify(set), Date.now(), list.id);
+    this.changed(list.id);
+    return this.get(list.id);
+  }
+  /** Hand edits are for ordinary playlists. */
+  notSmart(list) {
+    if (list?.kind === 'smart') throw new HttpError(400, FILLS_ITSELF);
+    return list;
+  }
+  /** The shuffle for this viewer's view of a smart list: kept until they open the list again. */
+  seed(listId, viewer, fresh = false) {
+    const key = `${listId}:${viewer?.profileId || 0}:${viewer?.device || ''}`; // each device keeps its own shuffle
+    if (fresh || !this.seeds.has(key)) {
+      this.seeds.set(key, Math.floor(Math.random() * 2147483647));
+      if (this.seeds.size > 5000) this.seeds.delete(this.seeds.keys().next().value);
+    }
+    return this.seeds.get(key);
   }
   notWatchlist(list, what) {
     if (!list) throw new HttpError(404, 'No such list');
@@ -65,7 +101,7 @@ export class Lists {
   }
   /** Append an item if its kind fits the list and it isn't there yet. Returns whether it was added. */
   add(listId, itemId) {
-    const list = this.get(listId);
+    const list = this.notSmart(this.get(listId));
     const item = this.library.get(Number(itemId));
     if (!list || !item || !TAKES[list.kind].includes(item.kind)) return false;
     if (this.db.get('SELECT 1 FROM list_items WHERE list_id = ? AND item_id = ?', list.id, item.id)) return false;
@@ -78,12 +114,14 @@ export class Lists {
   }
   /** A season's episodes, in order. Returns how many were added. */
   addSeason(listId, seasonId) {
+    this.notSmart(this.get(listId));
     const eps = this.db.all("SELECT id FROM items WHERE parent_id = ? AND kind = 'episode' ORDER BY episode, id", Number(seasonId));
     let n = 0;
     for (const e of eps) if (this.add(listId, e.id)) n++;
     return n;
   }
   removeItem(listId, itemId) {
+    this.notSmart(this.get(listId));
     this.db.run('DELETE FROM list_items WHERE list_id = ? AND item_id = ?', Number(listId), Number(itemId));
     this.renumber(Number(listId));
     this.changed(Number(listId));
@@ -93,6 +131,7 @@ export class Lists {
     this.db.transaction(() => rows.forEach((r, i) => this.db.run('UPDATE list_items SET position = ? WHERE list_id = ? AND item_id = ?', i, listId, r.item_id)));
   }
   move(listId, itemId, position) {
+    this.notSmart(this.get(listId));
     const rows = this.db.all('SELECT item_id FROM list_items WHERE list_id = ? ORDER BY position, item_id', Number(listId)).map((r) => r.item_id);
     const from = rows.indexOf(Number(itemId));
     if (from < 0) throw new HttpError(404, 'Not in this list');
@@ -102,12 +141,17 @@ export class Lists {
     this.db.run('UPDATE lists SET updated_at = ? WHERE id = ?', Date.now(), Number(listId));
     this.changed(Number(listId));
   }
-  rows(listId) {
+  /** The list's rows in order; a smart list's are worked out for `viewer` (none without one). */
+  rows(listId, viewer = null, { fresh = false } = {}) {
+    const list = this.get(listId);
+    if (list?.kind === 'smart') return viewer ? smartRows(this.db, this.library, list, viewer, { seed: this.seed(list.id, viewer, fresh) }) : [];
     return this.db.all('SELECT i.*, li.position, li.added_at AS list_added_at FROM list_items li JOIN items i ON i.id = li.item_id WHERE li.list_id = ? ORDER BY li.position, li.item_id', Number(listId));
   }
   /** The list's items the viewer may see, serialized with progress, in order. */
   items(listId, viewer) {
-    const rows = this.rows(listId).filter((r) => this.library.canSee(viewer, r));
+    const list = this.get(listId);
+    // Opening a smart list shuffles it again; its rows already passed the viewer's rules (in the query itself).
+    const rows = this.rows(listId, viewer, { fresh: true }).filter((r) => list?.kind === 'smart' || this.library.canSee(viewer, r));
     return this.library.withProgress(rows, viewer).map((s, i) => ({ ...s, listAddedAt: rows[i].list_added_at }));
   }
   /** Kids see a shared list only when all of it passes their age rule; everyone else sees any shared list. */
@@ -115,8 +159,8 @@ export class Lists {
     if (!list) return false;
     if (list.profile_id === viewer.profileId) return true;
     if (!list.shared) return false;
-    if (viewer.maxAge == null) return true;
-    return this.rows(list.id).every((r) => this.library.canSee(viewer, r));
+    if (viewer.maxAge == null || list.kind === 'smart') return true; // a smart list only ever shows the viewer what they may see
+    return this.rows(list.id, viewer).every((r) => this.library.canSee(viewer, r));
   }
   /** Own lists (Watchlist first), then shared ones from other profiles, with counts and a few posters. */
   forProfile(profile, viewer) {
@@ -126,11 +170,12 @@ export class Lists {
       .all('SELECT l.*, p.name AS owner_name FROM lists l JOIN profiles p ON p.id = l.profile_id WHERE l.shared = 1 AND l.profile_id != ? ORDER BY l.updated_at DESC', profile.id)
       .filter((l) => this.visibleTo(l, viewer));
     const summarise = (l, ownFlag) => {
-      const rows = this.rows(l.id).filter((r) => this.library.canSee(viewer, r));
+      const rows = this.rows(l.id, viewer).filter((r) => l.kind === 'smart' || this.library.canSee(viewer, r));
       const posterOf = (r) => (r.kind === 'track' && r.parent_id ? imageUrl(this.library.get(r.parent_id) || r, 'poster') : imageUrl(r, 'poster'));
       return {
         id: l.id,
         kind: l.kind,
+        media: l.media || null,
         name: l.name,
         shared: Boolean(l.shared),
         own: ownFlag,
@@ -151,13 +196,15 @@ export class Lists {
    * is skipped). Null when there is none, or when `afterItemId` is no longer in the list (it never restarts).
    */
   nextIn(listId, afterItemId, viewer) {
-    const rows = this.rows(listId);
+    const rows = this.rows(listId, viewer);
     const at = rows.findIndex((r) => r.id === Number(afterItemId));
     if (at < 0) return null;
-    return rows.slice(at + 1).find((r) => PLAYABLE.has(r.kind) && this.library.canSee(viewer, r)) || null;
+    const smart = this.get(listId)?.kind === 'smart'; // its rows already passed the viewer's rules
+    return rows.slice(at + 1).find((r) => PLAYABLE.has(r.kind) && (smart || this.library.canSee(viewer, r))) || null;
   }
   /** Where Play on a list starts: the first playable item the viewer may see, or null. */
   firstPlayable(listId, viewer) {
-    return this.rows(listId).find((r) => PLAYABLE.has(r.kind) && this.library.canSee(viewer, r)) || null;
+    const smart = this.get(listId)?.kind === 'smart';
+    return this.rows(listId, viewer).find((r) => PLAYABLE.has(r.kind) && (smart || this.library.canSee(viewer, r))) || null;
   }
 }

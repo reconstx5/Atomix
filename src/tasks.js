@@ -115,6 +115,14 @@ export class TaskRunner {
     }
   }
 
+  /** Nothing to do: no ffmpeg, or the optional jobs are off and no one-off catch-up (lyrics, subtitles) is waiting. */
+  shouldIdle(s = this.settings.all()) {
+    if (!this.tools()?.ffmpeg?.available) return true;
+    if (s.previewsEnabled || s.introDetection) return false;
+    const q = this.store.pendingCounts();
+    return !q.lyrics && !q.subtitles;
+  }
+
   next() {
     const s = this.settings.all();
     const pick = (only) => {
@@ -134,6 +142,9 @@ export class TaskRunner {
       // Embedded lyrics for songs probed before 0.10: one ffprobe each, once.
       const song = this.store.nextLyricsItem(only);
       if (song) return { key: `lyrics:${song.id}`, job: 'lyrics', item: song, itemId: song.id, title: this.store.itemLabel(song) };
+      // Embedded text subtitles, extracted once so the player doesn't demux the whole file on demand.
+      const sub = this.store.nextSubtitleItem(only);
+      if (sub) return { key: `subtitles:${sub.id}`, job: 'subtitles', item: sub, itemId: sub.id, title: this.store.itemLabel(sub) };
       return null;
     };
     if (this.priority.size) {
@@ -162,7 +173,7 @@ export class TaskRunner {
     while (!this.stopped) {
       try {
         const s = this.settings.all();
-        if (!this.tools()?.ffmpeg?.available || (!s.previewsEnabled && !s.introDetection)) {
+        if (this.shouldIdle(s)) {
           await this.idle(this.pollMs);
           continue;
         }
@@ -209,13 +220,14 @@ export class TaskRunner {
       if (task.job === 'previews') await this.jobs.previews(task.item, ctx);
       else if (task.job === 'thumb') await this.jobs.thumb(task.item, ctx);
       else if (task.job === 'lyrics') await this.jobs.lyrics(task.item, ctx);
+      else if (task.job === 'subtitles') await this.jobs.subtitles(task.item, ctx);
       else await this.jobs.intros(task.seasonId, ctx);
       this.lastDone = task.key;
     } catch (err) {
       this.lastDone = null;
       if (controller.signal.aborted) log.info(`Stopped "${task.title}" for now; it will be redone later.`);
       else {
-        log.warn(`${{ previews: 'Previews', thumb: 'Thumbnail', intros: 'Intro check', lyrics: 'Lyrics check' }[task.job]} for "${task.title}" failed: ${err.message}`);
+        log.warn(`${{ previews: 'Previews', thumb: 'Thumbnail', intros: 'Intro check', lyrics: 'Lyrics check', subtitles: 'Subtitle check' }[task.job]} for "${task.title}" failed: ${err.message}`);
         this.recordFailure(task, err);
       }
     } finally {
@@ -224,7 +236,7 @@ export class TaskRunner {
   }
 
   recordFailure(task, err) {
-    if (task.job === 'lyrics') return; // the job marks the song checked itself
+    if (task.job === 'lyrics' || task.job === 'subtitles') return; // the job marks the item checked itself
     if (task.job === 'previews' || task.job === 'thumb') this.store.saveJob(task.item, task.job, { status: 'failed', error: err.message });
     else for (const ep of this.store.pendingIntroEpisodes(task.seasonId)) this.store.saveJob(ep, 'intros', { status: 'failed', error: err.message });
   }

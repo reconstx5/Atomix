@@ -2,8 +2,14 @@
 import { api } from '../api.js';
 import { addDeviceDialog } from '../cast.js';
 import { h, icon, clear, timeAgo, formatClock } from '../dom.js';
-import { button, toast, openDialog, confirmDialog, field, toggle, spinner, avatar, AVATAR_NAMES } from '../components.js';
-import { state, setTitle, applyTheme, updatePrefs, signOut, refreshLibraries, navigate, refreshView, canAdmin, isKidsProfile, renderNav, isOrbit } from '../app.js';
+import { button, toast, openDialog, confirmDialog, field, toggle, spinner, avatar, AVATAR_NAMES, rovingRadios, rowActions, moreButton, emptyState, TOASTS } from '../components.js';
+import { musicAppsCard, scrobblingCard, lastfmFields, quickConnectCard } from './settings-music.js';
+import { installCard } from './settings-install.js';
+import { httpsCard } from './settings-https.js';
+import { homeCard, householdHomeSection } from './settings-home.js';
+import { activityTab } from './settings-activity.js';
+import { statsCard, householdSection } from './settings-stats.js';
+import { state, setTitle, applyTheme, updatePrefs, signOut, refreshLibraries, navigate, refreshView, canAdmin, isKidsProfile, renderNav, isOrbit, liveAllowed } from '../app.js';
 
 const KIDS_LEVELS = [
   [5, 'Little kids — G only'],
@@ -34,16 +40,55 @@ function libraryPicker(libraries, selected, { allLabel = 'All libraries' } = {})
 
 const TABS = [
   { id: 'profile', label: 'Profile', icon: 'user' },
-  { id: 'profiles', label: 'Profiles', icon: 'users', adult: true },
+  { id: 'profiles', label: 'Household', icon: 'users', adult: true },
   { id: 'dashboard', label: 'Dashboard', icon: 'dashboard', admin: true },
   { id: 'libraries', label: 'Libraries', icon: 'folder', admin: true },
   { id: 'users', label: 'Users', icon: 'users', admin: true },
   { id: 'plugins', label: 'Plugins', icon: 'addons', admin: true },
+  { id: 'live', label: 'Live TV', icon: 'live', admin: true, live: true },
+  { id: 'activity', label: 'Activity', icon: 'list', admin: true },
   { id: 'server', label: 'Server', icon: 'server', admin: true },
 ];
 
 const select = (options, value, attrs = {}) =>
   h('select', attrs, options.map(([v, label]) => h('option', { value: v, selected: String(value) === String(v) }, label)));
+
+/**
+ * Comics in .cbr/.cb7 need 7-Zip or unrar (v0.22): what was found, and where to look. Its own section, so the
+ * dashboard's refresh every few seconds doesn't wipe a path being typed.
+ */
+function archiveSection() {
+  const status = h('p', { class: 'archive-status', role: 'status' });
+  const input = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', placeholder: '/usr/bin/7z or C:\\Program Files\\7-Zip\\7z.exe' });
+  let loaded = false;
+  function update(a) {
+    if (!loaded) {
+      loaded = true;
+      api.get('/api/admin/settings').then((s) => (input.value = s.archiveToolPath || '')).catch(() => {});
+    }
+    const text = a?.available ? `7-Zip found: ${a.kind === 'unrar' ? 'unrar' : '7z'} ${a.version} (${a.path}) — .cbr and .cb7 comics can be read` : '7-Zip or unrar not found — install 7-Zip to read .cbr and .cb7 comics';
+    if (status.textContent !== ` ${text}`) status.replaceChildren(h('span', { class: `dot ${a?.available ? 'ok' : 'bad'}` }), ` ${text}`);
+  }
+  const save = button('Save and look again', {
+    variant: 'secondary',
+    onClick: async (e) => {
+      const b = e.currentTarget;
+      b.disabled = true;
+      try {
+        await api.put('/api/admin/settings', { archiveToolPath: input.value.trim() });
+        const a = (await api.get('/api/admin/dashboard')).tools.archive;
+        update(a);
+        toast(a?.available ? '7-Zip found' : '7-Zip or unrar not found', { type: a?.available ? 'info' : 'error' });
+      } catch (err) {
+        toast(err.message, { type: 'error' });
+      } finally {
+        b.disabled = false;
+      }
+    },
+  });
+  const el = section('Comics', status, field('7-Zip or unrar path', input, 'Leave empty to look for 7z, 7za, 7zz or unrar'), h('div', { class: 'actions' }, save));
+  return { el, update };
+}
 
 function section(title, ...children) {
   return h('section', { class: 'panel' }, title ? h('h2', {}, title) : null, children);
@@ -77,7 +122,7 @@ async function profileTab(el) {
   const themes = [...state.themes].sort((a, b) => (b.id === state.status.defaultTheme) - (a.id === state.status.defaultTheme));
   const current = prefs.theme || state.status.defaultTheme;
 
-  const themeGrid = h('div', { class: 'theme-grid', role: 'radiogroup', 'aria-label': 'Theme' });
+  const themeGrid = rovingRadios(h('div', { class: 'theme-grid', role: 'radiogroup', 'aria-label': 'Theme' }));
   for (const t of themes) {
     const p = t.preview || {};
     const selected = t.id === current;
@@ -169,6 +214,13 @@ async function profileTab(el) {
       toggle('Play the next episode automatically', prefs.autoplayNext !== false, (v) => save(() => updatePrefs({ autoplayNext: v }))),
       toggle('Skip intros automatically', prefs.skipIntros === true, (v) => save(() => updatePrefs({ skipIntros: v })), { hint: 'You can still choose Watch it when it skips.' }),
     ),
+    homeCard(),
+    listeningCard(prefs),
+    statsCard(),
+    musicAppsCard(),
+    scrobblingCard(),
+    state.status?.quickConnect ? quickConnectCard() : null,
+    installCard(),
     isKidsProfile()
       ? section('Profile', h('div', { class: 'profile-line' }, avatar(profile, 48), h('div', {}, h('strong', {}, profile.name), h('p', { class: 'muted' }, 'Kids profile'))), h('div', { class: 'actions' }, button('Switch profile', { icon: 'users', href: '#/profiles' })))
       : section(
@@ -177,6 +229,20 @@ async function profileTab(el) {
           h('h3', {}, 'Change password'),
           pwForm,
         ),
+  );
+}
+
+// ---------------- Listening (v0.22): audiobooks and podcasts skip back and forward by these ----------------
+function listeningCard(prefs) {
+  const pick = (values, current, key, label) => {
+    const sel = h('select', {}, values.map((v) => h('option', { value: String(v), selected: v === current }, `${v} seconds`)));
+    sel.addEventListener('change', () => save(() => updatePrefs({ [key]: Number(sel.value) })));
+    return field(label, sel);
+  };
+  return section(
+    'Listening',
+    h('p', { class: 'muted' }, 'For audiobooks and podcasts: the skip buttons, J and L, and Left and Right on the player bar.'),
+    h('div', { class: 'form-grid' }, pick([5, 10, 15, 30, 45, 60], prefs.spokenBack ?? 15, 'spokenBack', 'Skip back'), pick([10, 15, 30, 45, 60, 90, 120], prefs.spokenForward ?? 30, 'spokenForward', 'Skip forward')),
   );
 }
 
@@ -196,6 +262,7 @@ async function profileDialog(existing) {
       return b;
     }),
   );
+  rovingRadios(avatars);
   name.addEventListener('input', () => {
     for (const el of avatars.querySelectorAll('.avatar')) el.textContent = (name.value.trim()[0] || '?').toUpperCase();
   });
@@ -205,6 +272,12 @@ async function profileDialog(existing) {
   const kidsOptions = h('div', { class: 'stack kids-options', hidden: !p.kids }, field('Allowed ratings', level, 'Titles rated above this are hidden. Ratings come from TMDB or .nfo files.'), h('label', { class: 'check' }, unrated, h('span', {}, 'Also show titles with no rating (home videos, add-ons)')));
   kids.addEventListener('change', () => (kidsOptions.hidden = !kids.checked));
   const libs = libraryPicker(state.libraries, p.libraries, { allLabel: 'All libraries this account can see' });
+  const liveGroups = canAdmin() ? await liveGroupsField(existing) : null;
+  // Only on a Kids profile (ticking "Kids profile" brings it in).
+  if (liveGroups) {
+    if (kids.checked) kidsOptions.append(liveGroups.el);
+    kids.addEventListener('change', () => (kids.checked ? kidsOptions.append(liveGroups.el) : liveGroups.el.remove()));
+  }
   const pin = h('input', { type: 'password', inputmode: 'numeric', pattern: '[0-9]{4,8}', maxlength: 8, autocomplete: 'new-password', placeholder: p.hasPin ? 'Leave empty to keep' : 'Optional' });
   const removePin = p.hasPin ? h('input', { type: 'checkbox' }) : null;
 
@@ -232,6 +305,7 @@ async function profileDialog(existing) {
       if (removePin?.checked) payload.pin = null;
       else if (pin.value) payload.pin = pin.value;
       const saved = existing ? await api.patch(`/api/profiles/${existing.id}`, payload) : await api.post('/api/profiles', payload);
+      if (liveGroups && saved.kids) await api.put(`/api/profiles/${saved.id}/live-groups`, liveGroups.value());
       if (saved.id === state.profile.id) {
         state.profile = saved;
         applyTheme();
@@ -241,6 +315,43 @@ async function profileDialog(existing) {
       return true;
     },
   });
+}
+
+/**
+ * A Kids profile's Live TV: a box per group per source; none ticked means no Live TV for them. Null when no live
+ * source has channels.
+ */
+async function liveGroupsField(existing) {
+  const status = await api.get('/api/live/status').catch(() => null);
+  const sources = (status?.sources || []).filter((s) => s.channels > 0 && s.groups?.length);
+  if (!sources.length) return null;
+  const ticked = existing?.kids ? await api.get(`/api/profiles/${existing.id}/live-groups`).catch(() => []) : [];
+  const on = new Set(ticked.map((g) => `${g.source}\u0000${g.group}`));
+  const boxes = [];
+  const el = h(
+    'fieldset',
+    { class: 'stack live-groups-field' },
+    h('legend', {}, 'Live TV groups'),
+    h('p', { class: 'muted small' }, 'Kids see only the channels in the groups ticked here. None ticked: no Live TV.'),
+    sources.map((s) =>
+      h(
+        'div',
+        { class: 'live-groups-source' },
+        sources.length > 1 ? h('p', { class: 'field-label' }, s.name) : null,
+        h(
+          'div',
+          { class: 'live-groups-boxes' },
+          s.groups.map((g) => {
+            const box = h('input', { type: 'checkbox', checked: on.has(`${s.id}\u0000${g}`) });
+            boxes.push({ box, source: s.id, group: g });
+            return h('label', { class: 'check' }, box, h('span', {}, g));
+          }),
+        ),
+      ),
+    ),
+  );
+  // Only the sources shown here are replaced: ticks for a source not listed (no channels or groups right now) stay.
+  return { el, value: () => ({ sources: sources.map((s) => s.id), groups: boxes.filter((b) => b.box.checked).map((b) => ({ source: b.source, group: b.group })) }) };
 }
 
 async function profilesTab(el) {
@@ -255,24 +366,23 @@ async function profilesTab(el) {
         { class: 'panel profile-row' },
         avatar(p, 56),
         h('div', { class: 'profile-row-info' }, h('h2', {}, p.name, p.id === state.profile.id ? h('span', { class: 'chip' }, 'You') : null), h('p', { class: 'muted' }, [p.isPrimary ? 'Main profile' : null, p.kids ? `Kids · ${level}` : null, p.hasPin ? 'PIN set' : null, p.libraries ? `${p.libraries.length} librar${p.libraries.length === 1 ? 'y' : 'ies'}` : null].filter(Boolean).join(' · ') || 'Standard profile')),
-        h(
-          'div',
-          { class: 'row-actions' },
-          button('', { icon: 'edit', variant: 'ghost', title: `Edit ${p.name}`, onClick: async () => (await profileDialog(p)) === 'ok' && refreshView() }),
+        rowActions(p.name, [
+          { label: 'Edit', icon: 'edit', title: `Edit ${p.name}`, onSelect: async () => (await profileDialog(p)) === 'ok' && refreshView() },
           p.isPrimary
             ? null
-            : button('', {
+            : {
+                label: 'Delete',
                 icon: 'trash',
-                variant: 'ghost',
+                danger: true,
                 title: `Delete ${p.name}`,
-                onClick: async () => {
+                onSelect: async () => {
                   if (await confirmDialog(`Delete ${p.name}?`, 'Their watch history and preferences will be removed.', { confirm: 'Delete', danger: true })) {
                     await api.del(`/api/profiles/${p.id}`);
                     refreshView();
                   }
                 },
-              }),
-        ),
+              },
+        ]),
       ),
     );
   }
@@ -288,13 +398,14 @@ const TASK_PAUSED = {
 
 /** What the background jobs are doing, what's left, and anything that failed. */
 function backgroundSection(t, reload) {
-  const doing = { previews: 'Making seek-bar previews for', thumb: 'Making a thumbnail for', lyrics: 'Reading the lyrics in', intros: 'Finding intros in' };
+  const doing = { previews: 'Making seek-bar previews for', thumb: 'Making a thumbnail for', lyrics: 'Reading the lyrics in', subtitles: 'Reading the subtitles in', intros: 'Finding intros in' };
   const now = t.running ? `${doing[t.running.job] || 'Working on'} ${t.running.title}.` : TASK_PAUSED[t.paused] || 'Nothing running right now.';
   const waiting = [
     t.queued.previews ? `${t.queued.previews} ${t.queued.previews === 1 ? 'title' : 'titles'} waiting for previews` : null,
     t.queued.intros ? `${t.queued.intros} ${t.queued.intros === 1 ? 'season' : 'seasons'} waiting for an intro check` : null,
     t.queued.thumbs ? `${t.queued.thumbs} ${t.queued.thumbs === 1 ? 'extra' : 'extras'} waiting for a thumbnail` : null,
     t.queued.lyrics ? `${t.queued.lyrics} ${t.queued.lyrics === 1 ? 'song' : 'songs'} waiting for a lyrics check` : null,
+    t.queued.subtitles ? `${t.queued.subtitles} ${t.queued.subtitles === 1 ? 'title' : 'titles'} waiting for a subtitle check` : null,
   ].filter(Boolean);
   return section(
     'Background tasks',
@@ -308,13 +419,17 @@ function backgroundSection(t, reload) {
 
 async function dashboardTab(el) {
   const body = h('div');
-  el.append(body);
+  const archive = archiveSection();
+  el.append(body, archive.el, householdSection());
   async function load() {
-    const [d, tasks] = await Promise.all([api.get('/api/admin/dashboard'), api.get('/api/admin/tasks')]);
+    const [d, tasks, live] = await Promise.all([api.get('/api/admin/dashboard'), api.get('/api/admin/tasks'), api.get('/api/live/status').catch(() => null)]);
+    const liveErrors = (live?.sources || []).filter((s) => s.error).map((s) => h('p', { class: 'form-error', role: 'status' }, `Live TV: ${s.error}`));
     clear(body);
     const t = d.tools;
+    archive.update(t.archive);
     const toolRow = (name, info) => h('li', {}, h('span', { class: `dot ${info.available ? 'ok' : 'bad'}` }), h('strong', {}, name), ' ', info.available ? `v${info.version}` : h('span', { class: 'danger-text' }, `not found (${info.path})`));
-    body.append(
+    // (a section that isn't there is null: left out, not printed as "null")
+    body.append(...[
       h(
         'div',
         { class: 'stat-grid' },
@@ -350,22 +465,43 @@ async function dashboardTab(el) {
                 ),
               ),
             )
-          : h('p', { class: 'muted' }, 'Nobody is watching right now.'),
+          : emptyState({ title: 'Nobody is watching right now', icon: 'play', level: 3 }),
       ),
+      d.tuners?.length
+        ? section(
+            'Tuners in use',
+            h(
+              'table',
+              { class: 'table' },
+              h('thead', {}, h('tr', {}, ['Channel', 'Watching', 'Recording'].map((c) => h('th', { scope: 'col' }, c)))),
+              h('tbody', {}, d.tuners.map((t) => h('tr', {}, h('td', {}, t.channel), h('td', {}, t.viewers.length ? t.viewers.join(', ') : '—'), h('td', {}, t.recording ? `Recording ${t.recording}` : '—')))),
+            ),
+          )
+        : null,
+      d.downloadsPreparing ? section('Downloads', h('p', {}, `Preparing downloads: ${d.downloadsPreparing}`)) : null,
+      d.nextRecordings?.length
+        ? section(
+            'Next recordings',
+            h('ul', { class: 'plain-list' }, d.nextRecordings.map((r) => h('li', {}, h('strong', {}, r.title), ` · ${r.channel} · ${new Date(r.start).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}`))),
+            h('a', { href: '#/live/recordings' }, 'All recordings'),
+          )
+        : null,
       section(
         'Library scan',
         h('p', {}, d.scan.running ? `Scanning ${d.scan.library}: ${d.scan.phase} (${d.scan.done}/${d.scan.total || '?'})` : `Idle. Last scan finished ${timeAgo(d.scan.finishedAt)}${d.scan.error ? ` with an error: ${d.scan.error}` : ''}.`),
+        d.scan.warning ? h('p', { class: 'form-error', role: 'status' }, `${d.scan.warning}. Is the drive connected?`) : null,
+        ...liveErrors,
         h(
           'div',
           { class: 'actions' },
-          button('Scan all libraries', { icon: 'refresh', onClick: async () => (await api.post('/api/scan', {}), toast('Scan started'), setTimeout(load, 800)) }),
+          button('Scan all libraries', { icon: 'refresh', onClick: async () => (await api.post('/api/scan', {}), TOASTS.scanStarted(), setTimeout(load, 800)) }),
           button('Refresh all metadata', {
             icon: 'sparkle',
             variant: 'ghost',
             onClick: async () => {
               if (await confirmDialog('Refresh all metadata?', 'This re-downloads descriptions and artwork for everything. It can take a while for big libraries.', { confirm: 'Refresh' })) {
                 await api.post('/api/scan', { refreshMetadata: true });
-                toast('Metadata refresh started');
+                TOASTS.refreshStarted();
               }
             },
           }),
@@ -397,7 +533,7 @@ async function dashboardTab(el) {
           : null,
         button('Re-check ffmpeg', { variant: 'ghost', icon: 'refresh', onClick: async () => (await api.post('/api/admin/tools/recheck', {}), load()) }),
       ),
-    );
+    ].filter(Boolean));
   }
   await load();
   const timer = setInterval(() => load().catch(() => {}), 5000);
@@ -436,7 +572,7 @@ async function pickFolder(startPath = '') {
     ],
     onSubmit: () => {
       if (!current) {
-        toast('Open a folder first.');
+        toast('Open a folder first');
         return false;
       }
       chosen = current;
@@ -451,9 +587,13 @@ const LIBRARY_HINTS = {
   movies: 'Example: Movies/Movie Title (2010)/Movie Title (2010).mkv — one folder per movie is best, but loose files work too.',
   tv: 'Example: TV/Show Name (2019)/Season 01/Show Name S01E01.mkv',
   music: 'Example: Music/Artist/Album (2004)/01 - Song.flac — artist, album and track numbers are read from the tags when the files have them. Put cover.jpg in the album folder for artwork.',
+  podcasts: 'A folder for the episodes Atomix downloads. Add podcasts from the library page with Subscribe.',
+  audiobooks: 'Example: Audiobooks/Author/Book Title/01.mp3 — a folder of files is one book; a single .m4b is one book with its chapters.',
+  books: 'Example: Books/Author/Book Title.epub — the title, author, series and cover are read from the book.',
+  comics: 'Example: Comics/Series Name/Series Name 012.cbz — a folder of pictures is one comic too. .cbr and .cb7 need 7-Zip (Settings → Dashboard).',
 };
-const LIBRARY_ICON = { movies: 'film', tv: 'tv', music: 'music' };
-const LIBRARY_NOUN = { movies: 'movies', tv: 'shows', music: 'albums' };
+const LIBRARY_ICON = { movies: 'film', tv: 'tv', music: 'music', podcasts: 'mic', audiobooks: 'book', books: 'book', comics: 'book' };
+const LIBRARY_NOUN = { movies: 'movies', tv: 'shows', music: 'albums', podcasts: 'podcasts', audiobooks: 'books', books: 'books', comics: 'comics' };
 
 async function libraryDialog(lib) {
   const name = h('input', { value: lib?.name || '', required: true, maxlength: 60, placeholder: 'e.g. Movies' });
@@ -468,7 +608,7 @@ async function libraryDialog(lib) {
       ],
       onSubmit: async () => {
         await api.put(`/api/libraries/${lib.id}`, { name: name.value.trim() });
-        toast('Library saved', { type: 'success' });
+        TOASTS.saved('Library');
         return true;
       },
     });
@@ -478,6 +618,10 @@ async function libraryDialog(lib) {
       ['movies', 'Movies'],
       ['tv', 'TV shows'],
       ['music', 'Music'],
+      ['podcasts', 'Podcasts'],
+      ['audiobooks', 'Audiobooks'],
+      ['books', 'Books (EPUB)'],
+      ['comics', 'Comics (CBZ, CBR, CB7)'],
     ],
     lib?.type || 'movies',
     { disabled: Boolean(lib) },
@@ -486,7 +630,7 @@ async function libraryDialog(lib) {
   const list = h('ul', { class: 'path-list', role: 'list' });
   const newPath = h('input', { placeholder: 'D:\\Movies  or  /media/movies', 'aria-label': 'Folder path' });
   const previews = h('input', { type: 'checkbox', checked: lib?.options?.previews !== false });
-  const previewsRow = h('label', { class: 'check', hidden: type.value === 'music' }, previews, h('span', {}, 'Make seek-bar previews'));
+  const previewsRow = h('label', { class: 'check', hidden: !['movies', 'tv'].includes(type.value) }, previews, h('span', {}, 'Make seek-bar previews'));
   function renderPaths() {
     clear(list);
     if (!paths.length) list.append(h('li', { class: 'muted' }, 'No folders yet.'));
@@ -517,7 +661,7 @@ async function libraryDialog(lib) {
   );
   type.addEventListener('change', () => {
     body.querySelector('.hint').textContent = LIBRARY_HINTS[type.value];
-    previewsRow.hidden = type.value === 'music';
+    previewsRow.hidden = !['movies', 'tv'].includes(type.value);
   });
   return openDialog({
     title: lib ? `Edit ${lib.name}` : 'Add a library',
@@ -595,7 +739,7 @@ function serversPanel(servers) {
     'section',
     { class: 'panel servers-panel' },
     h('div', { class: 'panel-head' }, h('div', {}, h('h2', {}, 'Connected servers'), h('p', { class: 'muted' }, 'A Jellyfin, Emby, Plex or Atomix server you already run. Its libraries appear beside your own and play through this Atomix.')), button('Connect a server…', { icon: 'plus', variant: 'primary', onClick: async () => { if ((await connectServerDialog()) === 'ok') { await refreshLibraries(); refreshView(); } } })),
-    rows.length ? h('div', { class: 'server-list' }, rows) : h('p', { class: 'muted' }, 'No servers connected.'),
+    rows.length ? h('div', { class: 'server-list' }, rows) : emptyState({ title: 'No servers connected', icon: 'cloud', level: 3 }),
   );
 }
 
@@ -903,14 +1047,44 @@ async function reconnectDialog(server) {
   });
 }
 
+/** "Remove missing titles": count them, ask in the library's own panel, then remove them. */
+async function removeMissing(lib, panel) {
+  if (!panel || panel.querySelector('.library-confirm')) return;
+  const { count } = await api.post(`/api/admin/libraries/${lib.id}/remove-missing`, { dryRun: true });
+  if (!count) return toast('No missing titles in this library');
+  const ask = h('div', { class: 'library-confirm', role: 'group', 'aria-label': 'Remove missing titles' });
+  const done = () => {
+    ask.remove();
+    panel.querySelector('.actions button')?.focus();
+  };
+  const remove = button('Remove', {
+    variant: 'danger',
+    onClick: async () => {
+      remove.disabled = true;
+      const r = await api.post(`/api/admin/libraries/${lib.id}/remove-missing`, {}).catch((err) => (toast(err.message, { type: 'error' }), null));
+      ask.remove();
+      if (r) {
+        toast(r.removed === 1 ? 'Removed 1 title' : `Removed ${r.removed} titles`);
+        await refreshLibraries();
+        refreshView();
+      }
+    },
+  });
+  ask.append(h('p', {}, count === 1 ? 'Remove 1 title whose file is gone?' : `Remove ${count} titles whose files are gone?`), h('div', { class: 'actions' }, remove, button('Cancel', { variant: 'ghost', onClick: done })));
+  panel.append(ask);
+  remove.focus();
+}
+
 async function librariesTab(el) {
+  const panels = new Map();
+  const panelOf = (lib) => panels.get(lib.id);
   const [libs, servers] = await Promise.all([api.get('/api/libraries'), api.get('/api/servers')]);
   el.append(
     h('div', { class: 'panel-head' }, h('p', { class: 'muted' }, 'Point Atomix at folders on this computer or server, or connect a media server you already run. They are scanned automatically.'), button('Add library', { icon: 'plus', variant: 'primary', autofocus: true, onClick: async () => { if ((await libraryDialog()) === 'ok') { await refreshLibraries(); refreshView(); } } })),
     serversPanel(servers),
   );
   if (!libs.length) {
-    el.append(section(null, h('p', {}, 'No libraries yet. Add your movie folder first, then your TV folder.')));
+    el.append(section(null, emptyState({ title: 'No libraries yet', text: 'Add your movie folder first, then your TV folder.', icon: 'film', level: 2 })));
     return;
   }
   const gone = new Set(servers.flatMap((s) => s.libraries.filter((l) => l.gone).map((l) => l.id)));
@@ -918,8 +1092,7 @@ async function librariesTab(el) {
     const caption = lib.serverId
       ? gone.has(lib.id) ? `No longer on ${lib.serverName} · ${lib.count} ${LIBRARY_NOUN[lib.type] || 'items'} kept` : `On ${lib.serverName} · ${lib.count} ${LIBRARY_NOUN[lib.type] || 'items'} · synced ${timeAgo(lib.lastScan)}`
       : `${lib.count} ${LIBRARY_NOUN[lib.type] || 'items'} · last scanned ${timeAgo(lib.lastScan)}`;
-    el.append(
-      h(
+    const panel = h(
         'section',
         { class: `panel library-panel${lib.serverId ? ' library-remote' : ''}` },
         h('div', { class: 'library-panel-head' }, icon(lib.serverId ? 'cloud' : LIBRARY_ICON[lib.type] || 'film', { size: 28 }), h('div', {}, h('h2', {}, lib.name), h('p', { class: 'muted' }, caption))),
@@ -927,8 +1100,9 @@ async function librariesTab(el) {
         h(
           'div',
           { class: 'actions' },
-          button(lib.serverId ? 'Sync now' : 'Scan now', { icon: 'refresh', onClick: async () => (await api.post(`/api/libraries/${lib.id}/scan`, {}), toast(lib.serverId ? `Syncing ${lib.name}…` : `Scanning ${lib.name}…`)) }),
+          button(lib.serverId ? 'Sync now' : 'Scan now', { icon: 'refresh', onClick: async () => (await api.post(`/api/libraries/${lib.id}/scan`, {}), (lib.serverId ? TOASTS.syncStarted() : TOASTS.scanStarted())) }),
           button('Edit', { icon: 'edit', variant: 'ghost', onClick: async () => { if ((await libraryDialog(lib)) === 'ok') { await refreshLibraries(); refreshView(); } } }),
+          lib.serverId ? null : moreButton(lib.name, [{ label: 'Remove missing titles', icon: 'trash', onSelect: () => removeMissing(lib, panelOf(lib)) }]),
           lib.serverId ? null : button('Delete', {
             icon: 'trash',
             variant: 'ghost danger',
@@ -941,8 +1115,9 @@ async function librariesTab(el) {
             },
           }),
         ),
-      ),
-    );
+      );
+    panels.set(lib.id, panel);
+    el.append(panel);
   }
   el.append(await collectionsPanel());
 }
@@ -972,7 +1147,7 @@ async function collectionsPanel() {
     'section',
     { class: 'panel collections-panel' },
     h('div', { class: 'panel-head' }, h('div', {}, h('h2', {}, 'Collections'), h('p', { class: 'muted' }, 'Film series come from TMDB as your films are matched. Make your own from films and shows.')), button('New collection', { icon: 'plus', variant: 'primary', onClick: async () => { if ((await collectionDialog(null)) === 'ok') refreshView(); } })),
-    cols.length ? h('div', { class: 'table-scroll' }, h('table', { class: 'table' }, h('thead', {}, h('tr', {}, h('th', {}, 'Name'), h('th', {}, 'In your library'), h('th', {}, 'From'), h('th', {}, ''))), h('tbody', {}, rows))) : h('p', { class: 'muted' }, 'No collections yet.'),
+    cols.length ? h('div', { class: 'table-scroll' }, h('table', { class: 'table' }, h('thead', {}, h('tr', {}, h('th', { scope: 'col' }, 'Name'), h('th', { scope: 'col' }, 'In your library'), h('th', { scope: 'col' }, 'From'), h('th', { scope: 'col' }, h('span', { class: 'visually-hidden' }, 'Actions')))), h('tbody', {}, rows))) : emptyState({ title: 'No collections yet', icon: 'list', level: 3 }),
   );
 }
 
@@ -984,7 +1159,7 @@ function renameCollection(c) {
     actions: [{ label: 'Cancel', value: 'cancel' }, { label: 'Save', value: 'ok', variant: 'primary' }],
     onSubmit: async () => {
       await api.patch(`/api/collections/${c.id}`, { name: name.value });
-      toast('Collection saved');
+      TOASTS.saved('Collection');
       refreshView();
     },
   });
@@ -1047,7 +1222,7 @@ async function collectionDialog(existing) {
       if (artwork.value) body.artworkFrom = Number(artwork.value);
       if (existing) await api.patch(`/api/collections/${existing.id}`, body);
       else await api.post('/api/collections', body);
-      toast('Collection saved');
+      TOASTS.saved('Collection');
     },
   });
 }
@@ -1066,21 +1241,38 @@ async function userDialog(user) {
   );
   const allLibraries = await api.get('/api/libraries');
   const access = libraryPicker(allLibraries, user?.libraryAccess ?? null);
+  // v0.21: downloads to the app on this person's devices (admins always may).
+  const dlSw = toggle('Can download', Boolean(user?.canDownload), null, { hint: 'Download films, episodes and music into the Atomix app to watch offline.' });
+  const dlOn = dlSw.querySelector('input');
+  dlOn.name = 'canDownload';
+  const dlNote = h('p', { class: 'muted small', id: `dl-note-${Math.random().toString(36).slice(2, 8)}`, hidden: true }, 'Admins can always download.');
+  dlOn.setAttribute('aria-describedby', [dlOn.getAttribute('aria-describedby'), dlNote.id].filter(Boolean).join(' '));
+  // Admin forces it on; back to Viewer puts back what it was (a demoted admin's own setting, off for someone new).
+  let chosen = user ? user.role !== 'admin' && Boolean(user.canDownload) : false;
+  dlOn.addEventListener('change', () => (chosen = dlOn.checked));
+  const syncDownloads = () => {
+    const admin = role.value === 'admin';
+    dlOn.disabled = admin;
+    dlOn.checked = admin || chosen;
+    dlNote.hidden = !admin;
+  };
+  role.addEventListener('change', syncDownloads);
+  syncDownloads();
   return openDialog({
     title: user ? `Edit ${user.username}` : 'Add a person',
     wide: true,
-    body: h('div', { class: 'stack' }, h('div', { class: 'form-grid' }, field('Username', username), field('Display name', displayName), field(user ? 'New password' : 'Password', password, 'At least 8 characters.'), field('Role', role)), access.el),
+    body: h('div', { class: 'stack' }, h('div', { class: 'form-grid' }, field('Username', username), field('Display name', displayName), field(user ? 'New password' : 'Password', password, 'At least 8 characters.'), field('Role', role)), h('div', {}, dlSw, dlNote), access.el),
     actions: [
       { label: 'Cancel', value: 'cancel' },
       { label: user ? 'Save' : 'Add', value: 'ok', variant: 'primary' },
     ],
     onSubmit: async () => {
       if (user) {
-        const body = { displayName: displayName.value, role: role.value, libraryAccess: access.value() };
+        const body = { displayName: displayName.value, role: role.value, libraryAccess: access.value(), canDownload: role.value === 'admin' || chosen };
         if (password.value) body.password = password.value;
         await api.patch(`/api/users/${user.id}`, body);
       } else {
-        await api.post('/api/users', { username: username.value.trim(), displayName: displayName.value.trim(), password: password.value, role: role.value, libraryAccess: access.value() });
+        await api.post('/api/users', { username: username.value.trim(), displayName: displayName.value.trim(), password: password.value, role: role.value, libraryAccess: access.value(), canDownload: dlOn.checked });
       }
       toast('Saved', { type: 'success' });
       return true;
@@ -1107,25 +1299,28 @@ async function usersTab(el) {
               'tr',
               {},
               h('td', {}, h('strong', {}, u.displayName), h('br'), h('small', { class: 'muted' }, u.username)),
-              h('td', {}, u.role === 'admin' ? 'Admin' : 'Viewer', u.libraryAccess ? h('br') : null, u.libraryAccess ? h('small', { class: 'muted' }, `${u.libraryAccess.length} librar${u.libraryAccess.length === 1 ? 'y' : 'ies'}`) : null),
+              h('td', {}, u.role === 'admin' ? 'Admin' : 'Viewer', u.libraryAccess ? h('br') : null, u.libraryAccess ? h('small', { class: 'muted' }, `${u.libraryAccess.length} librar${u.libraryAccess.length === 1 ? 'y' : 'ies'}`) : null, u.role !== 'admin' && u.canDownload ? [h('br'), h('small', { class: 'muted' }, 'Downloads')] : null),
               h('td', {}, timeAgo(u.lastLogin)),
               h(
                 'td',
-                { class: 'row-actions' },
-                button('', { icon: 'edit', variant: 'ghost', title: `Edit ${u.username}`, onClick: async () => (await userDialog(u)) === 'ok' && refreshView() }),
-                u.id !== state.user.id
-                  ? button('', {
-                      icon: 'trash',
-                      variant: 'ghost',
-                      title: `Delete ${u.username}`,
-                      onClick: async () => {
-                        if (await confirmDialog(`Delete ${u.username}?`, 'Their watch history will be removed too.', { confirm: 'Delete', danger: true })) {
-                          await api.del(`/api/users/${u.id}`);
-                          refreshView();
-                        }
-                      },
-                    })
-                  : null,
+                { class: 'row-actions-cell' },
+                rowActions(u.username, [
+                  { label: 'Edit', icon: 'edit', title: `Edit ${u.username}`, onSelect: async () => (await userDialog(u)) === 'ok' && refreshView() },
+                  u.id !== state.user.id
+                    ? {
+                        label: 'Delete',
+                        icon: 'trash',
+                        danger: true,
+                        title: `Delete ${u.username}`,
+                        onSelect: async () => {
+                          if (await confirmDialog(`Delete ${u.username}?`, 'Their watch history will be removed too.', { confirm: 'Delete', danger: true })) {
+                            await api.del(`/api/users/${u.id}`);
+                            refreshView();
+                          }
+                        },
+                      }
+                    : null,
+                ]),
               ),
             ),
           ),
@@ -1163,8 +1358,49 @@ function pluginSettingsForm(plugin) {
   return h('details', { class: 'plugin-settings' }, h('summary', {}, 'Settings'), form);
 }
 
+/** A plugin's live source on its card: the last refresh (or why it failed), channels without guide, Refresh now. */
+function liveSourceBlock(source, status) {
+  const st = status?.sources?.find((s) => s.id === source.key) || null;
+  if (!st?.lastRefresh && !st?.error) return null; // not set up yet: its settings below are the next step
+  const line = st?.lastRefresh ? `Last refresh: ${timeAgo(st.lastRefresh)}${st.summary ? ` · ${st.summary}` : ''}` : 'Not refreshed yet';
+  const unmatched = st?.unmatched || [];
+  const radio = { count: st?.unmatchedRadio?.count || 0, names: st?.unmatchedRadio?.names || [] };
+  const refresh = button('Refresh now', {
+    icon: 'refresh',
+    variant: 'secondary',
+    attrs: { class: 'btn btn-secondary plugin-live-refresh' },
+    onClick: async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        const r = await api.post(`/api/live/sources/${encodeURIComponent(source.key)}/refresh`, {});
+        if (r.ok) toast(`Refreshed — ${r.channels} ${r.channels === 1 ? 'channel' : 'channels'}`, { type: 'success' });
+        else toast(r.error || "Couldn't refresh", { type: 'error', timeout: 9000 });
+        refreshLibraries?.();
+      } catch (err) {
+        toast(err.message, { type: 'error' });
+      } finally {
+        btn.disabled = false;
+        refreshView();
+      }
+    },
+  });
+  return h(
+    'div',
+    { class: 'plugin-live stack' },
+    h('p', {}, h('strong', {}, `${source.name}: `), line),
+    st?.error ? h('p', { class: 'form-error', role: 'status' }, st.error) : null,
+    st?.warning ? h('p', { class: 'muted' }, st.warning) : null,
+    unmatched.length ? h('details', {}, h('summary', {}, `Channels without guide (${unmatched.length})`), h('p', { class: 'muted small' }, unmatched.slice(0, 20).join(', ') + (unmatched.length > 20 ? ` and ${unmatched.length - 20} more` : ''))) : null,
+    // Radio stations rarely have a guide: folded, after the TV list, so they don't bury it.
+    radio.count ? h('details', {}, h('summary', {}, `Radio without guide (${radio.count})`), h('p', { class: 'muted small' }, radio.names.slice(0, 20).join(', ') + (radio.count > 20 ? ` and ${radio.count - Math.min(20, radio.names.length)} more` : ''))) : null,
+    h('div', { class: 'actions' }, refresh),
+  );
+}
+
 async function pluginsTab(el) {
   const plugins = await api.get('/api/admin/plugins');
+  const liveStatus = plugins.some((p) => p.provides.live?.length) ? await api.get('/api/live/status').catch(() => null) : null;
   el.append(
     h('div', { class: 'panel-head' }, h('p', { class: 'muted' }, 'Plugins live in the ', h('code', {}, 'plugins'), ' folder. Drop a new one in and restart Atomix. See docs/PLUGINS.md to write your own.')),
   );
@@ -1191,6 +1427,7 @@ async function pluginsTab(el) {
           }),
         ),
         p.error ? h('p', { class: 'form-error' }, `Failed to load: ${p.error}`) : null,
+        p.enabled && p.status ? h('p', { class: 'muted small plugin-status' }, p.status) : null,
         provides.length ? h('ul', { class: 'chips', role: 'list' }, provides.map((x) => h('li', { class: 'chip' }, x))) : null,
         p.enabled && p.actions?.some((a) => a.available)
           ? h(
@@ -1216,6 +1453,7 @@ async function pluginsTab(el) {
               ),
             )
           : null,
+        p.enabled ? (p.provides.live || []).map((src) => liveSourceBlock(src, liveStatus)) : null,
         pluginSettingsForm(p),
       ),
     );
@@ -1231,7 +1469,9 @@ async function serverTab(el) {
   const defaultTheme = select(state.themes.map((t) => [t.id, t.name]), s.defaultTheme);
   const scanInterval = h('input', { type: 'number', min: 0, max: 10080, value: s.scanIntervalMinutes });
   const remoteSync = h('input', { type: 'number', min: 0, max: 168, value: s.remoteSyncHours ?? 6 });
+  const thumbCache = h('input', { type: 'number', min: 100, max: 100000, value: s.thumbCacheMB ?? 2048 });
   const tmdbKey = h('input', { type: 'password', value: s.tmdbApiKey, autocomplete: 'off', spellcheck: 'false' });
+  const lastfm = lastfmFields(s);
   const language = h('input', { value: s.metadataLanguage, maxlength: 10, placeholder: 'en-US' });
   const ratingCountry = select(
     [
@@ -1244,7 +1484,9 @@ async function serverTab(el) {
     ],
     s.ratingCountry,
   );
-  const transcoding = h('input', { type: 'checkbox', checked: s.transcodingEnabled });
+  // Switches with a short name and the longer sentence as their hint (a screen reader reads both, separately).
+  const transcodingSw = toggle('Convert video when needed', s.transcodingEnabled, null, { hint: 'Let the server convert videos the browser can’t play.' });
+  const transcoding = transcodingSw.querySelector('input');
   const hwLabel = (id, label, enc) => [id, `${label}${enc && !encoders.includes(enc) ? ' (not detected)' : ''}`];
   const hwAccel = select(
     [
@@ -1259,6 +1501,7 @@ async function serverTab(el) {
   );
   const preset = select(['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium'].map((p) => [p, p]), s.x264Preset);
   const maxTranscodes = h('input', { type: 'number', min: 1, max: 32, value: s.maxTranscodes });
+  const maxSoftwareHeight = select([[720, '720p'], [1080, '1080p'], [1440, '1440p'], [2160, '2160p (4K)']], String(s.maxSoftwareHeight || 1080));
   const pickerIdle = select(
     [
       ['15', '15 minutes'],
@@ -1270,6 +1513,7 @@ async function serverTab(el) {
     String(s.pickerIdleMinutes ?? 30),
   );
   pickerIdle.name = 'pickerIdleMinutes';
+  const podcastHours = h('input', { name: 'podcastCheckHours', type: 'number', min: 0, max: 168, step: 1, value: s.podcastCheckHours ?? 6, class: 'input-year', inputmode: 'numeric' });
   const defaultQuality = select(
     [
       ['original', 'Original'],
@@ -1280,23 +1524,53 @@ async function serverTab(el) {
     s.defaultQuality,
   );
   const vaapiDevice = h('input', { value: s.vaapiDevice });
-  const previewsOn = h('input', { type: 'checkbox', checked: s.previewsEnabled });
-  const introsOn = h('input', { type: 'checkbox', checked: s.introDetection });
-  const trailersOn = h('input', { type: 'checkbox', checked: s.onlineTrailers !== false });
-  const lyricsOn = h('input', { type: 'checkbox', checked: s.onlineLyrics !== false });
+  const previewsSw = toggle('Seek-bar previews', s.previewsEnabled, null, { hint: 'Small pictures above the seek bar and for extras (a few MB per movie).' });
+  const introsSw = toggle('Find TV intros', s.introDetection, null, { hint: 'So viewers can skip them.' });
+  const trailersSw = toggle('Online trailers', s.onlineTrailers !== false, null, { hint: 'Play the movie’s YouTube trailer when there is no local one (never on kids profiles).' });
+  const lyricsSw = toggle('Online lyrics', s.onlineLyrics !== false, null, { hint: 'Ask LRCLIB for lyrics your files don’t have (only the song’s name, artist, album and length are sent).' });
+  const qcSw = toggle('Quick Connect', s.quickConnect !== false, null, { hint: 'TVs can sign in by showing a code that someone signed in approves.' });
+  const [previewsOn, introsOn, trailersOn, lyricsOn, qcOn] = [previewsSw, introsSw, trailersSw, lyricsSw, qcSw].map((sw) => sw.querySelector('input'));
+  qcOn.name = 'quickConnect';
+  // v0.21 downloads: phone-sized copies the Atomix app keeps on a device.
+  const dlEnabledSw = toggle('Allow downloads', s.downloadsEnabled !== false, null, { hint: 'People you allow can download titles into the Atomix app to watch offline.' });
+  const dlEnabled = dlEnabledSw.querySelector('input');
+  dlEnabled.name = 'downloadsEnabled';
+  const dlDir = h('input', { name: 'downloadsDir', value: s.downloadsDir || '', placeholder: 'In the data folder', spellcheck: 'false', autocomplete: 'off' });
+  const dlCache = h('input', { name: 'downloadsCacheGb', type: 'number', min: 1, max: 2000, value: s.downloadsCacheGb ?? 50, class: 'input-year' });
+  const dlQuality = select([['480', '480p (smallest)'], ['720', '720p'], ['1080', '1080p (largest)']], String(s.downloadQuality || '720'));
+  dlQuality.name = 'downloadQuality';
+  const dlDays = h('input', { name: 'downloadOfflineDays', type: 'number', min: 7, max: 90, value: s.downloadOfflineDays ?? 30, class: 'input-year' });
+  const dlDevice = h('input', { name: 'downloadDeviceGb', type: 'number', min: 1, max: 500, value: s.downloadDeviceGb ?? 20, class: 'input-year' });
+  const downloadsCard = h(
+    'section',
+    { class: 'panel downloads-card' },
+    h('h2', {}, 'Downloads'),
+    dlEnabledSw,
+    h(
+      'div',
+      { class: 'form-grid' },
+      field('Folder for prepared copies', dlDir, 'Leave empty for the data folder.'),
+      field('Keep prepared copies under (GB)', dlCache, 'The oldest are removed first; unused ones after 7 days.'),
+      field('Default quality', dlQuality),
+      field('Downloads last offline (days)', dlDays, 'After this long without reaching Atomix, a device stops playing them.'),
+      field('Space per device (GB)', dlDevice),
+    ),
+  );
 
   // Casting: the switch, the address TVs fetch from, and the devices (found, or added by address).
-  const castOn = toggle('Casting', s.castEnabled !== false, null, { hint: 'Play on Chromecasts and DLNA TVs on your home network, with this page or a phone as the remote.' });
+  const castOn = toggle('Enable casting', s.castEnabled !== false, null, { hint: 'Play on Chromecasts and DLNA TVs on your home network, with this page or a phone as the remote.' });
   const castInput = castOn.querySelector('input');
   const castBase = h('input', { name: 'castBaseUrl', value: s.castBaseUrl || '', placeholder: castInfo?.baseUrl || 'http://192.168.1.20:8787', inputmode: 'url', spellcheck: 'false', autocomplete: 'off' });
-  const castList = h('div', { class: 'cast-devices', 'aria-live': 'polite' });
+  const castList = h('div', { class: 'cast-devices' });
+  const castSummary = h('p', { class: 'visually-hidden', 'aria-live': 'polite' });
   async function drawCastDevices(refresh = false) {
     clear(castList).append(h('p', { class: 'muted' }, 'Looking for devices…'));
     const r = await api.get(`/api/cast/devices${refresh ? '?refresh=1' : ''}`).catch((err) => ({ error: err.message }));
     clear(castList);
     if (r.error) return castList.append(h('p', { class: 'error-text' }, r.error));
     if (!r.enabled) return castList.append(h('p', { class: 'muted' }, 'Casting is off. Turn it on and save to look for devices.'));
-    if (!r.devices.length) castList.append(h('p', { class: 'muted' }, 'No devices found on your network. Atomix and the TV must be on the same network; Atomix in Docker needs network_mode: host to see them.'));
+    castSummary.textContent = r.devices.length ? `${r.devices.length} ${r.devices.length === 1 ? 'device' : 'devices'} found` : 'No devices found';
+    if (!r.devices.length) castList.append(emptyState({ title: 'No devices found on your network', text: 'Atomix and the TV must be on the same network; Atomix in Docker needs network_mode: host to see them.', icon: 'cast', level: 3 }));
     for (const d of r.devices) {
       const removable = d.id.startsWith('manual:');
       castList.append(
@@ -1328,6 +1602,7 @@ async function serverTab(el) {
     field('Address the TV uses', castBase, `Change this if your TV can't load videos (it must be this computer's address on your home network).${castInfo?.baseUrl && !s.castBaseUrl ? ` Found: ${castInfo.baseUrl}` : ''}`),
     h('h3', { class: 'cast-devices-title' }, 'Devices'),
     castList,
+    castSummary,
     h(
       'div',
       { class: 'actions' },
@@ -1345,7 +1620,8 @@ async function serverTab(el) {
   const form = h(
     'form',
     { class: 'stack' },
-    section('General', h('div', { class: 'form-grid' }, field('Server name', serverName), field('Default theme', defaultTheme, 'People can still pick their own in Profile.'), field("Ask who's watching after", pickerIdle, 'How long Atomix can sit untouched before it asks again. Playing a video or music counts as being there.'), field('Sign-in page message', loginMessage), field('Rescan every (minutes)', scanInterval, '0 turns automatic scanning off.'), field('Sync connected servers every (hours)', remoteSync, '0 turns automatic syncing off; Sync now in Libraries still works.'))),
+    section('General', h('div', { class: 'form-grid' }, field('Server name', serverName), field('Default theme', defaultTheme, 'People can still pick their own in Profile.'), field("Ask who's watching after", pickerIdle, 'How long Atomix can sit untouched before it asks again. Playing a video or music counts as being there.'), field('Sign-in page message', loginMessage), field('Rescan every (minutes)', scanInterval, '0 turns automatic scanning off.'), field('Sync connected servers every (hours)', remoteSync, '0 turns automatic syncing off; Sync now in Libraries still works.'), field('Check podcast feeds every (hours)', podcastHours, '0 checks them only when someone presses Check now on a podcasts library.'), field('Picture cache (MB)', thumbCache, "Smaller copies of artwork for faster pages. The least used go first when it's full."))),
+    httpsCard(), // v0.27: the secure address phones need (its own card: it saves as you choose)
     section(
       'Metadata',
       h(
@@ -1370,13 +1646,14 @@ async function serverTab(el) {
     ),
     section(
       'Playback & transcoding',
-      h('label', { class: 'check' }, transcoding, h('span', {}, 'Allow the server to convert videos the browser can’t play')),
+      transcodingSw,
       h(
         'div',
         { class: 'form-grid' },
         field('Hardware acceleration', hwAccel, encoders.length ? `Your ffmpeg includes: ${encoders.join(', ')}. Hardware options also need a matching GPU and drivers.` : 'ffmpeg not found — install it to enable conversion.'),
         field('CPU encoder speed', preset, 'Faster presets use less CPU but look slightly worse.'),
         field('Max simultaneous conversions', maxTranscodes, 'Protects a small VPS from overload.'),
+        field('Max software conversion height', maxSoftwareHeight, 'Without a hardware encoder, bigger pictures are scaled down to keep up; hardware encoders ignore this.'),
         field('Default quality for everyone', defaultQuality),
         field('VAAPI device', vaapiDevice, 'Only used with VAAPI.'),
       ),
@@ -1385,14 +1662,17 @@ async function serverTab(el) {
     section(
       'Background tasks',
       h('p', { class: 'muted' }, 'These run one at a time at low priority, and wait while someone watches a video the server is converting.'),
-      h('label', { class: 'check' }, previewsOn, h('span', {}, 'Seek-bar previews and extra thumbnails: small pictures above the seek bar and for extras (a few MB per film)')),
-      h('label', { class: 'check' }, introsOn, h('span', {}, 'Find TV intros, so viewers can skip them')),
+      previewsSw,
+      introsSw,
     ),
     section(
       'Online extras',
-      h('label', { class: 'check' }, trailersOn, h('span', {}, "Online trailers: play the film's YouTube trailer when there is no local one (never on kids profiles)")),
-      h('label', { class: 'check' }, lyricsOn, h('span', {}, 'Online lyrics: ask LRCLIB for lyrics your files don’t have (only the song’s name, artist, album and length are sent)')),
+      trailersSw,
+      lyricsSw,
     ),
+    section('Signing in', qcSw),
+    downloadsCard,
+    lastfm.el,
     h('div', { class: 'actions sticky-actions' }, button('Save settings', { type: 'submit', variant: 'primary', icon: 'check' })),
   );
   form.addEventListener('submit', async (e) => {
@@ -1404,6 +1684,7 @@ async function serverTab(el) {
         defaultTheme: defaultTheme.value,
         scanIntervalMinutes: Number(scanInterval.value),
         remoteSyncHours: Number(remoteSync.value),
+        thumbCacheMB: Number(thumbCache.value),
         tmdbApiKey: tmdbKey.value.trim(),
         metadataLanguage: language.value.trim() || 'en-US',
         ratingCountry: ratingCountry.value,
@@ -1411,15 +1692,25 @@ async function serverTab(el) {
         hwAccel: hwAccel.value,
         x264Preset: preset.value,
         maxTranscodes: Number(maxTranscodes.value),
+        maxSoftwareHeight: Number(maxSoftwareHeight.value),
         defaultQuality: defaultQuality.value,
         pickerIdleMinutes: Number(pickerIdle.value),
+        podcastCheckHours: Number(podcastHours.value),
         vaapiDevice: vaapiDevice.value.trim(),
         previewsEnabled: previewsOn.checked,
         introDetection: introsOn.checked,
         onlineTrailers: trailersOn.checked,
         onlineLyrics: lyricsOn.checked,
+        quickConnect: qcOn.checked,
+        downloadsEnabled: dlEnabled.checked,
+        downloadsDir: dlDir.value.trim(),
+        downloadsCacheGb: Number(dlCache.value),
+        downloadQuality: dlQuality.value,
+        downloadOfflineDays: Number(dlDays.value),
+        downloadDeviceGb: Number(dlDevice.value),
         castEnabled: castInput.checked,
         castBaseUrl: castBase.value.trim(),
+        ...lastfm.values(),
       });
       drawCastDevices();
       state.status = await api.get('/api/status');
@@ -1427,14 +1718,56 @@ async function serverTab(el) {
       document.querySelector('.brand-name').textContent = state.status.serverName;
     });
   });
-  el.append(form);
+  el.append(form, await householdHomeSection());
 }
 
-const RENDERERS = { profile: profileTab, profiles: profilesTab, dashboard: dashboardTab, libraries: librariesTab, users: usersTab, plugins: pluginsTab, server: serverTab };
+// ---------------- Live TV ----------------
+/** Settings → Live TV: the Recording card (where recordings go, how early they start and how late they end). */
+async function liveTab(el) {
+  const s = await api.get('/api/admin/settings');
+  const dir = h('input', { name: 'recordingsDir', value: s.recordingsDir || '', placeholder: s.recordingsDirDefault || '', spellcheck: 'false', autocomplete: 'off' });
+  const pre = h('input', { name: 'recordPre', type: 'number', min: 0, max: 30, step: 1, value: s.recordPre ?? 1, inputmode: 'numeric' });
+  const post = h('input', { name: 'recordPost', type: 'number', min: 0, max: 60, step: 1, value: s.recordPost ?? 3, inputmode: 'numeric' });
+  const error = h('p', { class: 'form-error', role: 'alert', hidden: true });
+  const form = h(
+    'form',
+    { class: 'stack' },
+    field('Recordings folder', dir, 'Any folder on this server. Leave it empty for the default shown. Recordings appear as the "Recordings" TV library.'),
+    field('Start early (minutes)', pre, '0 to 30. A recording starts this long before its programme.'),
+    field('End late (minutes)', post, '0 to 60. A recording ends this long after its programme.'),
+    h('p', { class: 'muted small' }, 'Recordings stop when the folder has less than 5 GB free.'),
+    error,
+    h('div', { class: 'actions' }, h('button', { type: 'submit', class: 'btn btn-primary' }, 'Save')),
+  );
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    const say = (text, input) => {
+      error.textContent = text;
+      error.hidden = false;
+      input.focus();
+    };
+    // An emptied field isn't 0 minutes: it is refused, and its field takes the focus.
+    const blank = [pre, post].find((i) => i.value.trim() === '' || !Number.isFinite(Number(i.value)));
+    if (blank) return say('Start early and End late need a number of minutes', blank);
+    try {
+      const out = await api.put('/api/admin/settings', { recordingsDir: dir.value.trim(), recordPre: Number(pre.value), recordPost: Number(post.value) });
+      pre.value = out.recordPre;
+      post.value = out.recordPost;
+      toast('Recording settings saved', { type: 'success' });
+    } catch (err) {
+      // The field the message names (the folder's, unless it speaks of minutes).
+      say(err.message, /minute|early|late/i.test(err.message) ? pre : dir);
+    }
+  });
+  el.append(h('section', { class: 'panel rec-settings' }, h('h2', {}, 'Recording'), form));
+}
+
+const RENDERERS = { profile: profileTab, profiles: profilesTab, dashboard: dashboardTab, libraries: librariesTab, users: usersTab, plugins: pluginsTab, live: liveTab, activity: activityTab, server: serverTab };
 
 export async function render(el, params) {
   const isAdmin = canAdmin();
-  const tabs = TABS.filter((t) => (!t.admin || isAdmin) && (!t.adult || !isKidsProfile()));
+  const tabs = TABS.filter((t) => (!t.admin || isAdmin) && (!t.adult || !isKidsProfile()) && (!t.live || liveAllowed()));
   const tab = tabs.find((t) => t.id === params.tab) || tabs[0];
   if (params.tab && tab.id !== params.tab) navigate('#/settings', { replace: true });
   setTitle(tab.label);

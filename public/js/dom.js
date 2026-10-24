@@ -46,7 +46,7 @@ export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 // ---- Icons (simple 24×24 strokes, drawn for Atomix) ----
-const PATHS = {
+export const PATHS = { // exported for ui/basics.js's Icon (v0.26)
   play: '<path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/>',
   pause: '<rect x="6" y="4.5" width="4" height="15" rx="1" fill="currentColor" stroke="none"/><rect x="14" y="4.5" width="4" height="15" rx="1" fill="currentColor" stroke="none"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
@@ -56,6 +56,13 @@ const PATHS = {
   home: '<path d="M4 11l8-6.5 8 6.5V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z"/>',
   film: '<rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M7.5 4v16M16.5 4v16M3.5 9h4M3.5 15h4M16.5 9h4M16.5 15h4"/>',
   tv: '<rect x="3" y="6" width="18" height="12.5" rx="2"/><path d="M8.5 21.5h7M9 2.5l3 3.5 3-3.5"/>',
+  live: '<rect x="3" y="6" width="18" height="12.5" rx="2"/><path d="M9 2.5l3 3.5 3-3.5"/><circle cx="12" cy="12.25" r="2.25" fill="currentColor"/><path d="M7.75 9a5.5 5.5 0 0 0 0 6.5M16.25 9a5.5 5.5 0 0 1 0 6.5"/>',
+  radio: '<rect x="3" y="8" width="18" height="12" rx="2"/><path d="M7 8l10-4.5"/><circle cx="15.5" cy="14" r="3"/><path d="M6.5 12h4M6.5 15.5h4"/>',
+  guide: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 9v11M3 14.5h18M14 14.5V20"/>',
+  rewind: '<path d="M11 6.5L4.5 12l6.5 5.5zM19.5 6.5L13 12l6.5 5.5z" fill="currentColor" stroke="none"/>',
+  'chan-up': '<path d="M6 15l6-6 6 6"/>',
+  'chan-down': '<path d="M6 9l6 6 6-6"/>',
+  cloud: '<path d="M7 18a4 4 0 0 1-.5-7.97A5.5 5.5 0 0 1 17.2 9.5 3.5 3.5 0 0 1 17 16.5H7z"/>',
   addons: '<path d="M9 3.5h6v4.5a2 2 0 1 0 4 0h1.5V14H16a2 2 0 1 0 0 4h4.5v2.5h-17V14H8a2 2 0 1 0 0-4H3.5V3.5H9"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   back: '<path d="M15 5l-7 7 7 7"/>',
@@ -64,6 +71,7 @@ const PATHS = {
   replay: '<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4.5h4.5"/><text x="12" y="15.2" font-size="6.5" text-anchor="middle" fill="currentColor" stroke="none" font-family="system-ui,sans-serif" font-weight="700">10</text>',
   skip: '<path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v4.5h-4.5"/><text x="12" y="15.2" font-size="6.5" text-anchor="middle" fill="currentColor" stroke="none" font-family="system-ui,sans-serif" font-weight="700">30</text>',
   forward10: '<path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v4.5h-4.5"/><text x="12" y="15.2" font-size="6.5" text-anchor="middle" fill="currentColor" stroke="none" font-family="system-ui,sans-serif" font-weight="700">10</text>',
+  forward30: '<path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v4.5h-4.5"/><text x="12" y="15.2" font-size="6.5" text-anchor="middle" fill="currentColor" stroke="none" font-family="system-ui,sans-serif" font-weight="700">30</text>',
   volume: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
   mute: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>',
   fullscreen: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
@@ -75,10 +83,21 @@ const PATHS = {
   logout: '<path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 16l-4-4 4-4M6 12h10"/>',
   refresh: '<path d="M20 11a8 8 0 0 0-14.3-4.5L4 8.5M4 13a8 8 0 0 0 14.3 4.5L20 15.5"/><path d="M4 4v4.5h4.5M20 20v-4.5h-4.5"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+  moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/>',
+  audiobook: '<path d="M5.5 11.5V9a6.5 6.5 0 0 1 13 0v2.5"/><rect x="3.5" y="9.5" width="3.5" height="5.5" rx="1.2"/><rect x="17" y="9.5" width="3.5" height="5.5" rx="1.2"/><path d="M12 17.2c-1.6-1-3.6-1.3-6-1v4.3c2.4-.3 4.4 0 6 1 1.6-1 3.6-1.3 6-1v-4.3c-2.4-.3-4.4 0-6 1zM12 17.2v4.3"/>',
+  comic: '<path d="M4.5 4.5h15a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5H11l-4.5 3.5v-3.5h-2A1.5 1.5 0 0 1 3 15V6a1.5 1.5 0 0 1 1.5-1.5z"/><path d="M7.5 9h9M7.5 12h6"/>',
+  recording: '<rect x="3" y="6" width="18" height="12.5" rx="2"/><path d="M8.5 21.5h7M9 2.5l3 3.5 3-3.5"/><circle cx="12" cy="12.25" r="2.75" fill="currentColor" stroke="none"/>',
+  mast: '<path d="M12 9.5V21M8.5 21h7M9.5 21L12 9.5 14.5 21"/><circle cx="12" cy="7.5" r="1.6" fill="currentColor" stroke="none"/><path d="M8.6 4.1a4.8 4.8 0 0 0 0 6.8M15.4 4.1a4.8 4.8 0 0 1 0 6.8M5.8 1.8a8.2 8.2 0 0 0 0 11.4M18.2 1.8a8.2 8.2 0 0 1 0 11.4"/>',
+  book: '<path d="M12 6.5C10 5 7 4.5 3.5 5v13c3.5-.5 6.5 0 8.5 1.5 2-1.5 5-2 8.5-1.5V5C17 4.5 14 5 12 6.5zM12 6.5v13"/>',
   trash: '<path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13"/>',
   folder: '<path d="M3.5 6.5a1.5 1.5 0 0 1 1.5-1.5h4.5l2 2.5H19a1.5 1.5 0 0 1 1.5 1.5v8.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z"/>',
   user: '<circle cx="12" cy="8.5" r="4"/><path d="M4.5 20.5a7.5 7.5 0 0 1 15 0"/>',
   star: '<path d="M12 3.8l2.5 5.2 5.7.8-4.1 4 1 5.7-5.1-2.7-5.1 2.7 1-5.7-4.1-4 5.7-.8z" fill="currentColor" stroke="none"/>',
+  starLine: '<path d="M12 3.8l2.5 5.2 5.7.8-4.1 4 1 5.7-5.1-2.7-5.1 2.7 1-5.7-4.1-4 5.7-.8z"/>',
+  heart: '<path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z"/>',
+  heartFill: '<path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z" fill="currentColor"/>',
   shuffle: '<path d="M4 7h3.5c5 0 5 10 10 10H20M4 17h3.5c1.6 0 2.7-1 3.5-2.3M14 9.3c.8-1.3 1.9-2.3 3.5-2.3H20"/><path d="M17.5 4.5L20 7l-2.5 2.5M17.5 14.5L20 17l-2.5 2.5"/>',
   download: '<path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/>',
   chevronDown: '<path d="M6 9l6 6 6-6"/>',
@@ -86,7 +105,6 @@ const PATHS = {
   grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
   dashboard: '<path d="M4 13a8 8 0 1 1 16 0"/><path d="M12 13l4-4"/><path d="M4 17h16"/>',
   users: '<circle cx="9" cy="8.5" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 5.2a3.5 3.5 0 0 1 0 6.6M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/>',
-  palette: '<path d="M12 3.5a8.5 8.5 0 0 0 0 17c1.2 0 1.8-.8 1.8-1.7 0-1.3-1-1.6-1-2.7 0-1 .8-1.6 1.8-1.6h2.1a3.8 3.8 0 0 0 3.8-3.8c0-4-3.8-7.2-8.5-7.2z"/><circle cx="7.8" cy="11" r="1.1" fill="currentColor"/><circle cx="10.5" cy="7.5" r="1.1" fill="currentColor"/><circle cx="14.8" cy="7.8" r="1.1" fill="currentColor"/>',
   server: '<rect x="4" y="4" width="16" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="16" height="6.5" rx="1.5"/><path d="M8 7.2h.01M8 16.7h.01"/>',
   sparkle: '<path d="M12 3.5l1.8 5.2 5.2 1.8-5.2 1.8-1.8 5.2-1.8-5.2L5 10.5l5.2-1.8z"/>',
   lock: '<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
@@ -97,8 +115,6 @@ const PATHS = {
   list: '<path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/>',
   eye: '<path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
   eyeOff: '<path d="M4 4l16 16"/><path d="M10.6 6.1A9.8 9.8 0 0 1 12 6c6 0 9.5 6 9.5 6a16 16 0 0 1-3.2 3.7M6.6 7.6A15.2 15.2 0 0 0 2.5 12s3.5 6 9.5 6a9.3 9.3 0 0 0 3.4-.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
-  bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
-  globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 3.5 5.4 3.5 8.5s-1 5.9-3.5 8.5c-2.5-2.6-3.5-5.4-3.5-8.5s1-5.9 3.5-8.5z"/>',
   repeat: '<path d="M5 11V9.5A2.5 2.5 0 0 1 7.5 7H19M16 4l3 3-3 3M19 13v1.5a2.5 2.5 0 0 1-2.5 2.5H5M8 20l-3-3 3-3"/>',
   repeatOne: '<path d="M5 11V9.5A2.5 2.5 0 0 1 7.5 7H19M16 4l3 3-3 3M19 13v1.5a2.5 2.5 0 0 1-2.5 2.5H5M8 20l-3-3 3-3"/><path d="M11 10.5l1.5-1v5" stroke-width="1.6"/>',
   up: '<path d="M6 15l6-6 6 6"/>',
@@ -163,12 +179,18 @@ export function logoMark(size = 28) {
 // ---- Formatting ----
 export function formatClock(seconds, { tenths = false } = {}) {
   if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
+  // tenths: "0:42.5" when the value isn't whole (the intro editor), "0:42" when it is. Rounded to tenths first,
+  // then split, so 42.97 is "0:43.0" (not "0:42" with its fraction lost) and 59.96 rolls over to "1:00.0".
+  let frac = '';
+  if (tenths) {
+    const t = Math.round(seconds * 10);
+    if (seconds % 1) frac = `.${t % 10}`;
+    seconds = Math.floor(t / 10);
+  }
   const s = Math.floor(seconds % 60);
   const m = Math.floor((seconds / 60) % 60);
   const hr = Math.floor(seconds / 3600);
   const pad = (n) => String(n).padStart(2, '0');
-  // tenths: "0:42.5" when the value isn't whole (the intro editor), "0:42" when it is.
-  const frac = tenths && Math.round((seconds % 1) * 10) % 10 ? `.${Math.round((seconds % 1) * 10)}` : '';
   return hr ? `${hr}:${pad(m)}:${pad(s)}${frac}` : `${m}:${pad(s)}${frac}`;
 }
 

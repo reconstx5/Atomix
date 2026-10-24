@@ -1,5 +1,6 @@
 // SQLite storage using Node's built-in `node:sqlite` module (no native npm
 // dependencies, so `npm install` is never needed).
+import { registerSearchKey } from './library/searchkey.js';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -384,6 +385,356 @@ export const MIGRATIONS = [
     created_at INTEGER NOT NULL
   );
   `,
+  // 14: the lookups that run per deleted item / per deleted profile (progress cascades, session clears) get indexes.
+  `
+  CREATE INDEX IF NOT EXISTS progress_item ON progress(item_id);
+  CREATE INDEX IF NOT EXISTS sessions_profile ON sessions(profile_id);
+  `,
+  // 15: Live TV — channels and programmes from live sources (plugins such as IPTV Simple), favourite channels per
+  // profile, the channel groups a Kids profile may see, and each source's last refresh.
+  `
+  CREATE TABLE live_channels (
+    id INTEGER PRIMARY KEY,
+    source TEXT NOT NULL,
+    key TEXT NOT NULL,
+    number INTEGER,
+    name TEXT NOT NULL,
+    groups TEXT NOT NULL DEFAULT '[]',
+    logo TEXT,
+    radio INTEGER NOT NULL DEFAULT 0,
+    guide_id TEXT,
+    catchup TEXT,
+    hidden INTEGER NOT NULL DEFAULT 0,
+    sort INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL,
+    UNIQUE (source, key)
+  );
+  CREATE INDEX live_channels_guide ON live_channels(source, guide_id);
+  CREATE TABLE live_programmes (
+    id INTEGER PRIMARY KEY,
+    channel_id INTEGER NOT NULL REFERENCES live_channels(id) ON DELETE CASCADE,
+    start INTEGER NOT NULL,
+    end INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    subtitle TEXT,
+    description TEXT,
+    categories TEXT,
+    episode TEXT,
+    image TEXT
+  );
+  CREATE INDEX live_programmes_channel_start ON live_programmes(channel_id, start);
+  CREATE INDEX live_programmes_start ON live_programmes(start);
+  CREATE TABLE live_favourites (
+    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    channel_id INTEGER NOT NULL REFERENCES live_channels(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (profile_id, channel_id)
+  );
+  CREATE TABLE live_kids_groups (
+    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    grp TEXT NOT NULL,
+    PRIMARY KEY (profile_id, source, grp)
+  );
+  CREATE TABLE live_sources (
+    id TEXT PRIMARY KEY,
+    last_refresh INTEGER,
+    last_ok INTEGER,
+    channels INTEGER NOT NULL DEFAULT 0,
+    programmes INTEGER NOT NULL DEFAULT 0,
+    unmatched INTEGER NOT NULL DEFAULT 0,
+    warning TEXT,
+    error TEXT
+  );
+  `,
+  // 16: Live TV — encrypted channels (Widevine/ClearKey DASH, played in the browser): the system name, NULL = plain.
+  `
+  ALTER TABLE live_channels ADD COLUMN drm TEXT;
+  `,
+  // 17: Live TV — a channel missing from a refresh is hidden (since when) and deleted after 7 days; the names of
+  // channels without guide (TV and radio apart) survive a restart.
+  `
+  ALTER TABLE live_channels ADD COLUMN missing_since INTEGER;
+  ALTER TABLE live_sources ADD COLUMN unmatched_names TEXT;
+  `,
+  // 18: Live TV recordings (DVR): scheduled, running and finished recordings, series rules, and the guide's repeat
+  // flag ("new episodes only" skips repeats). Recordings keep their own copy of the programme's fields: programme ids
+  // change on every guide refresh. part: 2 when Atomix restarted in the middle of one.
+  `
+  CREATE TABLE live_series_rules (
+    id INTEGER PRIMARY KEY,
+    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    channel_key TEXT,
+    title TEXT NOT NULL,
+    new_only INTEGER NOT NULL DEFAULT 1,
+    keep INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE live_recordings (
+    id INTEGER PRIMARY KEY,
+    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    channel_key TEXT NOT NULL,
+    channel_id INTEGER,
+    channel_name TEXT,
+    programme_id INTEGER,
+    title TEXT NOT NULL,
+    episode_title TEXT,
+    season INTEGER,
+    episode INTEGER,
+    plot TEXT,
+    start INTEGER NOT NULL,
+    end INTEGER NOT NULL,
+    pre INTEGER NOT NULL DEFAULT 1,
+    post INTEGER NOT NULL DEFAULT 3,
+    status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'recording', 'done', 'failed', 'cancelled')),
+    error TEXT,
+    gap_seconds INTEGER NOT NULL DEFAULT 0,
+    path TEXT,
+    item_id INTEGER,
+    rule_id INTEGER REFERENCES live_series_rules(id) ON DELETE SET NULL,
+    part INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX live_recordings_status ON live_recordings(status, start);
+  CREATE INDEX live_recordings_rule ON live_recordings(rule_id);
+  CREATE INDEX live_recordings_item ON live_recordings(item_id);
+  ALTER TABLE live_programmes ADD COLUMN repeat INTEGER NOT NULL DEFAULT 0;
+  `,
+  // 19: play history (one row per playing; counted once a song is half heard or 4 minutes in, a film when watched),
+  // each profile's stars and hearts, and smart playlists (lists is rebuilt so kind may be 'smart'; rules is the
+  // stored rule set, media 'music' or 'video'). A smart list's contents are worked out when it's opened.
+  `
+  CREATE TABLE plays (
+    id INTEGER PRIMARY KEY,
+    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    started_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    seconds REAL NOT NULL DEFAULT 0,
+    counted INTEGER NOT NULL DEFAULT 0,
+    client TEXT NOT NULL DEFAULT 'browser'
+  );
+  CREATE INDEX plays_open ON plays(profile_id, item_id, updated_at);
+  CREATE INDEX plays_started ON plays(profile_id, started_at);
+  CREATE INDEX plays_item ON plays(item_id);
+  CREATE TABLE user_ratings (
+    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    stars INTEGER CHECK (stars BETWEEN 1 AND 5),
+    favourite INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (profile_id, item_id)
+  );
+  CREATE INDEX user_ratings_item ON user_ratings(item_id);
+  CREATE TABLE lists_new (
+    id INTEGER PRIMARY KEY,
+    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('watchlist', 'video', 'music', 'smart')),
+    name TEXT NOT NULL,
+    shared INTEGER NOT NULL DEFAULT 0,
+    media TEXT CHECK (media IN ('music', 'video') OR media IS NULL),
+    rules TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  INSERT INTO lists_new (id, profile_id, kind, name, shared, created_at, updated_at)
+    SELECT id, profile_id, kind, name, shared, created_at, updated_at FROM lists;
+  DROP TABLE lists;
+  ALTER TABLE lists_new RENAME TO lists;
+  CREATE UNIQUE INDEX lists_watchlist ON lists(profile_id) WHERE kind = 'watchlist';
+  `,
+  // 20: music apps (the Subsonic API at /rest/) sign in with app passwords, one per app and profile — kept, since
+  // token sign-in needs the password itself. Scrobbling: each profile's ListenBrainz/Last.fm sign-in (token or
+  // session key, never sent to a browser) and the queue of listens waiting to go out.
+  `
+  CREATE TABLE app_passwords (
+    id INTEGER PRIMARY KEY,
+    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    secret TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER,
+    revoked INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX app_passwords_profile ON app_passwords(profile_id);
+  CREATE TABLE profile_scrobblers (
+    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    service TEXT NOT NULL CHECK (service IN ('listenbrainz', 'lastfm')),
+    token TEXT,
+    username TEXT,
+    last_ok INTEGER,
+    last_error TEXT,
+    stopped INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (profile_id, service)
+  );
+  CREATE TABLE scrobble_queue (
+    id INTEGER PRIMARY KEY,
+    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    service TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('now', 'listen')),
+    payload TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    tries INTEGER NOT NULL DEFAULT 0,
+    next_at INTEGER NOT NULL
+  );
+  CREATE INDEX scrobble_queue_due ON scrobble_queue(next_at);
+  `,
+  // 21: the activity log admins read in Settings → Activity (kept 30 days). Plain sentences, never a password,
+  // token or provider address; settings changes name the settings only.
+  `
+  CREATE TABLE activity (
+    id INTEGER PRIMARY KEY,
+    at INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    user_id INTEGER,
+    profile_id INTEGER,
+    text TEXT NOT NULL,
+    ip TEXT
+  );
+  CREATE INDEX activity_at ON activity(at);
+  CREATE INDEX activity_type ON activity(type, at);
+  `,
+  // 22: the player's audio and subtitle delay per profile and title, and hand-edited details: which fields an admin
+  // edited (refresh and Fix match leave those alone), plus a studio.
+  `
+  CREATE TABLE play_settings (
+    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    audio_delay REAL NOT NULL DEFAULT 0,
+    subtitle_delay REAL NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (profile_id, item_id)
+  );
+  ALTER TABLE items ADD COLUMN locked_fields TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE items ADD COLUMN studio TEXT;
+  `,
+  // 23 — downloads (v0.21): which accounts may download (admins always), and the copies the server prepares.
+  `
+  ALTER TABLE users ADD COLUMN can_download INTEGER NOT NULL DEFAULT 0;
+  UPDATE users SET can_download = 1 WHERE role = 'admin';
+  ALTER TABLE live_recordings ADD COLUMN work_dir TEXT;
+  CREATE TABLE download_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    quality TEXT NOT NULL,
+    format TEXT NOT NULL,
+    status TEXT NOT NULL,
+    progress REAL NOT NULL DEFAULT 0,
+    file TEXT,
+    size INTEGER,
+    error TEXT,
+    created_at INTEGER NOT NULL,
+    used_at INTEGER NOT NULL,
+    fetched_at INTEGER
+  );
+  CREATE UNIQUE INDEX download_jobs_key ON download_jobs(item_id, quality, format);
+  `,
+  // 24 — Home you can arrange (v0.22): the household's arrangement (profile_id NULL, only one) and each profile's own
+  // copy; the household's web apps (shortcut tiles to sites with no API).
+  `
+  CREATE TABLE home_layouts (
+    profile_id INTEGER UNIQUE REFERENCES profiles(id) ON DELETE CASCADE,
+    layout TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE UNIQUE INDEX home_layouts_household ON home_layouts((profile_id IS NULL)) WHERE profile_id IS NULL;
+  CREATE TABLE web_apps (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    image TEXT,
+    kids INTEGER NOT NULL DEFAULT 0,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+  `,
+  // 25 — podcasts and audiobooks (v0.22): who wrote and who reads a title, when an episode came out; each podcast's
+  // feed (its address stays here, never sent to a browser) and each episode's enclosure and download state.
+  `
+  ALTER TABLE items ADD COLUMN author TEXT;
+  ALTER TABLE items ADD COLUMN narrator TEXT;
+  ALTER TABLE items ADD COLUMN published_at INTEGER;
+  CREATE TABLE podcast_feeds (
+    item_id INTEGER PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+    feed_url TEXT NOT NULL UNIQUE,
+    etag TEXT,
+    last_modified TEXT,
+    checked_at INTEGER,
+    error TEXT,
+    error_since INTEGER,
+    failures INTEGER NOT NULL DEFAULT 0,
+    keep_count INTEGER DEFAULT 10,
+    delete_played INTEGER NOT NULL DEFAULT 1,
+    explicit INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE podcast_episodes (
+    item_id INTEGER PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+    guid TEXT NOT NULL,
+    enclosure_url TEXT,
+    enclosure_type TEXT,
+    enclosure_size INTEGER,
+    kept INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'new',
+    error TEXT,
+    explicit INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX podcast_episodes_guid ON podcast_episodes(guid);
+  `,
+  // 26 — books and comics (v0.22): an issue's number (as written, and to sort by), a comic's pages, a series' reading
+  // direction; the place in a book (chapter and text offset) and the kind of device it was read on; pages read.
+  `
+  ALTER TABLE items ADD COLUMN issue TEXT;
+  ALTER TABLE items ADD COLUMN issue_sort REAL;
+  ALTER TABLE items ADD COLUMN page_count INTEGER;
+  ALTER TABLE items ADD COLUMN reading_dir TEXT;
+  ALTER TABLE progress ADD COLUMN locator TEXT;
+  ALTER TABLE progress ADD COLUMN device TEXT;
+  ALTER TABLE plays ADD COLUMN pages INTEGER NOT NULL DEFAULT 0;
+  CREATE INDEX items_series ON items(show_id, issue_sort) WHERE kind IN ('book', 'comic');
+  `,
+  // 27 — reading lists (v0.22): a list of books and comics. The kind's CHECK changes, so the table is rebuilt.
+  `
+  CREATE TABLE lists_new (
+    id INTEGER PRIMARY KEY,
+    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('watchlist', 'video', 'music', 'smart', 'reading')),
+    name TEXT NOT NULL,
+    shared INTEGER NOT NULL DEFAULT 0,
+    media TEXT CHECK (media IN ('music', 'video') OR media IS NULL),
+    rules TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  INSERT INTO lists_new (id, profile_id, kind, name, shared, media, rules, created_at, updated_at)
+    SELECT id, profile_id, kind, name, shared, media, rules, created_at, updated_at FROM lists;
+  DROP TABLE lists;
+  ALTER TABLE lists_new RENAME TO lists;
+  CREATE UNIQUE INDEX lists_watchlist ON lists(profile_id) WHERE kind = 'watchlist';
+  `,
+  // 28 — outside scores (v0.23): a metadata plugin's IMDb, Rotten Tomatoes and Metacritic scores, as JSON
+  // [{ source, value }].
+  `
+  ALTER TABLE items ADD COLUMN scores TEXT;
+  `,
+  // 29 — search (v0.24): each title's search key (src/library/searchkey.js; filled here for existing titles, NULL for
+  // new or renamed ones until the next search fills it) and each profile's recent searches.
+  `
+  ALTER TABLE items ADD COLUMN search_key TEXT;
+  UPDATE items SET search_key = atomix_key(title) || '|' || COALESCE(atomix_key(original_title), '');
+  CREATE INDEX items_search_key_missing ON items(id) WHERE search_key IS NULL;
+  CREATE TRIGGER items_search_key_reset AFTER UPDATE OF title, original_title ON items
+    WHEN OLD.title IS NOT NEW.title OR OLD.original_title IS NOT NEW.original_title
+    BEGIN UPDATE items SET search_key = NULL WHERE id = NEW.id; END;
+  CREATE TABLE search_history (
+    id INTEGER PRIMARY KEY,
+    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    query TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX search_history_profile ON search_history(profile_id, created_at DESC);
+  `,
 ];
 
 /**
@@ -394,6 +745,7 @@ export function openDatabase(file, { upTo = MIGRATIONS.length } = {}) {
   const DatabaseSync = sqlite();
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
+  registerSearchKey(db); // atomix_key() for searches (v0.24)
 
   // Migrations run with foreign keys off (so tables can be rebuilt without
   // cascading deletes), then the result is checked before switching them on.

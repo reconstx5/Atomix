@@ -2,29 +2,40 @@
 import { api, setUnauthorizedHandler, setProfileRequiredHandler } from './api.js';
 import { h, icon, clear, logoMark } from './dom.js';
 import { initNavigation, focusFirst, isKeyboardMode, configureNavigation, openMenu } from './nav.js';
-import { toast, spinner, avatar } from './components.js';
+import { toast, spinner, avatar, announce, ensureLiveRegions } from './components.js';
 import { music, miniPlayer } from './music.js';
 import { castPill, setCastProfile } from './cast.js';
 import { backdropLayer, environmentLayer, repaintEnvironment, routeStart, routeEnd } from './backdrop.js';
-import { renderOrbitNav } from './shell.js';
-import { FRAME_QUERY, homeBack } from './orbit-rules.js';
+import { renderOrbitNav, libraryIcon } from './shell.js';
+import { FRAME_QUERY, homeBack, pillShown } from './orbit-rules.js';
 import { readNote, writeNote, clearNote, gateDecision, startGate, stopGate, rememberReturn, takeReturn, forgetReturn } from './gate.js';
 import { showSplash, endSplash, pageReady } from './splash.js';
+import { readableAccent, accentInk } from './tint.js';
+import { registerWorker } from './offline/install.js';
+import { downloads } from './offline/downloader.js';
+import { canDownloadHere } from './offline/ui.js';
+import { sync, keepSnapshot, readSnapshot, forgetSnapshot } from './offline/sync.js';
+import { watchState, notifyState } from './state-events.js';
+import { mountView } from './screen.js';
 
-export const state = {
+export const state = watchState({
   status: null,
   user: null,
   profile: null, // who's watching
+  offline: false, // v0.21: the server can't be reached; only Downloads works
   lastPrefs: null, // the last profile's prefs, for the look while the picker shows
   pickerFor: null, // the profile that was on when the picker came back (anyone else starts at Home)
   playingItemHash: null, // the page to return to from the player
   libraries: [],
   themes: [],
-};
+  live: null, // { enabled, sources } for this profile (Live TV menu entry)
+}); // v0.26: watched, so Preact components (useAppState in ui.js) re-render when what they read changes
 
 export const isKidsProfile = () => Boolean(state.profile?.kids);
 export const canAdmin = () => state.user?.role === 'admin' && !isKidsProfile();
 export const addonsAllowed = () => !isKidsProfile() || Boolean(state.profile?.allowUnrated);
+/** Live TV shows once a source has channels this profile may see (Kids: only ticked groups). */
+export const liveAllowed = () => state.live?.enabled === true;
 /** The page uses the Orbit layout (full-screen page, floating menu). */
 export const isOrbit = () => document.body.dataset.layout === 'orbit';
 /** "Who's watching?" is needed when there is more than one profile or the only one has a PIN. */
@@ -67,25 +78,146 @@ function askWhoIsWatching() {
 function setPlayersProfile(profile) {
   music.setProfile(profile);
   setCastProfile(profile);
+  downloads.setProfile(profile, state.status?.downloads); // v0.21: each profile's own downloads
+  // Online: what was watched offline goes to the server and the server checks this profile's downloads.
+  if (profile && !state.offline) sync.run();
 }
 
+// ---- Offline (v0.21) ----
+/** An answer from Atomix itself, not a Wi-Fi sign-in page or a proxy's page standing in for it. */
+const isAtomixStatus = (st) => Boolean(st) && typeof st === 'object' && typeof st.version === 'string';
+// Where the app may go with no connection: the downloads, playing them, "Who's watching?" and Now Playing.
+const OFFLINE_PATHS = [/^\/downloads$/, /^\/profiles$/, /^\/now-playing$/];
+const offlineAllowed = (path, query) => OFFLINE_PATHS.some((r) => r.test(path)) || (/^\/play\/\d+$/.test(path) && query.offline != null);
+const OFFLINE_REASON = "You're offline — only your downloads work until Atomix is back";
+
+/** The menu offline: Downloads (and switching profile) work; the rest is disabled with the reason. */
+function disableForOffline() {
+  for (const a of navEl.querySelectorAll('a[href]')) {
+    const href = a.getAttribute('href');
+    if (href === '#/downloads' || href === '#/profiles') continue;
+    a.setAttribute('aria-disabled', 'true');
+    a.title = OFFLINE_REASON;
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      toast(OFFLINE_REASON);
+    });
+  }
+}
+
+/** The server can't be reached: open from the device when it has someone's downloads. */
+async function offlineBoot() {
+  const snap = readSnapshot();
+  if (!snap?.user || !('serviceWorker' in navigator)) return false;
+  let has = false;
+  try {
+    const { openStore } = await import('./offline/store.js');
+    has = (await (await openStore()).all()).length > 0;
+  } catch {
+    has = false;
+  }
+  if (!has) return false;
+  state.offline = true;
+  state.status = { serverName: snap.serverName, defaultTheme: snap.defaultTheme, downloads: snap.downloads, user: snap.user, offline: true };
+  state.themes = snap.themes || [];
+  state.user = snap.user;
+  state.profile = null;
+  state.libraries = [];
+  sync.offlineDays = snap.downloads?.offlineDays;
+  applyTheme();
+  setTitle();
+  document.body.classList.add('signed-in');
+  renderNav();
+  if (!location.hash.startsWith('#/downloads')) history.replaceState(null, '', '#/downloads');
+  window.addEventListener('hashchange', render);
+  watchForServer();
+  await render();
+  return true;
+}
+
+/** Back online (the browser says so, or a status probe every 30 s answers): the normal open, once nothing plays. */
+function watchForServer() {
+  let busy = false;
+  const probe = async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const r = await fetch('/api/status', { credentials: 'same-origin', cache: 'no-store' });
+      if (r.ok && isAtomixStatus(await r.json().catch(() => null))) {
+        if (mediaPlaying()) return; // never mid-film: the next probe tries again
+        location.reload();
+      }
+    } catch {
+      /* still offline */
+    } finally {
+      busy = false;
+    }
+  };
+  window.addEventListener('online', probe);
+  setInterval(probe, 30000);
+}
+
+// v0.24: a view's own scripts are fetched together when it opens (the page carries each view's module graph).
+const preloaded = new Set();
+let moduleGraph = null;
+function preloadModules(path) {
+  if (!moduleGraph) {
+    try {
+      moduleGraph = JSON.parse(document.getElementById('module-graph')?.textContent || '{}');
+    } catch {
+      moduleGraph = {};
+    }
+  }
+  for (const m of moduleGraph[path] || []) {
+    if (preloaded.has(m)) continue;
+    preloaded.add(m);
+    if (document.querySelector(`link[rel="modulepreload"][href="${m}"]`)) continue;
+    document.head.append(h('link', { rel: 'modulepreload', href: m }));
+  }
+}
+const lazyView = (file) => () => {
+  preloadModules(`/js/${file}`);
+  return import(`./${file}`);
+};
+// v0.26: a Screen's data module (its load(), without Preact), started as the route opens.
+const lazyData = (file) => (params, query) => {
+  preloadModules(`/js/${file}`);
+  return import(`./${file}`).then((m) => m.load(params, query));
+};
+
+/** The data starter of the route for `path` (tests: devtools/v026-ui.mjs), or undefined. */
+export const routeData = (path) => routes.find((r) => r.pattern.test(path))?.data;
+
 const routes = [
-  { pattern: /^\/?$/, view: () => import('./views/home.js'), nav: 'home' },
-  { pattern: /^\/library\/(\d+)$/, keys: ['id'], view: () => import('./views/library.js'), nav: (p) => `lib-${p.id}` },
-  { pattern: /^\/item\/(\d+)$/, keys: ['id'], view: () => import('./views/item.js') },
-  { pattern: /^\/play\/(\d+)$/, keys: ['id'], view: () => import('./views/player.js'), fullscreen: true },
-  { pattern: /^\/play-source\/([\w-]+)\/([\w-]+)$/, keys: ['plugin', 'source'], view: () => import('./views/player.js'), fullscreen: true },
-  { pattern: /^\/trailer\/(\d+)$/, keys: ['id'], view: () => import('./views/trailer.js'), fullscreen: true },
-  { pattern: /^\/now-playing$/, view: () => import('./views/nowplaying.js') },
-  { pattern: /^\/cast$/, view: () => import('./views/remote.js') },
-  { pattern: /^\/lists$/, view: () => import('./views/lists.js'), nav: 'lists' },
-  { pattern: /^\/lists\/(\d+)$/, keys: ['id'], view: () => import('./views/lists.js'), nav: 'lists' },
-  { pattern: /^\/collections\/(\d+)$/, keys: ['id'], view: () => import('./views/lists.js') },
-  { pattern: /^\/search$/, view: () => import('./views/search.js'), nav: 'search' },
-  { pattern: /^\/addons$/, view: () => import('./views/addons.js'), nav: 'addons' },
-  { pattern: /^\/addons\/([\w-]+)\/([\w-]+)$/, keys: ['plugin', 'source'], view: () => import('./views/addons.js'), nav: 'addons' },
-  { pattern: /^\/settings(?:\/([\w-]+))?$/, keys: ['tab'], view: () => import('./views/settings.js'), nav: 'settings' },
-  { pattern: /^\/profiles$/, view: () => import('./views/profiles.js'), picker: true },
+  { pattern: /^\/?$/, view: lazyView('views/home.js'), nav: 'home' },
+  { pattern: /^\/library\/(\d+)$/, keys: ['id'], view: lazyView('views/library.js'), data: lazyData('views/library-data.js'), nav: (p) => `lib-${p.id}` },
+  { pattern: /^\/item\/(\d+)$/, keys: ['id'], view: lazyView('views/item.js') },
+  { pattern: /^\/play\/(\d+)$/, keys: ['id'], view: lazyView('views/player.js'), fullscreen: true },
+  { pattern: /^\/play-source\/([\w-]+)\/([\w-]+)$/, keys: ['plugin', 'source'], view: lazyView('views/player.js'), fullscreen: true },
+  { pattern: /^\/trailer\/(\d+)$/, keys: ['id'], view: lazyView('views/trailer.js'), fullscreen: true },
+  { pattern: /^\/read\/(\d+)$/, keys: ['id'], view: lazyView('views/reader.js'), fullscreen: true, keepMusic: true },
+  { pattern: /^\/live$/, view: lazyView('views/live.js'), data: lazyData('views/live-data.js'), nav: 'live' },
+  { pattern: /^\/live\/guide$/, view: lazyView('views/guide.js'), nav: 'live' },
+  { pattern: /^\/live\/recordings$/, view: lazyView('views/recordings.js'), nav: 'live' },
+  { pattern: /^\/live\/play\/(\d+)$/, keys: ['live'], view: lazyView('views/player.js'), fullscreen: true },
+  { pattern: /^\/live\/catchup\/(\d+)$/, keys: ['catchup'], view: lazyView('views/player.js'), fullscreen: true },
+  { pattern: /^\/now-playing$/, view: lazyView('views/nowplaying.js') },
+  { pattern: /^\/cast$/, view: lazyView('views/remote.js') },
+  { pattern: /^\/lists$/, view: lazyView('views/lists.js'), nav: 'lists' },
+  { pattern: /^\/together\/([A-Za-z0-9]{6})$/, keys: ['code'], view: lazyView('views/together.js') },
+  { pattern: /^\/lists\/smart\/new$/, view: lazyView('views/smartlist.js'), nav: 'lists' },
+  { pattern: /^\/lists\/(\d+)\/rules$/, keys: ['id'], view: lazyView('views/smartlist.js'), nav: 'lists' },
+  { pattern: /^\/lists\/(\d+)$/, keys: ['id'], view: lazyView('views/lists.js'), nav: 'lists' },
+  { pattern: /^\/collections\/(\d+)$/, keys: ['id'], view: lazyView('views/lists.js') },
+  { pattern: /^\/downloads$/, view: lazyView('views/downloads.js'), nav: 'downloads' },
+  { pattern: /^\/arrange-home$/, view: lazyView('views/arrange-home.js'), nav: 'home' },
+  { pattern: /^\/search$/, view: lazyView('views/search.js'), nav: 'search' },
+  { pattern: /^\/genre\/([^/]+)$/, keys: ['name'], view: lazyView('views/genre.js'), nav: 'search' }, // v0.24
+  { pattern: /^\/person\/([^/]+)$/, keys: ['name'], view: lazyView('views/person.js'), nav: 'search' },
+  { pattern: /^\/addons$/, view: lazyView('views/addons.js'), nav: 'addons' },
+  { pattern: /^\/addons\/([\w-]+)\/([\w-]+)$/, keys: ['plugin', 'source'], view: lazyView('views/addons.js'), nav: 'addons' },
+  { pattern: /^\/settings(?:\/([\w-]+))?$/, keys: ['tab'], view: lazyView('views/settings.js'), nav: 'settings' },
+  { pattern: /^\/profiles$/, view: lazyView('views/profiles.js'), picker: true },
 ];
 
 let main;
@@ -100,6 +232,7 @@ const THEME_WAIT_MS = 600;
 export const themeReady = () => themeLoad;
 
 export function applyTheme() {
+  notifyState('prefs'); // the prefs may have changed inside the profile, which the state wrapper can't see
   // While "Who's watching?" shows (the client has no profile, the server still does), keep the last
   // profile's look rather than jumping to the default: the splash and the picker stay in their colours.
   const prefs = state.profile?.prefs || (state.user && state.lastPrefs) || {};
@@ -121,12 +254,16 @@ export function applyTheme() {
   document.documentElement.dataset.layout = layout;
   document.documentElement.style.colorScheme = theme?.colorScheme || 'dark';
   const root = document.documentElement.style;
-  if (prefs.accent) root.setProperty('--accent', prefs.accent);
+  // A chosen colour is also used as text (labels, the playing song): on a dark theme it's lifted first if it's too
+  // dark to read; a light theme keeps the colour as chosen (dark reads fine there).
+  const light = theme?.colorScheme === 'light';
+  const accent = prefs.accent ? (light ? prefs.accent : readableAccent(prefs.accent)) : null;
+  if (accent) root.setProperty('--accent', accent);
   else root.removeProperty('--accent');
   // Arctic takes its colour from the artwork; a chosen accent is the light for pages without any.
-  if (prefs.accent) root.setProperty('--tint-default', prefs.accent);
+  if (accent) root.setProperty('--tint-default', accent);
   else root.removeProperty('--tint-default');
-  if (prefs.accent) root.setProperty('--accent-text', contrastText(prefs.accent));
+  if (accent) root.setProperty('--accent-text', accentInk(accent));
   else root.removeProperty('--accent-text');
   root.setProperty('--subtitle-scale', String(prefs.subtitleSize || 1));
   document.documentElement.classList.toggle('reduce-motion', Boolean(prefs.reduceMotion));
@@ -140,15 +277,6 @@ export function applyTheme() {
   }
 }
 
-function contrastText(hex) {
-  const n = parseInt(hex.slice(1), 16);
-  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => {
-    const s = c / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  });
-  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  return lum > 0.4 ? '#111111' : '#ffffff';
-}
 
 // ---- Shell ----
 // A clock in the corner, as on a TV media centre.
@@ -175,22 +303,25 @@ export function renderNav() {
       libraries: state.libraries,
       profile: state.profile,
       addons: addonsAllowed(),
+      live: liveAllowed(),
+      downloads: canDownloadHere() || state.offline, // v0.21 (older themes reach it from Settings → Profile)
       settingsLabel: canAdmin() ? 'Settings' : 'Profile',
       clock: clockEl,
     });
+    if (state.offline) disableForOffline();
     configureNavigation({ menu: navEl.querySelector('.orbit-menu'), rowAlign: 'start' });
     highlightNav();
     return;
   }
   configureNavigation();
   clear(navEl);
-  const libs = state.libraries.map((l) => navLink(`lib-${l.id}`, `#/library/${l.id}`, l.name, l.type === 'tv' ? 'tv' : l.type === 'music' ? 'music' : 'film'));
+  const libs = state.libraries.map((l) => navLink(`lib-${l.id}`, `#/library/${l.id}`, l.name, libraryIcon(l.type)));
   navEl.append(
     h('a', { class: 'brand', href: '#/', 'aria-label': `${state.status?.serverName || 'Atomix'} home` }, logoMark(30), h('span', { class: 'brand-name' }, state.status?.serverName || 'Atomix')),
     h(
       'ul',
       { class: 'nav-links', role: 'list' },
-      [navLink('home', '#/', 'Home', 'home'), ...libs, navLink('lists', '#/lists', 'Lists', 'list'), addonsAllowed() ? navLink('addons', '#/addons', 'Add-ons', 'addons') : null].filter(Boolean).map((a) => h('li', {}, a)),
+      [navLink('home', '#/', 'Home', 'home'), ...libs, navLink('lists', '#/lists', 'Lists', 'list'), liveAllowed() ? navLink('live', '#/live', 'Live TV', 'live') : null, addonsAllowed() ? navLink('addons', '#/addons', 'Add-ons', 'addons') : null, state.offline ? navLink('downloads', '#/downloads', 'Downloads', 'download') : null].filter(Boolean).map((a) => h('li', {}, a)),
     ),
     h(
       'ul',
@@ -212,19 +343,26 @@ export function renderNav() {
       h('li', { class: 'nav-clock-item' }, clockEl),
     ),
   );
+  if (state.offline) disableForOffline();
   highlightNav();
 }
 
 let currentNav = null;
 function highlightNav() {
   for (const a of navEl.querySelectorAll('.nav-link')) {
-    if (a.dataset.nav === currentNav) a.setAttribute('aria-current', 'page');
+    if (a.dataset.nav && a.dataset.nav === currentNav) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
   }
+  // Orbit's phone dock: a page that is only in More (Lists, a fourth library) marks More instead, for the eye and
+  // for screen readers (the entry itself is hidden in the dock). The framed rail hides More, so it never shows there.
+  const more = navEl.querySelector('.orbit-more-btn');
+  if (more && currentNav && !navEl.querySelector(`.orbit-dock [data-nav="${currentNav}"]`)) more.setAttribute('aria-current', 'page');
 }
 
 export async function refreshLibraries() {
-  state.libraries = await api.get('/api/libraries');
+  const [libraries, live] = await Promise.all([api.get('/api/libraries'), api.get('/api/live/status').catch(() => null)]);
+  state.libraries = libraries;
+  state.live = live;
   renderNav();
 }
 
@@ -283,7 +421,9 @@ function onBackKey() {
   } else goBack();
 }
 
+let announcedPath = null;
 async function render() {
+  document.documentElement.classList.remove('pill-hidden'); // every page starts with the pill shown
   const token = ++renderToken;
   // A dialog left open by the browser's Back button would cover the next page.
   for (const d of document.querySelectorAll('dialog[open]')) d.close('cancel');
@@ -298,6 +438,10 @@ async function render() {
   if (!state.user) return renderAuth(token);
 
   const { path, query } = parseHash();
+  if (state.offline && state.profile && !offlineAllowed(path, query)) {
+    navigate('#/downloads', { replace: true });
+    return;
+  }
   // No profile chosen yet on this device: show "Who's watching?" first.
   const route = !state.profile ? routes.find((r) => r.picker) : routes.find((r) => r.pattern.test(path));
   if (!route) {
@@ -310,7 +454,7 @@ async function render() {
 
   document.body.dataset.view = route.fullscreen ? 'player' : route.picker ? 'auth' : 'page';
   // Videos and music don't play over each other.
-  if (route.fullscreen) music.suspend();
+  if (route.fullscreen && !route.keepMusic) music.suspend(); // (reading leaves the music playing)
   else music.resume();
   currentNav = typeof route.nav === 'function' ? route.nav(params) : route.nav || null;
   highlightNav();
@@ -319,20 +463,34 @@ async function render() {
   main.append(spinner());
   routeStart();
   try {
+    // v0.26: a Screen's data starts now, beside its modules; a failure is reported by mountView, not left unhandled.
+    const early = route.data ? route.data(params, query) : undefined;
+    early?.catch(() => {});
     const mod = await route.view();
     if (token !== renderToken) return;
     const container = h('div', { class: 'view' });
-    const result = await mod.render(container, params, query);
+    const leave = await mountView(container, mod, params, query, early); // v0.26: an old render(el) view or a Preact Screen
     if (token !== renderToken) {
-      if (typeof result === 'function') result();
+      if (leave) leave();
       return;
     }
-    cleanup = typeof result === 'function' ? result : null;
+    cleanup = leave;
     clear(main);
     main.append(container);
     routeEnd();
-    pageScroller().scrollTo(0, 0);
-    if (!route.fullscreen) {
+    // A new page is news to a screen reader: its name, once per address (an in-page refresh says nothing — the
+    // action that caused it speaks for itself; the full-screen player says its own things).
+    if (!route.fullscreen && announcedPath !== path) announce(document.title.split(' · ')[0] || document.title);
+    announcedPath = path;
+    // A page opened on one particular thing (a deep link such as the guide's ?channel=) marks it data-focus-now: it
+    // gets the focus and stays in view, keyboard or not.
+    const opened = !route.fullscreen && main.querySelector('[data-focus-now]');
+    if (opened) {
+      opened.removeAttribute('data-focus-now');
+      opened.focus({ preventScroll: true });
+      opened.scrollIntoView({ block: 'center', inline: 'nearest' });
+    } else pageScroller().scrollTo(0, 0);
+    if (!route.fullscreen && !opened) {
       if (isKeyboardMode()) focusFirst(main);
       else main.focus({ preventScroll: true });
     }
@@ -349,9 +507,10 @@ async function render() {
       h(
         'div',
         { class: 'empty-state' },
-        h('h1', {}, 'Something went wrong'),
+        h('h1', {}, err.status === 404 ? 'Nothing here' : 'Something went wrong'),
         h('p', {}, err instanceof TypeError && /fetch|network/i.test(err.message) ? "Can't reach the Atomix server. Check it's still running, then try again." : err.message),
-        h('div', { class: 'actions' }, h('button', { class: 'btn btn-primary', type: 'button', onClick: () => render() }, 'Try again'), h('a', { class: 'btn btn-ghost', href: '#/' }, 'Go home')),
+        // Something that no longer exists won't come back with "Try again": only the way home.
+        h('div', { class: 'actions' }, err.status === 404 ? null : h('button', { class: 'btn btn-primary', type: 'button', onClick: () => render() }, 'Try again'), h('a', { class: err.status === 404 ? 'btn btn-primary' : 'btn btn-ghost', href: '#/' }, 'Go home')),
       ),
     );
   }
@@ -383,6 +542,7 @@ async function renderAuth(token) {
 export async function onSignedIn(user) {
   state.user = user;
   state.status = await api.get('/api/status');
+  keepSnapshot({ status: state.status, themes: state.themes });
   state.profile = state.status.profile;
   applyTheme(); // the person's own theme first, so the splash plays in its colours
   // Signing in is a fresh open (no note yet): the splash plays while the rest is fetched behind it.
@@ -423,6 +583,13 @@ export async function onProfileSelected(profile) {
   state.profile = profile;
   setPlayersProfile(profile);
   applyTheme();
+  if (state.offline) {
+    sync.expire(profile.id).catch(() => {}); // past the offline days: no playing (worked out with no connection)
+    renderNav();
+    state.pickerFor = null;
+    navigate('#/downloads', { replace: true });
+    return;
+  }
   await refreshLibraries();
   writeNote(profile.id);
   watchIdle();
@@ -451,7 +618,10 @@ export async function signOut() {
   clearNote();
   stopGate();
   forgetReturn();
+  forgetSnapshot(); // signed out: this device doesn't open offline as them
   setPlayersProfile(null);
+  // …and keeps none of their downloads (nobody else could see, play or remove them).
+  import('./offline/store.js').then(({ openStore }) => openStore()).then((s) => s.clearAll()).catch(() => {});
   document.body.classList.remove('signed-in');
   applyTheme();
   location.hash = '#/';
@@ -462,17 +632,28 @@ export async function updatePrefs(prefs) {
   const res = await api.patch('/api/me', { prefs });
   state.user = res.user;
   state.profile = res.profile;
+  music.setProfile(res.profile); // the same profile: only its prefs (v0.22 speed and skips) are taken
   applyTheme();
   return state.profile;
 }
 
 async function boot() {
+  ensureLiveRegions();
   main = document.getElementById('main');
   navEl = document.getElementById('nav');
   initNavigation({ onBack: onBackKey });
   document.body.prepend(environmentLayer, backdropLayer);
   // Themes can give the header a solid background once the page scrolls under it.
   window.addEventListener('scroll', () => document.documentElement.classList.toggle('scrolled', window.scrollY > 8), { passive: true });
+  // Orbit on a phone: the profile pill slides away while scrolling down and comes back on any scroll up (v0.24).
+  let lastY = window.scrollY;
+  window.addEventListener('scroll', () => {
+    const y = window.scrollY;
+    const root = document.documentElement;
+    if (isOrbit() && !framed.matches) root.classList.toggle('pill-hidden', !pillShown({ y, lastY, shown: !root.classList.contains('pill-hidden') }));
+    else root.classList.remove('pill-hidden');
+    lastY = y;
+  }, { passive: true });
   document.body.append(miniPlayer, castPill);
   setProfileRequiredHandler(() => {
     if (!state.profile) return;
@@ -496,13 +677,18 @@ async function boot() {
 
   try {
     [state.status, state.themes] = await Promise.all([api.get('/api/status'), api.get('/api/themes')]);
+    if (!isAtomixStatus(state.status) || !Array.isArray(state.themes)) throw new TypeError("Something other than Atomix answered (a Wi-Fi sign-in page?)");
   } catch (err) {
+    // No connection (or the server down behind its proxy): open from the device when it has downloads.
+    if ((err instanceof TypeError || err.status >= 500) && (await offlineBoot().catch(() => false))) return;
     main.append(h('div', { class: 'empty-state' }, h('h1', {}, "Can't reach the Atomix server"), h('p', {}, err.message)));
     return;
   }
+  keepSnapshot({ status: state.status, themes: state.themes });
   // A fresh open (no note in this tab) plays the splash while the rest of the boot happens behind it. Only when
   // signed in: the sign-in screen is not a moment for it. (The session cookie is HttpOnly, so this waits for
   // /api/status, which is one quick request; `main` is empty until then, so nothing shows before the splash.)
+  registerWorker(); // v0.21: the offline helper (secure addresses only; it never blocks the boot)
   state.user = state.status.user;
   state.profile = state.status.profile;
   state.lastPrefs = state.profile?.prefs || null;
@@ -536,6 +722,8 @@ async function boot() {
     }
   }
   if (state.user && state.profile) watchIdle();
+  // v0.21: the connection back while the app stayed open — send what happened offline and check the downloads.
+  window.addEventListener('online', () => !state.offline && state.profile && sync.run());
   window.addEventListener('hashchange', render);
   await render();
   await settleSplash(splash);

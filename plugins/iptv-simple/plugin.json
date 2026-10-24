@@ -1,0 +1,53 @@
+{
+  "id": "iptv-simple",
+  "name": "IPTV Simple",
+  "version": "1.0.0",
+  "description": "Live TV from an M3U playlist and an XMLTV guide — a paid IPTV provider, free channel lists, or a tuner such as HDHomeRun or Tvheadend. Channel groups, catch-up and radio.",
+  "author": "Atomix",
+  "main": "index.js",
+  "settings": [
+    { "key": "playlist", "label": "Playlist (URL or file on this server)", "type": "text", "default": "" },
+    { "key": "guide", "label": "Guide (URL or file; empty = the playlist's own)", "type": "text", "default": "" },
+    { "key": "userAgent", "label": "User agent", "type": "text", "default": "" },
+    {
+      "key": "refreshHours",
+      "label": "Refresh every",
+      "type": "select",
+      "default": "6",
+      "options": [
+        { "value": "1", "label": "Hour" },
+        { "value": "6", "label": "6 hours" },
+        { "value": "12", "label": "12 hours" },
+        { "value": "24", "label": "Day" }
+      ]
+    },
+    {
+      "key": "numbering",
+      "label": "Channel numbers",
+      "type": "select",
+      "default": "playlist",
+      "options": [
+        { "value": "playlist", "label": "From the playlist (tvg-chno), else in order" },
+        { "value": "order", "label": "In playlist order" }
+      ]
+    },
+    { "key": "startNumber", "label": "Start numbering at", "type": "number", "default": 1 },
+    { "key": "guideShift", "label": "Guide time shift (hours)", "type": "number", "default": 0 },
+    { "key": "logosPath", "label": "Logos folder or URL", "type": "text", "default": "" },
+    {
+      "key": "maxStreams",
+      "label": "Streams at once",
+      "type": "select",
+      "default": "auto",
+      "options": [
+        { "value": "auto", "label": "Automatic (1 for a provider, unlimited for a file)" },
+        { "value": "1", "label": "1" },
+        { "value": "2", "label": "2" },
+        { "value": "3", "label": "3" },
+        { "value": "4", "label": "4" },
+        { "value": "unlimited", "label": "Unlimited" }
+      ]
+    },
+    { "key": "catchupDays", "label": "Catch-up days when the playlist doesn't say", "type": "number", "default": 7 }
+  ]
+}

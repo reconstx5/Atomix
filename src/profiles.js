@@ -2,6 +2,7 @@
 // Each profile has its own watch history and preferences; Kids profiles
 // only see titles up to an age rating. Accounts can also be limited to
 // certain libraries by an admin.
+import crypto from 'node:crypto';
 import { HttpError } from './http/router.js';
 import { hashPassword, verifyPassword } from './auth.js';
 import { parseJson } from './db.js';
@@ -20,6 +21,8 @@ export function publicProfile(row) {
     allowUnrated: Boolean(row.allow_unrated),
     libraries: parseJson(row.libraries, null),
     hasPin: Boolean(row.pin_hash),
+    // v0.22: which PIN this is (not the PIN, nor its hash): a device's kept offline check goes when this changes.
+    pinStamp: row.pin_hash ? crypto.createHash('sha256').update(String(row.pin_hash)).digest('hex').slice(0, 12) : null,
     isPrimary: Boolean(row.is_primary),
     prefs: parseJson(row.prefs, {}),
   };

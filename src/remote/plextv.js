@@ -101,7 +101,8 @@ export async function chooseConnection(resource, { timeoutMs = 4000, onTry } = {
     tried.push(c.uri);
     onTry?.(c.uri);
     try {
-      const res = await fetch(`${c.uri}/identity`, { headers: { Accept: 'application/json', 'X-Plex-Token': resource.accessToken }, signal: AbortSignal.timeout(timeoutMs) });
+      // No redirects: the token only goes to the address plex.tv listed.
+      const res = await fetch(`${c.uri}/identity`, { headers: { Accept: 'application/json', 'X-Plex-Token': resource.accessToken }, signal: AbortSignal.timeout(timeoutMs), redirect: 'manual' });
       if (!res.ok) continue;
       const body = await res.json().catch(() => null);
       if (body?.MediaContainer?.machineIdentifier === resource.clientIdentifier) return { url: c.uri, relay: Boolean(c.relay) };

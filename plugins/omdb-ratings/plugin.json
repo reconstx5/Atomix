@@ -1,0 +1,15 @@
+{
+  "id": "omdb-ratings",
+  "name": "OMDb ratings",
+  "version": "1.0.0",
+  "description": "Adds IMDb, Rotten Tomatoes and Metacritic scores to films and shows from OMDb.",
+  "author": "Atomix",
+  "homepage": "https://www.omdbapi.com",
+  "main": "index.js",
+  "enabledByDefault": false,
+  "settings": [
+    { "key": "apiKey", "label": "API key", "type": "password", "default": "", "help": "Free: request one at omdbapi.com/apikey.aspx (1,000 lookups a day)." },
+    { "key": "dailyLimit", "label": "Lookups a day", "type": "number", "default": 900, "help": "OMDb's free keys allow 1,000. The day is the server's local day." }
+  ],
+  "actions": [{ "id": "fetch-missing", "label": "Fetch missing scores" }]
+}

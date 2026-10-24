@@ -515,6 +515,8 @@ test('without libass a text subtitle on a DLNA TV is refused with the libass mes
     await stopCast(admin);
     const r2 = (await startCast(admin, { deviceId: dev['Samsung TV'], itemId: ids.other, position: 0, subtitle: text.id })).data;
     assert.equal(r2.subtitleId, null, 'a start loads without it');
+    assert.equal(r2.notice, "This ffmpeg can't draw subtitles onto video (it needs libass)", 'and says why');
+    assert.equal((await current(admin)).data.notice, "This ffmpeg can't draw subtitles onto video (it needs libass)");
     await stopCast(admin);
   } finally {
     tools.filters.subtitles = had;
@@ -637,6 +639,75 @@ test('GET /api/cast/devices reports enabled, baseUrl, reachable, and busy for th
   }
   assert.equal((await sam.post('/api/cast/devices', { kind: 'dlna', address: tv.location })).status, 403, 'adding devices is for admins');
 });
+
+test('an .ass sidecar is burned in as .ass (styling kept); a dead HLS encoder is reported, not waited for', { skip }, async () => {
+  const file = nf.app.core.db.get('SELECT path FROM items WHERE id = ?', ids.other).path;
+  const ass = file.replace(/\.[^.]+$/, '.de.ass');
+  fs.writeFileSync(ass, '[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,8,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.50,0:00:02.00,Default,,0,0,0,,{\\pos(160,20)}Oben\n');
+  try {
+    nf.app.core.cast.manager.subtitlesChanged(ids.other);
+    const subs = (await admin.get(`/api/items/${ids.other}/subtitles`)).data;
+    const styled = subs.find((t) => t.language === 'de' && t.kind === 'text');
+    assert.ok(styled, 'the .ass sidecar is listed');
+    const s = (await startCast(admin, { deviceId: dev['Samsung TV'], itemId: ids.other, position: 0, subtitle: styled.id })).data;
+    const sid = /\/api\/stream\/([0-9a-f]+)/.exec(tv.called('SetAVTransportURI').at(-1).args.CurrentURI)[1];
+    const ps = nf.app.core.playback.sessions.get(sid);
+    assert.match(ps.burnTextFile, /\.ass$/, 'burned as .ass, not flattened to .vtt');
+    assert.match(fs.readFileSync(ps.burnTextFile, 'utf8'), /pos\(160,20\)/);
+    await stopCast(admin);
+    assert.equal(s.kind, 'dlna');
+  } finally {
+    fs.rmSync(ass, { force: true });
+    nf.app.core.cast.manager.subtitlesChanged(ids.other);
+  }
+  // A viewer whose HLS encoder died gets told so at once.
+  const pb = nf.app.core.playback;
+  const dead = { id: 'deadhls', userId: 1, delivery: 'hls', dir: path.join(nf.app.core.config.transcodeDir, 'deadhls'), proc: null, exited: true, mode: 'transcode' };
+  fs.mkdirSync(dead.dir, { recursive: true });
+  pb.sessions.set(dead.id, dead);
+  const t0 = Date.now();
+  const r = await admin.raw('/api/hls/deadhls/seg00009.m4s');
+  pb.sessions.delete(dead.id);
+  assert.equal(r.status, 500);
+  assert.ok(Date.now() - t0 < 5000, 'no 30 s wait');
+});
+
+// ---- v0.21: casts carry the audio and subtitle delay ----
+test('a cast carries the profile\'s audio delay, and the Chromecast\'s subtitles are shifted by its subtitle delay', { skip }, async () => {
+  await admin.put(`/api/items/${ids.film}/play-settings`, { audioDelay: 0.4, subtitleDelay: 0.5 });
+  try {
+    await startCast(admin, { deviceId: dev['Living room TV'], itemId: ids.film, position: 0 });
+    const load = lastLoad(cc);
+    const sid = /\/api\/stream\/([0-9a-f]+)\?cast=/.exec(load.media.contentId)?.[1];
+    const ps = nf.app.core.playback.sessions.get(sid);
+    assert.equal(ps.audioDelay, 0.4, 'the stream is made with the audio delay');
+    const track = load.media.tracks.find((t) => t.trackContentId.includes('/subtitles/'));
+    assert.match(track.trackContentId, /[?&]delay=0\.5\b/);
+    const vtt = await (await fetch(track.trackContentId)).text();
+    assert.match(vtt, /00:00:01\.000 --> 00:00:02\.500/, vtt);
+    await stopCast(admin);
+  } finally {
+    await admin.put(`/api/items/${ids.film}/play-settings`, { audioDelay: 0, subtitleDelay: 0 });
+  }
+});
+
+test('the DLNA TV\'s burned-in subtitles are shifted by the subtitle delay', { skip }, async () => {
+  if (!nf.app.core.tools?.filters?.subtitles) return; // no libass here: nothing is burned in
+  await admin.put(`/api/items/${ids.other}/play-settings`, { subtitleDelay: 0.5 });
+  try {
+    const s = (await startCast(admin, { deviceId: dev['Samsung TV'], itemId: ids.other, position: 0 })).data;
+    const text = s.subtitles.find((t) => t.kind === 'text');
+    assert.equal((await cmd(admin, s.id, 'subtitle', { id: text.id })).status, 200);
+    const cur = (await current(admin)).data;
+    const ps = [...nf.app.core.playback.sessions.values()].find((x) => x.burnTextFile);
+    assert.ok(ps, JSON.stringify(cur));
+    assert.match(fs.readFileSync(ps.burnTextFile, 'utf8'), /00:00:01\.000 --> 00:00:02\.500/);
+    await stopCast(admin);
+  } finally {
+    await admin.put(`/api/items/${ids.other}/play-settings`, { audioDelay: 0, subtitleDelay: 0 });
+  }
+});
+
 
 test('admins see cast sessions in the dashboard and can stop them; an Atomix shutdown stops every cast', { skip }, async () => {
   const s = (await startCast(sam, { deviceId: dev['Living room TV'], itemId: ids.film, position: 0 })).data;

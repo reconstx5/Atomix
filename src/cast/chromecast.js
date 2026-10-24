@@ -85,13 +85,13 @@ export class ChromecastDevice extends EventEmitter {
     return this.channel.request(NS.media, payload, { destinationId: this.transportId, ...opts });
   }
   /**
-   * @param {{ url, contentType, title, subtitle?, image?, startTime?, duration?, kind: 'movie'|'episode'|'track'|'extra',
+   * @param {{ url, contentType, title, subtitle?, image?, startTime?, duration?, live?, kind: 'movie'|'episode'|'track'|'extra',
    *   tracks?: { trackId, url, language, name }[], activeTrackIds?: number[] }} m
    */
   async load(m) {
     const metadata = { metadataType: m.kind === 'track' ? 3 : 0, title: m.title, subtitle: m.subtitle || undefined, images: m.image ? [{ url: m.image }] : [] };
     if (m.kind === 'track') Object.assign(metadata, { artist: m.subtitle || undefined, albumName: m.album || undefined });
-    const media = { contentId: m.url, contentType: m.contentType, streamType: 'BUFFERED', duration: m.duration || undefined, metadata };
+    const media = { contentId: m.url, contentType: m.contentType, streamType: m.live ? 'LIVE' : 'BUFFERED', duration: m.live ? undefined : m.duration || undefined, metadata };
     if (m.tracks?.length) media.tracks = m.tracks.map((t) => ({ trackId: t.trackId, type: 'TEXT', subtype: 'SUBTITLES', trackContentId: t.url, trackContentType: 'text/vtt', language: t.language || 'und', name: t.name }));
     const r = await this.media({ type: 'LOAD', media, autoplay: true, currentTime: m.startTime || 0, activeTrackIds: m.activeTrackIds || [] }, { timeoutMs: 20000 });
     if (r.type === 'LOAD_FAILED' || r.type === 'LOAD_CANCELLED' || r.type === 'INVALID_REQUEST') {

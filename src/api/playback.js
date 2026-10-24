@@ -1,6 +1,8 @@
 // Playback session, streaming and add-on (plugin source) endpoints.
+import { AUDIO_KINDS } from '../library/kinds.js';
 import { HttpError } from '../http/router.js';
-import { resolveSource } from '../remote/index.js';
+import { resolveSource, isRemotePath } from '../remote/index.js';
+import fs from 'node:fs';
 import { serializeItem } from './serialize.js';
 import { listSubtitles } from '../stream/subtitles.js';
 import { QUALITIES } from '../stream/playback.js';
@@ -8,7 +10,7 @@ import { parseJson } from '../db.js';
 
 const list = (v) => (Array.isArray(v) ? v.map(String) : typeof v === 'string' ? v.split(',') : []).map((s) => s.trim().toLowerCase()).filter(Boolean);
 
-function parseCaps(input = {}) {
+export function parseCaps(input = {}) {
   return {
     // Clients always send their capabilities; the fallback assumes a typical browser.
     video: Array.isArray(input.video) || typeof input.video === 'string' ? list(input.video) : ['h264'],
@@ -16,6 +18,9 @@ function parseCaps(input = {}) {
     containers: list(input.containers).length ? list(input.containers) : ['mp4'],
     hls: Boolean(input.hls),
     hdr: Boolean(input.hdr),
+    // MediaSource (the page plays Atomix's DASH buffer itself): iPhone Safari has none. A client that doesn't say is
+    // taken to have it, as before 0.19.1.
+    mse: input.mse !== false,
   };
 }
 
@@ -36,7 +41,9 @@ export function registerPlaybackRoutes(r, core) {
 
   r.post('/api/items/:id/playback', async (ctx) => {
     const item = library.get(ctx.params.id);
-    if (!item || !['movie', 'episode', 'track', 'extra'].includes(item.kind) || !library.canSee(ctx.viewer, item)) throw new HttpError(404, 'Nothing to play here');
+    if (!item || !(['movie', 'episode', 'extra'].includes(item.kind) || AUDIO_KINDS.has(item.kind)) || !item.path || !library.canSee(ctx.viewer, item)) throw new HttpError(404, 'Nothing to play here');
+    // A file that has gone (moved, or its drive unplugged) is said at once, not after a failed conversion (v0.22).
+    if (!isRemotePath(item.path) && !fs.existsSync(item.path)) throw new HttpError(404, 'The file is missing on the server — try rescanning the library.');
     const body = await ctx.body();
     const media = parseJson(item.media, null);
     const quality = String(body.quality || settings.get('defaultQuality') || 'original');
@@ -53,10 +60,16 @@ export function registerPlaybackRoutes(r, core) {
       resumed = true;
     }
 
-    const { session, url } = playback.create({
+    // Delays: the request's audio delay (the player just changed it), else the one saved for this profile and title.
+    const saved = ['movie', 'episode'].includes(item.kind) ? core.playSettings.get(ctx.viewer.profileId, item.id) : { audioDelay: 0, subtitleDelay: 0 };
+    if (body.audioDelay !== undefined && ['movie', 'episode'].includes(item.kind)) Object.assign(saved, core.playSettings.set(ctx.viewer.profileId, item.id, { audioDelay: body.audioDelay }));
+    const { session, url } = await playback.create({
       user: ctx.user,
       profile: ctx.profile,
       item,
+      audioDelay: saved.audioDelay,
+      subtitleDelay: saved.subtitleDelay,
+      speed: Number(body.speed) || 1,
       caps: parseCaps(body.caps),
       source: await remoteSource(item),
       start,
@@ -70,7 +83,7 @@ export function registerPlaybackRoutes(r, core) {
 
     const listId = body.listId ? Number(body.listId) : null;
     const list = listId ? core.lists.get(listId) : null;
-    const next = item.kind === 'track' || item.kind === 'extra' ? null : list && core.lists.visibleTo(list, ctx.viewer) ? core.lists.nextIn(list.id, item.id, ctx.viewer) : library.nextEpisode(item);
+    const next = AUDIO_KINDS.has(item.kind) || item.kind === 'extra' ? null : list && core.lists.visibleTo(list, ctx.viewer) ? core.lists.nextIn(list.id, item.id, ctx.viewer) : library.nextEpisode(item);
     const show = item.show_id ? library.get(item.show_id) : null;
     const parent = item.kind === 'extra' ? library.get(item.parent_id) : null;
     return {
@@ -83,6 +96,9 @@ export function registerPlaybackRoutes(r, core) {
       resumed,
       duration: item.duration || media?.duration || null,
       reasons: session.reasons,
+      audioDelay: saved.audioDelay,
+      subtitleDelay: saved.subtitleDelay,
+      chapters: item.kind === 'track' ? [] : core.chapters.forItem(item, media), // a podcast episode's or book's own chapters too
       quality,
       audioIndex: session.audio?.index ?? null,
       audioTracks: (media?.audio || []).map((a) => ({ index: a.index, codec: a.codec, channels: a.channels, language: a.language, title: a.title, default: a.default })),
@@ -92,7 +108,7 @@ export function registerPlaybackRoutes(r, core) {
       show: show ? serializeItem(show) : null,
       next: next ? serializeItem(next) : null,
       listId: list && core.lists.visibleTo(list, ctx.viewer) ? list.id : null,
-      previews: item.kind === 'track' ? null : core.extras.previewManifest(item),
+      previews: AUDIO_KINDS.has(item.kind) ? null : core.extras.previewManifest(item),
       markers: item.kind === 'episode' ? core.extras.playbackMarkers(item.id) : { intro: null, credits: null },
     };
   });
@@ -105,8 +121,7 @@ export function registerPlaybackRoutes(r, core) {
 
   r.post('/api/playback/:sid/ping', async (ctx) => {
     const body = await ctx.body();
-    playback.heartbeat(ctx.params.sid, ctx.user, body);
-    return { ok: true };
+    return playback.heartbeat(ctx.params.sid, ctx.user, body);
   });
 
   r.get('/api/stream/:sid', (ctx) => playback.streamProgressive(ctx, ctx.params.sid), { cast: 'stream' });

@@ -3,11 +3,12 @@
 
 /**
  * @param {object} core
- * @param {{ user, viewer, item, position: number, duration?: number, sessionId?: string }} p
+ * @param {{ user, viewer, item, position: number, duration?: number, sessionId?: string, client?: string }} p
  * @returns {Promise<{ watched: boolean }>}
  */
-export async function recordProgress(core, { user, viewer, item, position, duration, sessionId = null }) {
-  const result = core.library.saveProgress(viewer.profileId, item, position, duration);
+export async function recordProgress(core, { user, viewer, item, position, duration, sessionId = null, client = 'browser', paused = false, locator, device, watched, pages }) {
+  const result = core.library.saveProgress(viewer.profileId, item, position, duration, { locator, device, watched });
+  core.plays?.report({ profileId: viewer.profileId, item, position, duration, watched: result.watched, paused, client, pages }); // play history
   await core.hooks.emit('playback:progress', { user, viewer, item, position: Number(position), watched: result.watched, sessionId });
   return result;
 }

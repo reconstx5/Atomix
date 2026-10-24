@@ -2,6 +2,7 @@
 // control in that direction, Enter activates, Backspace goes back.
 // Works with keyboards, TV remotes (which send arrow keys) and gamepads
 // mapped to arrows.
+import { reduceMotion } from './motion.js';
 import { menuKey, menuStep, leftOnPage, FRAME_QUERY } from './orbit-rules.js';
 
 const FOCUSABLE = [
@@ -139,7 +140,9 @@ export function openMenu(from = document.activeElement) {
   if (!items.length) return false;
   if (from && from !== document.body && !menuEl.contains(from)) returnTo = from;
   document.documentElement.classList.add('menu-open');
-  (items.find((a) => a.getAttribute('aria-current') === 'page') || items[0]).focus({ preventScroll: true });
+  const target = items.find((a) => a.getAttribute('aria-current') === 'page') || items[0];
+  target.focus({ preventScroll: true });
+  target.scrollIntoView({ block: 'nearest' }); // the page's entry may be scrolled out of the list's view (v0.24 review fix)
   return true;
 }
 
@@ -215,7 +218,7 @@ export function initNavigation({ onBack }) {
       if (next) {
         e.preventDefault();
         next.focus({ preventScroll: true });
-        const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const reduce = reduceMotion(); // the system setting or the profile's own
         // Orbit: moving along a row scrolls it so the selected card stays at the left.
         const inline = rowInline === 'start' && (dir === 'left' || dir === 'right') && next.closest('.row-scroller') ? 'start' : 'nearest';
         next.scrollIntoView({ block: 'nearest', inline, behavior: reduce ? 'auto' : 'smooth' });

@@ -159,3 +159,33 @@ test('extras without a picture want a thumbnail, in the same libraries previews 
   assert.ok(store.saveJob(row(ex), 'thumb', { status: 'done' }));
   assert.equal(store.nextThumbItem(), null);
 });
+
+test("the lyrics catch-up doesn't scan again while nothing is pending until the next scan", () => {
+  const d = openDatabase(path.join(tempDir(), 'lyr.db'));
+  const s = new ExtrasStore(d);
+  assert.equal(s.nextLyricsItem(), null);
+  let reads = 0;
+  const get = d.get.bind(d);
+  d.get = (...a) => (reads++, get(...a));
+  assert.equal(s.nextLyricsItem(), null);
+  assert.equal(reads, 0, 'none pending is remembered');
+  const lib = Number(d.run('INSERT INTO libraries (name, type, paths, created_at) VALUES (?, ?, ?, ?)', 'M', 'music', '[]', now).lastInsertRowid);
+  d.run("INSERT INTO items (library_id, kind, title, path, media, added_at, updated_at) VALUES (?, 'track', 'S', '/m/s.mp3', ?, ?, ?)", lib, JSON.stringify({ tags: {} }), now, now);
+  assert.equal(s.nextLyricsItem(), null, 'still remembered until a scan');
+  s.scanned();
+  assert.equal(s.nextLyricsItem()?.title, 'S', 'a scan looks again');
+});
+
+test('the Settings lyrics count is cached for 60 s', () => {
+  const d = openDatabase(path.join(tempDir(), 'lyrc.db'));
+  let t = 1_000_000;
+  const s = new ExtrasStore(d, { now: () => t });
+  const lib = Number(d.run('INSERT INTO libraries (name, type, paths, created_at) VALUES (?, ?, ?, ?)', 'M', 'music', '[]', now).lastInsertRowid);
+  const add = (n) => d.run("INSERT INTO items (library_id, kind, title, path, media, added_at, updated_at) VALUES (?, 'track', ?, ?, ?, ?, ?)", lib, n, `/m/${n}.mp3`, JSON.stringify({ tags: {} }), now, now);
+  add('a');
+  assert.equal(s.pendingCounts().lyrics, 1);
+  add('b');
+  assert.equal(s.pendingCounts().lyrics, 1, 'within 60 s the count is reused');
+  t += 60_001;
+  assert.equal(s.pendingCounts().lyrics, 2);
+});

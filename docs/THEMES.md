@@ -54,7 +54,7 @@ Set these custom properties on `:root`. Everything in the app is built from them
 | `--font`, `--font-display` | body and heading fonts. Atomix ships **Roboto Condensed** (Latin and Latin Extended, SIL Open Font License) so `"Roboto Condensed"` works offline; for anything else add `@font-face` with files in your theme folder |
 | `--font-title` | typeface for big titles when there is no clear logo. Atomix also ships **League Gothic** (SIL OFL) for this |
 | `--header-h` | height of the top menu bar |
-| `--backdrop-dim`, `--backdrop-blur`, `--backdrop-opacity`, `--backdrop-saturate` | how the full-screen artwork behind the pages is shown (e.g. `--backdrop-blur: 12px` for a frosted look) |
+| `--backdrop-dim` | how much of the page colour is laid over the full-screen artwork behind the pages (a percentage; the Arctic themes use 18–24%). `--backdrop-blur`, `--backdrop-opacity` and `--backdrop-saturate` were removed in v0.15.0 — the artwork is shown crisp at full opacity; a theme that wants a frosted look styles `.backdrop` itself (`filter: blur(12px)`) |
 
 The Arctic themes also define `--panel` (glassy panel colour), `--focus` / `--focus-text` (the white used for
 whatever has keyboard or remote focus) and `--halo` (the glow around it). Other themes can use these names too.

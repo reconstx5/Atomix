@@ -22,6 +22,8 @@ function hostPort(address) {
   if (!(port > 0 && port < 65536)) return null;
   return { host: m[1], port };
 }
+import { isPrivateTarget, checkResolved } from '../http/net.js';
+
 function httpUrl(address) {
   try {
     const u = new URL(String(address).trim());
@@ -102,6 +104,7 @@ export class CastDevices {
     if (kind === 'dlna') {
       const location = httpUrl(address);
       if (!location) throw new HttpError(400, "Enter the TV's description address, like http://192.168.1.50:7676/description.xml.");
+      if (isPrivateTarget(location) || (await checkResolved(location).then(() => false, () => true))) throw new HttpError(400, 'That address points at this server or a private network.');
       const d = new DlnaDevice({ location });
       let desc;
       try {

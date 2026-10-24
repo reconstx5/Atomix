@@ -61,15 +61,22 @@ export function makeEpisode(file, { seconds = 100, themeAt = null, seed = 1, aud
 }
 
 /** A short tone with ID3/Vorbis tags and optional embedded cover art. */
-export function makeAudio(file, { tags = {}, seconds = 2, cover = null, codec } = {}) {
+export function makeAudio(file, { tags = {}, seconds = 2, cover = null, codec, chapters = null } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const args = ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `sine=frequency=330:duration=${seconds}`];
+  if (chapters) {
+    // Chapters (seconds) through an ffmetadata file, as an audiobook (.m4b) carries them.
+    const meta = `${file}.ffmeta`;
+    fs.writeFileSync(meta, ';FFMETADATA1\n' + chapters.map((c) => `[CHAPTER]\nTIMEBASE=1/1000\nSTART=${Math.round(c.start * 1000)}\nEND=${Math.round(c.end * 1000)}\ntitle=${c.title}\n`).join(''));
+    args.push('-i', meta, '-map_metadata', '1', '-map_chapters', '1');
+  }
   if (cover) args.push('-i', cover, '-map', '0:a', '-map', '1:v', '-c:v', 'mjpeg', '-disposition:v', 'attached_pic');
   if (codec) args.push('-c:a', codec);
   for (const [k, v] of Object.entries(tags)) args.push('-metadata', `${k}=${v}`);
   if (file.endsWith('.mp3')) args.push('-id3v2_version', '3');
   args.push(file);
   execFileSync('ffmpeg', args);
+  if (chapters) fs.rmSync(`${file}.ffmeta`, { force: true });
 }
 
 export function makeImage(file, color = 'red', size = '300x300') {

@@ -154,7 +154,7 @@ const hms = (s) => { s = Math.max(0, Math.floor(s)); return `${Math.floor(s / 36
 export async function fakeDlna({ sink = ['http-get:*:video/mp4:*', 'http-get:*:audio/mpeg:*'], urlBase = false, relativeControl = false, name = 'Samsung TV', port: listenPort = 0 } = {}) {
   const http = await import('node:http');
   const calls = [];
-  const state = { uri: '', meta: '', transport: 'NO_MEDIA_PRESENT', position: 0, duration: 0, volume: 50, rejectMeta: false, noSeek: false };
+  const state = { uri: '', meta: '', transport: 'NO_MEDIA_PRESENT', position: 0, duration: 0, volume: 50, rejectMeta: false, noSeek: false, positionDelay: 0 };
   const ctl = (svc) => (relativeControl ? `ctl/${svc}` : `/upnp/ctl/${svc}`);
   const fault = (res, code) => {
     res.writeHead(500, { 'content-type': 'text/xml; charset="utf-8"' });
@@ -193,12 +193,15 @@ export async function fakeDlna({ sink = ['http-get:*:video/mp4:*', 'http-get:*:a
       if (action === 'Pause') { state.transport = 'PAUSED_PLAYBACK'; return answer(res, service, action); }
       if (action === 'Stop') { state.transport = 'STOPPED'; state.position = 0; return answer(res, service, action); }
       if (action === 'Seek') {
-        if (state.noSeek) return fault(res, 710);
+        if (state.noSeek) return fault(res, state.noSeekCode || 710);
         const [h, mi, s] = args.Target.split(':').map(Number);
         state.position = h * 3600 + mi * 60 + s;
         return answer(res, service, action);
       }
-      if (action === 'GetPositionInfo') return answer(res, service, action, { Track: 1, TrackDuration: hms(state.duration), TrackURI: state.uri, RelTime: hms(state.position), AbsTime: 'NOT_IMPLEMENTED' });
+      if (action === 'GetPositionInfo') {
+        const reply = () => answer(res, service, action, { Track: 1, TrackDuration: hms(state.duration), TrackURI: state.uri, RelTime: hms(state.position), AbsTime: 'NOT_IMPLEMENTED' });
+        return state.positionDelay ? setTimeout(reply, state.positionDelay) : reply();
+      }
       if (action === 'GetTransportInfo') return answer(res, service, action, { CurrentTransportState: state.transport, CurrentTransportStatus: 'OK', CurrentSpeed: 1 });
       if (action === 'GetMediaInfo') {
         const uri = state.uri; // what was loaded when the question arrived
@@ -223,7 +226,7 @@ export async function fakeDlna({ sink = ['http-get:*:video/mp4:*', 'http-get:*:a
     finish() { state.transport = 'STOPPED'; state.position = 0; },
     takeOver() { state.uri = 'http://192.168.1.50/other.mp4'; state.transport = 'PLAYING'; },
     rejectMetadataOnce() { state.rejectMeta = true; },
-    noSeek() { state.noSeek = true; },
+    noSeek(code = 710) { state.noSeek = true; state.noSeekCode = code; },
     /** The TV takes the URL but never plays it (it can't fetch it). */
     refuseToPlay() { state.refusePlay = true; },
     /** The next n SetAVTransportURI calls fault (the TV can't take the URL). */

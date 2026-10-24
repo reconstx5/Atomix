@@ -1,0 +1,22 @@
+{
+  "id": "more-home-rows",
+  "name": "More Home rows",
+  "version": "1.0.0",
+  "description": "Adds Finish what you started, Seasonal picks and On this day to Home. Each row follows every profile's rules and hides when it's empty.",
+  "author": "Atomix",
+  "main": "index.js",
+  "enabledByDefault": true,
+  "settings": [
+    { "key": "idleDays", "label": "Finish what you started: left for at least (days)", "type": "number", "default": 14 },
+    {
+      "key": "hemisphere",
+      "label": "Seasons",
+      "type": "select",
+      "default": "southern",
+      "options": [
+        { "value": "southern", "label": "Southern hemisphere (summer in Dec–Feb)" },
+        { "value": "northern", "label": "Northern hemisphere (summer in Jun–Aug)" }
+      ]
+    }
+  ]
+}

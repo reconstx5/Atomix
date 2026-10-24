@@ -1,0 +1,16 @@
+{
+  "id": "fanart-tv",
+  "name": "Fanart.tv",
+  "version": "1.0.0",
+  "description": "Fills missing clear logos, backgrounds and posters for films, shows, artists and albums from Fanart.tv.",
+  "author": "Atomix",
+  "homepage": "https://fanart.tv",
+  "main": "index.js",
+  "enabledByDefault": false,
+  "settings": [
+    { "key": "apiKey", "label": "Personal API key", "type": "password", "default": "", "help": "Free: sign in at fanart.tv, open your profile → API." },
+    { "key": "fillLogo", "label": "Fill clear logos", "type": "boolean", "default": true },
+    { "key": "fillBackdrop", "label": "Fill backgrounds", "type": "boolean", "default": true },
+    { "key": "fillPoster", "label": "Fill posters", "type": "boolean", "default": true }
+  ]
+}

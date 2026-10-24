@@ -154,3 +154,27 @@ test('an unreachable renderer emits close after two failed polls', async () => {
   await d.refresh().catch(() => {});
   assert.equal(closed, true);
 });
+
+test('a status poll still in flight is not stacked by the next tick', async () => {
+  const f = await fake();
+  const d = new DlnaDevice({ location: f.location, pollMs: 100 });
+  open.push(d);
+  await d.connect();
+  await d.load({ url: 'http://x/f.mp4', contentType: 'video/mp4', title: 'T', kind: 'movie' });
+  f.state.positionDelay = 800; // a slow TV
+  const before = f.called('GetPositionInfo').length;
+  await new Promise((r) => setTimeout(r, 1000));
+  const polls = f.called('GetPositionInfo').length - before;
+  assert.ok(polls >= 1 && polls <= 2, `one poll at a time, got ${polls}`);
+});
+
+test('Seek faults 701 and 602 at the start are treated like 710 (the TV can\'t seek; load still plays)', async () => {
+  for (const code of [701, 602]) {
+    const f = await fake();
+    const d = await device(f);
+    f.noSeek(code);
+    await d.load({ url: 'http://x/f.mp4', contentType: 'video/mp4', title: 'T', kind: 'movie', startTime: 30 });
+    assert.equal(d.seekSupported, false, String(code));
+    assert.equal(f.state.transport, 'PLAYING');
+  }
+});

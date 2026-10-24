@@ -33,6 +33,23 @@ export function homeBack({ hasMenu, onHome, atTop }) {
   return atTop ? 'menu' : 'top';
 }
 
+/** Orbit's icon for a library (v0.24): one per kind, the Live TV recordings library apart from other TV. */
+export function orbitLibraryIcon(lib) {
+  if (lib?.type === 'tv' && lib.recordings) return 'recording';
+  return { tv: 'tv', music: 'music', podcasts: 'mic', audiobooks: 'audiobook', books: 'book', comics: 'comic' }[lib?.type] || 'film';
+}
+
+/**
+ * The phone's profile pill (v0.24): hidden while scrolling down, back on any scroll up and at the top of the page.
+ * Moves of 4 px or less change nothing, so a finger's wobble doesn't flicker it.
+ */
+export function pillShown({ y, lastY, shown }) {
+  if (y <= 8) return true;
+  if (y > lastY + 4) return false;
+  if (y < lastY - 4) return true;
+  return shown;
+}
+
 /** Two boxes (anything with top/bottom) overlap vertically. */
 export const sameLine = (a, b) => Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0;
 

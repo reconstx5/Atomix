@@ -2,7 +2,7 @@
 // what is playing on a TV from every page. Atomix itself drives the TV; this page is only the remote.
 import { api } from './api.js';
 import { h, icon, clear } from './dom.js';
-import { art, toast, openDialog } from './components.js';
+import { art, toast, openDialog, spinner } from './components.js';
 
 const listeners = new Set();
 let profileId = null;
@@ -134,7 +134,7 @@ const isAdmin = async () => (await import('./app.js')).canAdmin();
  * Choose a device and cast `target` ({ itemId } or { queue: { itemIds, index } }) to it.
  * `opts.position`, `audioIndex` and `subtitle` carry on from the player; `onStarted` runs once the TV has it.
  */
-export function openCastPicker(target, { position = null, audioIndex = null, subtitle = null, onStarted } = {}) {
+export function openCastPicker(target, { position = null, audioIndex = null, subtitle = null, onStarted, encrypted = false } = {}) {
   let dialog;
   const list = h('div', { class: 'cast-picker' });
   openDialog({
@@ -151,7 +151,7 @@ export function openCastPicker(target, { position = null, audioIndex = null, sub
 
   async function load(refresh) {
     admin = await isAdmin();
-    clear(list).append(h('p', { class: 'cast-looking', role: 'status' }, h('span', { class: 'spinner spinner-sm', 'aria-hidden': 'true' }), 'Looking for devices…'));
+    clear(list).append(h('p', { class: 'cast-looking', role: 'status' }, spinner('Looking for devices', { inline: true }), 'Looking for devices…'));
     let r;
     try {
       r = await api.get(`/api/cast/devices${refresh ? '?refresh=1' : ''}`);
@@ -175,7 +175,14 @@ export function openCastPicker(target, { position = null, audioIndex = null, sub
       );
       return;
     }
-    if (!r.devices.length) {
+    // v0.27: an encrypted channel plays only on a Chromecast or Google TV (its own Widevine).
+    const devices = encrypted ? r.devices.filter((d) => d.kind === 'chromecast') : r.devices;
+    if (encrypted && r.devices.length && !devices.length) {
+      list.append(h('div', { class: 'cast-empty' }, h('p', { class: 'cast-empty-title' }, 'Encrypted channels need a Chromecast or Google TV on your network. Plain channels still play here.'), addRow()), refreshRow());
+      list.querySelector('button')?.focus();
+      return;
+    }
+    if (!devices.length) {
       list.append(
         h('div', { class: 'cast-empty' }, h('p', { class: 'cast-empty-title' }, 'No devices found on your network.'), h('p', { class: 'muted' }, 'Atomix and the TV must be on the same network. Atomix in Docker needs network_mode: host to see them.'), addRow()),
         refreshRow(),
@@ -183,7 +190,7 @@ export function openCastPicker(target, { position = null, audioIndex = null, sub
       list.querySelector('button')?.focus();
       return;
     }
-    for (const d of r.devices) {
+    for (const d of devices) {
       list.append(
         h(
           'button',
@@ -206,8 +213,9 @@ export function openCastPicker(target, { position = null, audioIndex = null, sub
       if (audioIndex != null) body.audioIndex = audioIndex;
       if (subtitle) body.subtitle = subtitle;
       if (target.queue) (await import('./music.js')).music.pause();
-      await startCast(body);
+      const started = await startCast(body);
       dialog?.close('done');
+      if (started?.notice) toast(started.notice); // e.g. the TV can't show the chosen subtitle
       onStarted?.();
       const { navigate } = await import('./app.js');
       navigate('#/cast', { replace: Boolean(onStarted) });
@@ -219,6 +227,9 @@ export function openCastPicker(target, { position = null, audioIndex = null, sub
   }
   load(false);
 }
+
+/** Live TV: cast a channel ({ liveChannelId }) or a programme from the archive ({ catchupProgrammeId }, `position`). */
+export const castLive = (target, opts = {}) => openCastPicker(target, opts);
 
 /** Add a Chromecast or DLNA TV by its address (admins). Resolves to the device, or null. */
 export function addDeviceDialog() {
@@ -271,10 +282,15 @@ const pillNext = h('button', { type: 'button', class: 'mbtn cast-pill-next', 'ar
 export const castPill = h(
   'div',
   { class: 'cast-pill', hidden: true, role: 'region', 'aria-label': 'Casting' },
-  h('a', { class: 'cast-pill-open', href: '#/cast' }, pillArt, h('span', { class: 'cast-pill-text' }, pillLabel, pillTitle)),
+  h('a', { class: 'cast-pill-open', href: '#/cast' }, pillArt, h('span', { class: 'cast-pill-text', 'aria-live': 'polite', 'aria-atomic': 'true' }, pillLabel, pillTitle)),
   h('div', { class: 'cast-pill-buttons' }, pillPlay, pillNext),
 );
 let pillImage = null;
+
+/** Only real changes reach the page (and a screen reader): the 5-second poll rewrites nothing that's the same. */
+const setText = (el, text) => {
+  if (el.textContent !== text) el.textContent = text;
+};
 
 function paintPill() {
   const s = castState();
@@ -284,8 +300,8 @@ function paintPill() {
   document.documentElement.classList.toggle('has-cast', show);
   if (!show) return;
   if (s) {
-    pillLabel.textContent = `Playing on ${s.deviceName}`;
-    pillTitle.textContent = s.upNext ? `Up next: ${s.upNext.title}` : s.title;
+    setText(pillLabel, `Playing on ${s.deviceName}`);
+    setText(pillTitle, s.upNext ? `Up next: ${s.upNext.title}` : s.title);
     if (pillImage !== s.image) {
       pillImage = s.image;
       clear(pillArt).append(art(s.image, s.title, { kind: 'square', eager: true }));
@@ -296,8 +312,8 @@ function paintPill() {
     clear(pillPlay).append(icon(playing ? 'pause' : 'play', { size: 20 }));
     pillNext.hidden = !(s.upNext || (s.queue && s.queue.index + 1 < s.queue.items.length));
   } else {
-    pillLabel.textContent = `Casting ended on ${ended.deviceName}`;
-    pillTitle.textContent = ended.detail || (ended.ended === 'finished' ? 'It finished.' : '');
+    setText(pillLabel, `Casting ended on ${ended.deviceName}`);
+    setText(pillTitle, ended.detail || (ended.ended === 'finished' ? 'It finished.' : ''));
     pillPlay.hidden = true;
     pillNext.hidden = true;
   }

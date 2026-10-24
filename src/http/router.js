@@ -43,6 +43,9 @@ export class Router {
       profile: options.profile ?? true,
       // Blocked while a Kids profile is active (admin routes always are).
       adult: options.adult ?? false,
+      // 'binary': the body may also be application/octet-stream (a DRM licence request from the browser's key system).
+      // A cross-site form can't send that type, and a cross-origin fetch of it needs a preflight Atomix never grants.
+      body: options.body ?? 'json',
       owner: options.owner,
       // A media route a TV may fetch with a cast link instead of a session cookie ('file'|'stream'|'subtitle'|'image').
       cast: options.cast,
@@ -109,21 +112,37 @@ export function serializeCookie(name, value, opts = {}) {
   return str;
 }
 
-export function readBody(req, limit = 1024 * 1024) {
+export function readBody(req, limit = 1024 * 1024, { timeoutMs = 30000 } = {}) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
+    // A body that trickles in forever would hold the request open; 30 s is plenty for a JSON body.
+    const timer = setTimeout(() => {
+      reject(new HttpError(408, 'Request body took too long'));
+      req.resume(); // whatever else trickles in is dropped; the answer goes out and the connection closes after it
+    }, timeoutMs);
+    timer.unref?.();
+    let over = false;
     req.on('data', (c) => {
+      if (over) return; // drained, not kept: the 413 reaches the client, then the connection closes
       size += c.length;
       if (size > limit) {
+        over = true;
+        clearTimeout(timer);
+        chunks.length = 0;
         reject(new HttpError(413, 'Request body too large'));
-        req.destroy();
         return;
       }
       chunks.push(c);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', reject);
+    req.on('end', () => {
+      clearTimeout(timer);
+      if (!over) resolve(Buffer.concat(chunks));
+    });
+    req.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
   });
 }
 
@@ -151,7 +170,7 @@ export function createContext(req, res, url, params, extras) {
     ...extras,
     async body() {
       if (!bodyPromise) {
-        bodyPromise = readBody(req).then((buf) => {
+        bodyPromise = readBody(req, 1024 * 1024, { timeoutMs: ctx.bodyTimeoutMs || 30000 }).then((buf) => {
           if (!buf.length) return {};
           try {
             return JSON.parse(buf.toString('utf8'));

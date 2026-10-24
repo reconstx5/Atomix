@@ -19,7 +19,7 @@ const ALIASES = {
   originaldate: 'date',
   tdrc: 'date',
 };
-const KEEP = new Set(['title', 'artist', 'album', 'album_artist', 'track', 'disc', 'date', 'genre', 'compilation']);
+const KEEP = new Set(['title', 'artist', 'album', 'album_artist', 'track', 'disc', 'date', 'genre', 'compilation', 'composer', 'narrator']);
 
 /** Lower-case tag names and map the common variants onto one name each. */
 export function normaliseTags(...sources) {

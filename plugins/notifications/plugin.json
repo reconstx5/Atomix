@@ -1,35 +1,178 @@
 {
   "id": "notifications",
-  "name": "New-episode alerts",
-  "version": "1.0.0",
-  "description": "Sends a message to Discord, email or any webhook when new movies and episodes arrive — one tidy message per scan.",
+  "name": "Alerts",
+  "version": "1.1.0",
+  "description": "Sends new films and episodes, and server problems, to ntfy, Telegram, Pushover, Discord, email or any webhook.",
   "author": "Atomix",
   "main": "index.js",
   "enabledByDefault": false,
-  "actions": [{ "id": "test", "label": "Send a test message" }],
+  "actions": [
+    {
+      "id": "test",
+      "label": "Send a test message"
+    }
+  ],
   "settings": [
-    { "key": "discordWebhook", "label": "Discord webhook URL", "type": "password", "default": "", "help": "In Discord: channel settings → Integrations → Webhooks → New webhook → Copy URL." },
-    { "key": "webhookUrl", "label": "Other webhook URL (JSON POST)", "type": "text", "default": "", "help": "For Home Assistant, n8n, ntfy and similar. Receives { event, server, text, items }." },
-    { "key": "emailTo", "label": "Email to", "type": "text", "default": "", "help": "One or more addresses, separated by commas." },
-    { "key": "emailFrom", "label": "Email from", "type": "text", "default": "", "help": "Usually the address you sign in to the mail server with." },
-    { "key": "smtpHost", "label": "Mail server (SMTP host)", "type": "text", "default": "", "help": "e.g. smtp.gmail.com, smtp.office365.com, smtp.fastmail.com" },
-    { "key": "smtpPort", "label": "Mail server port", "type": "number", "default": 587 },
+    {
+      "key": "discordWebhook",
+      "label": "Discord webhook URL",
+      "type": "password",
+      "default": "",
+      "help": "In Discord: channel settings → Integrations → Webhooks → New webhook → Copy URL."
+    },
+    {
+      "key": "webhookUrl",
+      "label": "Other webhook URL (JSON POST)",
+      "type": "text",
+      "default": "",
+      "help": "For Home Assistant, n8n, ntfy and similar. Receives { event, server, text, items }."
+    },
+    {
+      "key": "ntfyServer",
+      "label": "ntfy server",
+      "type": "text",
+      "default": "https://ntfy.sh"
+    },
+    {
+      "key": "ntfyTopic",
+      "label": "ntfy topic",
+      "type": "text",
+      "default": "",
+      "help": "Pick a long, hard-to-guess name; anyone who knows it can read the alerts on ntfy.sh."
+    },
+    {
+      "key": "ntfyToken",
+      "label": "ntfy access token (optional)",
+      "type": "password",
+      "default": ""
+    },
+    {
+      "key": "telegramToken",
+      "label": "Telegram bot token",
+      "type": "password",
+      "default": "",
+      "help": "From @BotFather."
+    },
+    {
+      "key": "telegramChat",
+      "label": "Telegram chat id",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "key": "pushoverToken",
+      "label": "Pushover app token",
+      "type": "password",
+      "default": ""
+    },
+    {
+      "key": "pushoverUser",
+      "label": "Pushover user key",
+      "type": "password",
+      "default": ""
+    },
+    {
+      "key": "emailTo",
+      "label": "Email to",
+      "type": "text",
+      "default": "",
+      "help": "One or more addresses, separated by commas."
+    },
+    {
+      "key": "emailFrom",
+      "label": "Email from",
+      "type": "text",
+      "default": "",
+      "help": "Usually the address you sign in to the mail server with."
+    },
+    {
+      "key": "smtpHost",
+      "label": "Mail server (SMTP host)",
+      "type": "text",
+      "default": "",
+      "help": "e.g. smtp.gmail.com, smtp.office365.com, smtp.fastmail.com"
+    },
+    {
+      "key": "smtpPort",
+      "label": "Mail server port",
+      "type": "number",
+      "default": 587
+    },
     {
       "key": "smtpSecurity",
       "label": "Encryption",
       "type": "select",
       "default": "starttls",
       "options": [
-        { "value": "starttls", "label": "STARTTLS (usually port 587)" },
-        { "value": "tls", "label": "SSL/TLS (usually port 465)" },
-        { "value": "none", "label": "None (only for a mail relay on your own network)" }
+        {
+          "value": "starttls",
+          "label": "STARTTLS (usually port 587)"
+        },
+        {
+          "value": "tls",
+          "label": "SSL/TLS (usually port 465)"
+        },
+        {
+          "value": "none",
+          "label": "None (only for a mail relay on your own network)"
+        }
       ]
     },
-    { "key": "smtpUser", "label": "Mail username", "type": "text", "default": "" },
-    { "key": "smtpPass", "label": "Mail password", "type": "password", "default": "", "help": "Gmail and Outlook need an app password here, not your normal password." },
-    { "key": "publicUrl", "label": "Your Atomix address (for links)", "type": "text", "default": "", "help": "e.g. https://media.example.com — leave empty to send without links." },
-    { "key": "notifyMovies", "label": "Announce new movies", "type": "boolean", "default": true },
-    { "key": "notifyEpisodes", "label": "Announce new episodes", "type": "boolean", "default": true },
-    { "key": "skipFirstScan", "label": "Stay quiet on a library's first scan (so adding a big library doesn't spam everyone)", "type": "boolean", "default": true }
+    {
+      "key": "smtpUser",
+      "label": "Mail username",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "key": "smtpPass",
+      "label": "Mail password",
+      "type": "password",
+      "default": "",
+      "help": "Gmail and Outlook need an app password here, not your normal password."
+    },
+    {
+      "key": "alertNew",
+      "label": "New films and episodes",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "key": "alertProblems",
+      "label": "Server problems",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "key": "alertRecovered",
+      "label": "Say when a problem clears",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "key": "publicUrl",
+      "label": "Your Atomix address (for links)",
+      "type": "text",
+      "default": "",
+      "help": "e.g. https://media.example.com — leave empty to send without links."
+    },
+    {
+      "key": "notifyMovies",
+      "label": "Announce new movies",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "key": "notifyEpisodes",
+      "label": "Announce new episodes",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "key": "skipFirstScan",
+      "label": "Stay quiet on a library's first scan (so adding a big library doesn't spam everyone)",
+      "type": "boolean",
+      "default": true
+    }
   ]
 }

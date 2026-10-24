@@ -141,3 +141,30 @@ test('normaliseUrl', () => {
   assert.throws(() => normaliseUrl('not a url'), (e) => e.status === 400);
   assert.throws(() => normaliseUrl(''), (e) => e.status === 400);
 });
+
+test('the reporter forgets a session after it stops, even if a report arrives late', async () => {
+  const { EventEmitter } = await import('node:events');
+  const { attachReporter } = await import('../src/remote/progress.js');
+  const { REMOTE_PREFIX } = await import('../src/remote/index.js');
+  const hooks = new EventEmitter();
+  let now = 1_000_000;
+  const sessions = new Map();
+  const core = { hooks, db: { get: () => null }, remote: { providers: {} }, playback: { sessions } };
+  const reporter = attachReporter(core, { now: () => now });
+  const item = { id: 7, path: `${REMOTE_PREFIX}x`, library_id: 1 };
+  sessions.set('s1', { id: 's1', itemId: 7 });
+  hooks.emit('playback:progress', { item, position: 5, sessionId: 's1' });
+  assert.equal(reporter.tracked(), 1);
+  sessions.delete('s1');
+  hooks.emit('playback:stop', { session: { id: 's1', itemId: 7 } });
+  now += 20_000;
+  hooks.emit('playback:progress', { item, position: 6, sessionId: 's1' });
+  assert.equal(reporter.tracked(), 0, 'a late report for a stopped session leaves nothing behind');
+  // Entries over an hour old are pruned (callers without a session).
+  hooks.emit('playback:progress', { item, position: 1 });
+  assert.equal(reporter.tracked(), 1);
+  now += 3600_000 + 1;
+  hooks.emit('playback:progress', { item: { ...item, id: 8 }, position: 1 });
+  assert.equal(reporter.tracked(), 1, 'the hour-old entry went');
+  await reporter.idle();
+});

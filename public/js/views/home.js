@@ -3,8 +3,8 @@
 // rows scroll under a fixed spotlight, the way a TV media centre does.
 import { api } from '../api.js';
 import { h } from '../dom.js';
-import { spotlight, row, emptyState, button, cardItems } from '../components.js';
-import { setTitle, canAdmin, isKidsProfile } from '../app.js';
+import { spotlight, row, emptyState, button, cardItems, eagerCards } from '../components.js';
+import { setTitle, canAdmin, isKidsProfile, isOrbit } from '../app.js';
 import { setBackdrop, artFor, followFocus } from '../backdrop.js';
 
 export async function render(el) {
@@ -12,7 +12,7 @@ export async function render(el) {
   const data = await api.get('/api/home');
   const isAdmin = canAdmin();
 
-  if (!data.libraries.length) {
+  if (!data.libraries.length && !data.rows.some((r) => r.id === 'live-now')) {
     el.append(
       emptyState({
         title: 'Your media hub is empty',
@@ -24,9 +24,12 @@ export async function render(el) {
   }
 
   const rows = h('div', { class: 'rows' });
+  eagerCards(6); // Home's first six pictures (the rows on screen first) load at once (v0.24)
   for (const r of data.rows) {
-    rows.append(row({ id: r.id, inMenu: true, title: r.title, items: r.items, style: r.style, href: r.libraryId ? `#/library/${r.libraryId}` : r.id === 'watchlist' || r.id === 'lists' ? '#/lists' : null }));
+    const href = r.href || (r.libraryId ? `#/library/${r.libraryId}` : r.id === 'watchlist' || r.id === 'lists' ? '#/lists' : null);
+    rows.append(row({ id: r.id, inMenu: true, title: r.title, items: r.items, style: r.style, href }));
   }
+  eagerCards(0);
   if (!data.rows.length) {
     rows.append(
       isKidsProfile()
@@ -35,7 +38,7 @@ export async function render(el) {
     );
   }
 
-  const featured = data.hero || data.rows[0]?.items[0] || null;
+  const featured = data.hero || data.rows.find((r) => r.id !== 'live-now')?.items[0] || null;
   el.classList.add('home-view');
   if (featured) {
     const spot = spotlight(featured, { onShow: (item) => setBackdrop(artFor(item)) });
@@ -45,6 +48,8 @@ export async function render(el) {
   } else {
     el.classList.add('no-spotlight');
   }
+  // Orbit: "Arrange home" after the last row (older themes reach it from Settings → Profile; their Home is unchanged).
+  if (isOrbit()) rows.append(h('div', { class: 'home-arrange' }, button('Arrange home', { icon: 'edit', variant: 'ghost', href: '#/arrange-home' })));
   el.append(h('div', { class: 'home-rows' }, rows));
   // Orbit: past the first row the top area gets smaller so two rows fit; moving back up restores it.
   // (Other themes have no styles for .is-compact.)

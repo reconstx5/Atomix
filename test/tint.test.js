@@ -58,3 +58,26 @@ test('contrast helper matches WCAG', () => {
   assert.equal(Math.round(contrast('#ffffff', '#000000')), 21);
   assert.equal(contrast('#777777', '#777777'), 1);
 });
+
+test('readableAccent lifts a dark chosen colour to readable text on the dark pages, keeping its hue', async () => {
+  const { readableAccent, luminance } = await import('../public/js/tint.js');
+  const lifted = readableAccent('#101040');
+  assert.ok(luminance(lifted) >= 0.3, `${lifted} ${luminance(lifted)}`);
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(lifted.slice(i, i + 2), 16));
+  assert.ok(b > r && b > g, 'still blue');
+  assert.equal(readableAccent('#8fe9ff'), '#8fe9ff', 'a light colour is left alone');
+  assert.equal(readableAccent('nonsense'), 'nonsense');
+});
+
+// v0.15.0 fix pass (C1): the ink on a chosen accent is whichever of dark/white contrasts more with the colour that is
+// actually painted — the lifted one — never a fixed luminance threshold that lands at 2.9:1.
+test('accentInk picks the ink with the higher contrast against the lifted accent', async () => {
+  const { accentInk, readableAccent } = await import('../public/js/tint.js');
+  for (const dark of ['#101040', '#400010', '#104010', '#301030']) {
+    const lifted = readableAccent(dark);
+    const ink = accentInk(lifted);
+    assert.ok(contrast(lifted, ink) >= 4.5, `${dark} → ${lifted} with ${ink} is ${contrast(lifted, ink).toFixed(2)}:1`);
+  }
+  assert.equal(accentInk('#ffffff'), '#111111');
+  assert.equal(accentInk('#000000'), '#ffffff');
+});

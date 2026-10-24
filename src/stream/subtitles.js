@@ -39,6 +39,12 @@ function sidecars(videoPath) {
     .map((f, i) => ({ id: `s${i}`, file: path.join(dir, f), ...parseSubtitleName(f, base) }));
 }
 
+/** The file behind a sidecar subtitle id (`s<N>`), or null. */
+export function sidecarFile(item, subId) {
+  if (!/^s\d+$/.test(String(subId)) || isRemotePath(item.path)) return null;
+  return sidecars(item.path).find((s) => s.id === subId)?.file || null;
+}
+
 // ---- Subtitles downloaded from online providers (kept in the data folder, so
 // read-only media folders work too) ----
 function downloadDir(config, itemId) {
@@ -125,6 +131,7 @@ export function listSubtitles(item, config) {
   return out;
 }
 
+export const decodeSubtitleText = (buf) => decodeText(buf);
 function decodeText(buf) {
   let text = new TextDecoder('utf-8').decode(buf);
   if (text.includes('�')) text = new TextDecoder('windows-1252').decode(buf);
@@ -140,19 +147,32 @@ export function srtToVtt(srt) {
   return `WEBVTT\n\n${body}\n`;
 }
 
-/** Produce WebVTT text for a subtitle id, using a disk cache for extracted tracks. */
-async function toVtt(file, ffmpegPath) {
+/** Produce WebVTT text for a subtitle file (.srt/.vtt read directly; .ass/.ssa through ffmpeg, cp1252 on a retry). */
+export async function toVtt(file, ffmpegPath) {
   const ext = path.extname(file).toLowerCase();
   if (ext === '.vtt') return decodeText(await fs.promises.readFile(file));
   if (ext === '.srt') return srtToVtt(decodeText(await fs.promises.readFile(file)));
-  const out = await run(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-i', file, '-f', 'webvtt', 'pipe:1']);
-  return out.toString('utf8');
+  const convert = (charset) => run(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-nostdin', ...(charset ? ['-sub_charenc', charset] : []), '-i', file, '-f', 'webvtt', 'pipe:1']);
+  try {
+    return (await convert(null)).toString('utf8');
+  } catch (err) {
+    // ffmpeg's ASS reader insists on UTF-8; an older Windows-made file is Latin-1, so say so and try again.
+    if (!/utf-?8|invalid/i.test(err.message)) throw err;
+    return (await convert('cp1252')).toString('utf8');
+  }
 }
 
 /**
  * @param {object} [source]  for a connected server's title: { file: stream URL, headers } — ffmpeg reads the stream
  */
-export async function getSubtitleVtt(item, subId, { ffmpegPath, cacheDir, dataDir }, source = null) {
+/** Extractions under way, by cache file: a second request for the same track waits for the first. */
+const inflight = new Map();
+
+/**
+ * @param {{ slot?: () => { release(): void } }} [opts] slot: taken around the ffmpeg run (the playback pool's cap;
+ *   it throws 503 when the server is busy converting).
+ */
+export async function getSubtitleVtt(item, subId, { ffmpegPath, cacheDir, dataDir }, source = null, { slot = null } = {}) {
   if (subId.startsWith('d')) {
     const entry = readMeta({ dataDir }, item.id).find((e) => e.n === Number(subId.slice(1)));
     if (!entry) return null;
@@ -166,22 +186,72 @@ export async function getSubtitleVtt(item, subId, { ffmpegPath, cacheDir, dataDi
   if (subId.startsWith('e')) {
     const index = Number(subId.slice(1));
     if (!Number.isInteger(index)) return null;
+    // Only a text track the probe listed: anything else is a 404, not an ffmpeg run.
+    const media = parseJson(item.media, null);
+    if (!(media?.subtitles || []).some((t) => t.index === index && TEXT_SUB_CODECS.has(t.codec))) return null;
     const dir = path.join(cacheDir, 'subs');
     await fs.promises.mkdir(dir, { recursive: true });
-    const cacheFile = path.join(dir, `${item.id}-${index}-${item.mtime || item.metadata_at || 0}.vtt`);
+    const cacheFile = embeddedCacheFile(item, index, { cacheDir });
     try {
       return await fs.promises.readFile(cacheFile, 'utf8');
     } catch {
       /* not cached yet */
     }
-    const out = await run(
-      ffmpegPath,
-      ['-hide_banner', '-loglevel', 'error', '-nostdin', ...(source?.headers ? headerArgs(source.headers) : []), '-i', source?.file || item.path, '-map', `0:s:${index}`, '-f', 'webvtt', 'pipe:1'],
-      { timeout: 10 * 60 * 1000 },
-    );
-    const text = out.toString('utf8');
-    await fs.promises.writeFile(cacheFile, text);
-    return text;
+    if (inflight.has(cacheFile)) return inflight.get(cacheFile);
+    const job = (async () => {
+      const held = slot ? slot() : null;
+      try {
+        const out = await run(
+          ffmpegPath,
+          ['-hide_banner', '-loglevel', 'error', '-nostdin', ...(source?.headers ? headerArgs(source.headers) : []), '-i', source?.file || item.path, '-map', `0:s:${index}`, '-f', 'webvtt', 'pipe:1'],
+          { timeout: 10 * 60 * 1000 },
+        );
+        const text = out.toString('utf8');
+        await fs.promises.writeFile(cacheFile, text);
+        return text;
+      } finally {
+        held?.release();
+      }
+    })();
+    inflight.set(cacheFile, job);
+    try {
+      return await job;
+    } finally {
+      inflight.delete(cacheFile);
+    }
   }
   return null;
+}
+
+/** The embedded text tracks of a title (what the background job extracts). */
+export function embeddedTextTracks(item) {
+  const media = parseJson(item.media, null);
+  return (media?.subtitles || []).filter((t) => TEXT_SUB_CODECS.has(t.codec));
+}
+
+/** The cache file an embedded track's VTT lives in. */
+export function embeddedCacheFile(item, index, { cacheDir }) {
+  return path.join(cacheDir, 'subs', `${item.id}-${index}-${item.mtime || item.metadata_at || 0}.vtt`);
+}
+
+/**
+ * Extracts every embedded text track of a local file into the cache with ONE ffmpeg run (one demux of the file,
+ * however many tracks). Tracks already cached are skipped. Returns how many were written.
+ */
+export async function extractEmbeddedTracks(item, { ffmpegPath, cacheDir }, { onSpawn, signal } = {}) {
+  const todo = embeddedTextTracks(item).filter((t) => !fs.existsSync(embeddedCacheFile(item, t.index, { cacheDir })));
+  if (!todo.length) return 0;
+  await fs.promises.mkdir(path.join(cacheDir, 'subs'), { recursive: true });
+  const outputs = todo.flatMap((t) => ['-map', `0:s:${t.index}`, '-f', 'webvtt', `${embeddedCacheFile(item, t.index, { cacheDir })}.part`]);
+  await run(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-i', item.path, ...outputs], { timeout: 30 * 60 * 1000, onSpawn });
+  signal?.throwIfAborted();
+  for (const t of todo) {
+    const file = embeddedCacheFile(item, t.index, { cacheDir });
+    try {
+      fs.renameSync(`${file}.part`, file);
+    } catch {
+      /* a track ffmpeg skipped: the on-demand route will try it alone */
+    }
+  }
+  return todo.length;
 }

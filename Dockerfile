@@ -21,7 +21,7 @@ ENV NODE_ENV=production \
 RUN mkdir -p /data && chown -R node:node /data
 USER node
 VOLUME ["/data"]
-EXPOSE 8787
+EXPOSE 8787 8443
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD wget -qO- http://127.0.0.1:8787/api/health || exit 1
 ENTRYPOINT ["/sbin/tini", "--"]

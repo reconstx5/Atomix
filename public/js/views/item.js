@@ -1,20 +1,24 @@
 // Detail page for a movie, show (with seasons & episodes) or single episode.
+import { sizedAttrs } from '../sized.js';
 import { api, qs } from '../api.js';
 import { openCastPicker } from '../cast.js';
 import { h, icon, clear, episodeLabel, formatRuntime, formatBytes, formatClock } from '../dom.js';
-import { art, metaLine, button, toast, openDialog, landscapeCard, spinner, grid, mediaFlags, endsAt, timeLeft, field, moreButton, row, episodeCaption } from '../components.js';
+import { art, metaLine, button, toast, openDialog, landscapeCard, spinner, grid, mediaFlags, endsAt, timeLeft, field, moreButton, row, episodeCaption, cardState, TOASTS } from '../components.js';
 import { watchlistButton, addToPlaylistItems } from '../lists.js';
+import { ratingControl, openRating, canRate } from '../rating.js';
 import { parseClock } from '../markers.js';
 import { setTitle, navigate, refreshView, canAdmin, isKidsProfile, isOrbit } from '../app.js';
 import { music, trackList } from '../music.js';
 import { setBackdrop, followFocus } from '../backdrop.js';
+import { openEditDetails } from './edit-details.js';
+import { downloadButton, downloadSheetItem } from '../offline/ui.js';
 
 /** The title as its clear logo when there is one (the text stays for screen readers and as a fallback). */
 function titleArt(logoUrl, text) {
   const heading = h('h1', { class: 'detail-title' }, text);
   if (!logoUrl) return heading;
   heading.classList.add('visually-hidden');
-  const img = h('img', { class: 'detail-logo', src: logoUrl, alt: '', decoding: 'async' });
+  const img = h('img', { class: 'detail-logo', src: sizedAttrs(logoUrl, 'logo', { orbit: document.body?.dataset.layout === 'orbit', width: Math.min(600, window.innerWidth * 0.8) * (window.devicePixelRatio || 1) }).src, alt: '', decoding: 'async' });
   img.addEventListener('error', () => {
     img.remove();
     heading.classList.remove('visually-hidden');
@@ -53,7 +57,7 @@ function adminMenu(item) {
       variant: 'ghost',
       onClick: async (e) => {
         e.currentTarget.disabled = true;
-        toast('Refreshing metadata…');
+        TOASTS.refreshStarted();
         await api.post(`/api/items/${item.id}/refresh`, {});
         refreshView();
       },
@@ -63,13 +67,23 @@ function adminMenu(item) {
   return actions;
 }
 
-/** Orbit's round "…" button: the less-used actions (Refresh info, Fix match, Download, Edit intro). */
+/** The "…" button and, in the classic layouts, the admin buttons beside it — one action set in every theme. */
+function headerMore(item, more) {
+  if (isOrbit()) return more.length ? [moreButton(item.title, more)] : [];
+  const inline = new Set(['Refresh info', 'Fix match']);
+  const rest = more.filter((m) => !inline.has(m.label));
+  return [...(rest.length ? [moreButton(item.title, rest)] : []), ...(adminMenu(item) || [])];
+}
+
+/** The less-used actions behind "…": playlists, casting, Refresh info, Fix match, Download, Edit intro. */
 function moreItems(item, markers, extra = {}) {
   const items = [];
   // Playlists first: they are for everyone, not just admins.
   if (item.kind === 'movie' || item.kind === 'episode') items.push(addToPlaylistItems({ itemId: item.id }));
   else if (item.kind === 'show') items.push(addToPlaylistItems({ get seasonId() { return extra.seasonId?.(); } }, { label: 'Add season to playlist…' }));
   else if (item.kind === 'album' || item.kind === 'artist') items.push(addToPlaylistItems({ itemIds: (extra.tracks || []).map((t) => t.id) }, { kind: 'music' }));
+  // Stars and hearts: Orbit shows them on the page; the older layouts keep them here (their pages stay as they were).
+  if (!isOrbit() && canRate(item)) items.push({ label: 'Rate…', icon: 'star', onSelect: () => openRating(item) });
   // Casting: Atomix plays it on a TV and this screen is the remote.
   if (item.kind === 'movie' || item.kind === 'episode') items.push({ label: 'Cast to…', icon: 'cast', onSelect: () => openCastPicker({ itemId: item.id }) });
   else if ((item.kind === 'album' || item.kind === 'artist') && extra.tracks?.length) items.push({ label: 'Cast to…', icon: 'cast', onSelect: () => openCastPicker({ queue: { itemIds: extra.tracks.map((t) => t.id), index: 0 } }) });
@@ -78,16 +92,26 @@ function moreItems(item, markers, extra = {}) {
       label: 'Refresh info',
       icon: 'refresh',
       onSelect: async () => {
-        toast('Refreshing metadata…');
+        TOASTS.refreshStarted();
         await api.post(`/api/items/${item.id}/refresh`, {});
         refreshView();
       },
     });
     if (item.kind === 'movie' || item.kind === 'show') items.push({ label: 'Fix match', icon: 'edit', onSelect: () => identifyDialog(item) });
+    // v0.20: in "…" in every theme (the classic layouts' row of admin buttons stays as it was).
+    if (['movie', 'show', 'episode', 'album', 'artist'].includes(item.kind)) items.push({ label: 'Edit details', icon: 'edit', onSelect: () => openEditDetails(item) });
   }
-  if ((item.kind === 'movie' || item.kind === 'episode') && !isKidsProfile() && !item.remote) items.push({ label: 'Download', icon: 'download', href: `/api/items/${item.id}/download`, download: true });
+  // v0.21: Download into the app (Orbit has the button on the page; the older themes find it here), a show's season,
+  // an album's or artist's songs. Saving the file itself keeps its own entry.
+  if (!item.remote) {
+    if ((item.kind === 'movie' || item.kind === 'episode') && !isOrbit()) items.push(downloadSheetItem(item));
+    if (item.kind === 'show') items.push(downloadSheetItem(item, { label: 'Download season', ids: () => [extra.seasonId?.()].filter(Boolean) }));
+    if (item.kind === 'album') items.push(downloadSheetItem(item, { label: 'Download album' }));
+    if (item.kind === 'artist') items.push(downloadSheetItem(item, { label: 'Download all songs' }));
+  }
+  if ((item.kind === 'movie' || item.kind === 'episode') && !isKidsProfile() && !item.remote) items.push({ label: 'Save the file', icon: 'download', href: `/api/items/${item.id}/download`, download: true });
   if (item.kind === 'episode' && markers !== undefined) items.push({ label: 'Edit intro', icon: 'edit', onSelect: () => introDialog(item, markers?.intro) });
-  return items;
+  return items.filter(Boolean);
 }
 
 async function identifyDialog(item) {
@@ -142,7 +166,7 @@ async function identifyDialog(item) {
     ],
     onSubmit: async () => {
       if (!chosen) {
-        toast('Pick one of the results first.');
+        toast('Pick one of the results first');
         return false;
       }
       await api.post(`/api/items/${item.id}/identify`, { tmdbId: chosen });
@@ -167,6 +191,7 @@ async function introDialog(item, current) {
   const start = h('input', { value: has ? formatClock(current.start, { tenths: true }) : '', placeholder: '0:42', inputmode: 'decimal', autocomplete: 'off', 'data-autofocus': true });
   const end = h('input', { value: has ? formatClock(current.end, { tenths: true }) : '', placeholder: '1:32', inputmode: 'decimal', autocomplete: 'off' });
   const all = h('input', { type: 'checkbox' });
+  const shown = { start: start.value, end: end.value }; // what the editor opened with
   const actions = [
     { label: 'Cancel', value: 'cancel' },
     { label: 'No intro', value: 'none' },
@@ -186,10 +211,12 @@ async function introDialog(item, current) {
     onSubmit: async (value) => {
       const applyToSeason = all.checked;
       if (value === 'save') {
+        // Nothing changed: an automatic intro stays automatic (a save would make it "set by hand").
+        if (has && start.value === shown.start && end.value === shown.end && !applyToSeason) return true;
         const s = parseClock(start.value);
         const e = parseClock(end.value);
         if (s == null || e == null) {
-          toast('Enter times like 0:42 and 1:32.');
+          toast('Enter times like 0:42 and 1:32');
           return false;
         }
         await api.put(`/api/items/${item.id}/markers/intro`, { start: s, end: e, applyToSeason });
@@ -199,10 +226,10 @@ async function introDialog(item, current) {
         toast('Saved: no intro', { type: 'success' });
       } else if (value === 'detect') {
         await api.post(`/api/items/${item.id}/markers/detect`, {});
-        toast('Looking for the intro again. This can take a minute.');
+        toast('Looking for the intro again — this can take a minute');
       } else if (value === 'auto') {
         await api.del(`/api/items/${item.id}/markers/intro`);
-        toast('Using the automatic intro times.');
+        toast('Using the automatic intro times');
       }
       refreshView();
       return true;
@@ -236,7 +263,7 @@ function episodeList(episodes) {
         { class: `episode${ep.progress?.watched ? ' is-watched' : ''}` },
         h(
           'a',
-          { class: 'episode-thumb', href: `#/play/${ep.id}`, 'aria-label': `Play episode ${ep.episode}: ${ep.title}` },
+          { class: 'episode-thumb', href: `#/play/${ep.id}`, 'aria-label': `Play episode ${ep.episode}: ${ep.title}${cardState(ep)}` },
           art(ep.poster, ep.title, { kind: 'landscape' }),
           h('span', { class: 'card-play' }, icon('play', { size: 20 })),
           ep.progress?.watched ? h('span', { class: 'badge badge-watched' }, icon('check', { size: 14, label: 'Watched' })) : null,
@@ -270,7 +297,7 @@ function episodeRow(episodes) {
     const length = episodeCaption(ep);
     const card = h(
       'a',
-      { class: `card episode-card${ep.progress?.watched ? ' is-watched' : ''}`, href: `#/play/${ep.id}`, 'aria-label': `Play episode ${ep.episode}: ${ep.title}` },
+      { class: `card episode-card${ep.progress?.watched ? ' is-watched' : ''}`, href: `#/play/${ep.id}`, 'aria-label': `Play episode ${ep.episode}: ${ep.title}${cardState(ep)}` },
       h(
         'div',
         { class: 'card-art' },
@@ -325,6 +352,7 @@ function musicHeader(el, { item, eyebrow, backdrop, meta, actions, round = false
           item.genres?.length ? h('ul', { class: 'genres', role: 'list' }, item.genres.map((g) => h('li', { class: 'chip' }, g))) : null,
           item.overview ? h('p', { class: 'overview' }, item.overview) : null,
           h('div', { class: 'actions' }, actions),
+          isOrbit() && canRate(item) ? ratingControl(item) : null,
         ),
       ),
     ),
@@ -349,13 +377,7 @@ function renderAlbum(el, data, query) {
   setTitle(`${item.title}${artist ? ` · ${artist.title}` : ''}`);
   const focusId = Number(query.track) || null;
   const actions = playButtons(tracks, { autofocus: !focusId });
-  if (isOrbit()) {
-    const more = moreItems(item, undefined, { tracks });
-    if (more.length) actions.push(moreButton(item.title, more));
-  } else {
-    const admin = adminMenu(item);
-    if (admin) actions.push(...admin);
-  }
+  actions.push(...headerMore(item, moreItems(item, undefined, { tracks })));
   musicHeader(el, {
     item,
     backdrop: item.backdrop || artist?.backdrop,
@@ -384,13 +406,7 @@ function renderArtist(el, data) {
   const tracks = data.tracks || [];
   setTitle(item.title);
   const actions = playButtons(tracks, { label: 'Play all' });
-  if (isOrbit()) {
-    const more = moreItems(item, undefined, { tracks });
-    if (more.length) actions.push(moreButton(item.title, more));
-  } else {
-    const admin = adminMenu(item);
-    if (admin) actions.push(...admin);
-  }
+  actions.push(...headerMore(item, moreItems(item, undefined, { tracks })));
   musicHeader(el, {
     item,
     round: true,
@@ -419,6 +435,12 @@ export async function render(el, params, query) {
     navigate(`#/item/${data.album.id}?track=${item.id}`, { replace: true });
     return;
   }
+  // Spoken titles (v0.22): an episode opens on its podcast's page, a book's part on its book.
+  if (['book', 'comic', 'series'].includes(item.kind)) return (await import('./book.js')).render(el, params, query, data); // v0.22 Plan D
+  if (item.kind === 'podcast') return (await import('./podcast.js')).render(el, params, query, data);
+  if (item.kind === 'podcast_episode' && item.showId) return navigate(`#/item/${item.showId}?episode=${item.id}`, { replace: true });
+  if (item.kind === 'audiobook') return (await import('./audiobook.js')).render(el, params, query, data);
+  if (item.kind === 'chapter' && item.parentId) return navigate(`#/item/${item.parentId}`, { replace: true });
   if (item.kind === 'album') return renderAlbum(el, data, query);
   if (item.kind === 'artist') return renderArtist(el, data);
   const show = data.show;
@@ -436,7 +458,7 @@ export async function render(el, params, query) {
     const n = data.nextEpisode;
     const nr = resumeInfo(n);
     actions.push(button(`${nr ? 'Resume' : 'Play'} ${episodeLabel(n)}`, { icon: 'play', variant: 'primary', href: `#/play/${n.id}`, autofocus: true }));
-    if (nr && isOrbit()) actions.push(button('From the start', { icon: 'replay', variant: 'ghost', href: `#/play/${n.id}?t=0` }));
+    if (nr) actions.push(button('From the start', { icon: 'replay', variant: 'ghost', href: `#/play/${n.id}?t=0` }));
   }
   if (data.trailer) {
     const t = data.trailer;
@@ -444,13 +466,17 @@ export async function render(el, params, query) {
   }
   if (item.kind === 'movie' || item.kind === 'show') actions.push(watchlistButton(item, data.inWatchlist));
   actions.push(watchedButton(item));
+  if (isOrbit() && (item.kind === 'movie' || item.kind === 'episode') && !item.remote) actions.push(downloadButton(item));
   const currentSeason = () => Number(document.querySelector('.season-tab[aria-selected="true"]')?.dataset.id) || null;
+  // One action set for every theme: Orbit folds it all into "…"; the classic layouts show the admin buttons and the
+  // download inline and keep the rest (playlists, casting, Edit intro) in "…".
+  const more = moreItems(item, data.markers, { seasonId: currentSeason });
   if (isOrbit()) {
-    const more = moreItems(item, data.markers, { seasonId: currentSeason });
     if (more.length) actions.push(moreButton(item.title, more));
   } else {
-    const playlistEntry = item.kind === 'show' ? addToPlaylistItems({ get seasonId() { return currentSeason(); } }, { label: 'Add season to playlist…' }) : addToPlaylistItems({ itemId: item.id });
-    actions.push(moreButton(item.title, [playlistEntry]));
+    const inline = new Set(['Refresh info', 'Fix match', 'Save the file']);
+    const rest = more.filter((m) => !inline.has(m.label));
+    if (rest.length) actions.push(moreButton(item.title, rest));
     if (item.kind !== 'show' && !isKidsProfile() && !item.remote) {
       actions.push(button('', { icon: 'download', variant: 'ghost', href: `/api/items/${item.id}/download`, title: 'Download file', attrs: { download: '' } }));
     }
@@ -485,6 +511,7 @@ export async function render(el, params, query) {
           item.overview ? h('p', { class: 'overview' }, item.overview) : h('p', { class: 'overview muted' }, 'No description yet.'),
           r?.left ? h('p', { class: 'muted small' }, `${formatRuntime(r.left / 60)} left`) : null,
           h('div', { class: 'actions' }, actions),
+          isOrbit() && canRate(item) ? ratingControl(item) : null,
           data.markers !== undefined ? introLine(item, data.markers, { edit: !isOrbit() }) : null,
         ),
       ),
@@ -498,9 +525,27 @@ export async function render(el, params, query) {
     const seasons = data.seasons || [];
     const selectedId = Number(query.season) || (data.nextEpisode ? data.nextEpisode.parentId : seasons.find((s) => s.season > 0)?.id || seasons[0]?.id);
     const tabs = h('div', { class: 'season-tabs', role: 'tablist', 'aria-label': 'Seasons' });
-    const panel = h('div', { class: 'season-panel', role: 'tabpanel' });
+    const panel = h('div', { class: 'season-panel', role: 'tabpanel', id: `season-panel-${item.id}` });
+    // A tab pattern: one tab stop (the selected season), Left/Right between seasons, the panel named by its tab.
+    tabs.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const all = [...tabs.children];
+      const i = all.indexOf(document.activeElement);
+      if (i < 0) return;
+      const next = all[i + (e.key === 'ArrowRight' ? 1 : -1)];
+      if (!next) return;
+      e.preventDefault();
+      e.stopPropagation();
+      next.focus();
+      next.click();
+    });
     async function selectSeason(season) {
-      for (const t of tabs.children) t.setAttribute('aria-selected', String(Number(t.dataset.id) === season.id));
+      for (const t of tabs.children) {
+        const on = Number(t.dataset.id) === season.id;
+        t.setAttribute('aria-selected', String(on));
+        t.tabIndex = on ? 0 : -1;
+        if (on) panel.setAttribute('aria-labelledby', t.id);
+      }
       history.replaceState(null, '', `#/item/${item.id}?season=${season.id}`);
       clear(panel).append(spinner());
       const sd = await api.get(`/api/items/${season.id}`);
@@ -513,7 +558,7 @@ export async function render(el, params, query) {
       tabs.append(
         h(
           'button',
-          { type: 'button', role: 'tab', class: 'season-tab', dataset: { id: s.id }, 'aria-selected': 'false', title: `${s.childCount || 0} episodes${done ? ', all watched' : ''}`, onClick: () => selectSeason(s) },
+          { type: 'button', role: 'tab', class: 'season-tab', id: `season-tab-${s.id}`, 'aria-controls': panel.id, tabindex: '-1', dataset: { id: s.id }, 'aria-selected': 'false', title: `${s.childCount || 0} episodes${done ? ', all watched' : ''}`, onClick: () => selectSeason(s) },
           s.title,
           done ? icon('check', { size: 14, label: 'All watched' }) : null,
         ),
@@ -534,12 +579,13 @@ export async function render(el, params, query) {
   }
   if (data.collection) {
     const part = row({ id: 'collection', title: `Part of ${data.collection.name}`, subtitle: `${data.collection.owned} of ${data.collection.total} in your library`, items: data.collection.items, style: 'poster', href: `#/collections/${data.collection.id}` });
-    // The film you're on: a "This film" badge, and not a link to the page you're already on.
+    // The movie you're on: a "This movie" badge, and not a link to the page you're already on.
     const at = data.collection.items.findIndex((i) => i.isCurrent);
     const link = at >= 0 ? part.querySelector('.row-scroller').children[at] : null;
     if (link) {
-      const card = h('div', { class: `${link.className} is-current`, tabindex: '0', 'aria-label': `${link.getAttribute('aria-label') || ''}, this film` }, ...link.childNodes);
-      card.querySelector('.card-art')?.append(h('span', { class: 'badge badge-current' }, 'This film'));
+      // Not a stop for the remote (OK would do nothing on it): marked current for a screen reader instead.
+      const card = h('div', { class: `${link.className} is-current`, tabindex: '-1', 'aria-current': 'true', 'aria-label': `${link.getAttribute('aria-label') || ''}, this movie` }, ...link.childNodes);
+      card.querySelector('.card-art')?.append(h('span', { class: 'badge badge-current' }, 'This movie'));
       link.replaceWith(card);
     }
     body.append(part);

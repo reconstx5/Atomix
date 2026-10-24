@@ -70,5 +70,5 @@ test('the trailer field: local wins, YouTube is the fallback, kids get local onl
   const home = (await admin.get('/api/home')).data;
   assert.ok(home.hero === null || 'trailer' in home.hero);
   const res = await admin.raw('/');
-  assert.match(res.headers.get('content-security-policy'), /frame-src https:\/\/www\.youtube-nocookie\.com/);
+  assert.match(res.headers.get('content-security-policy'), /frame-src [^;]*https:\/\/www\.youtube-nocookie\.com/);
 });

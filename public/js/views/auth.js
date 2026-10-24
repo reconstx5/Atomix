@@ -1,7 +1,8 @@
 // Sign-in and first-run setup screens.
 import { api } from '../api.js';
 import { h, logoMark } from '../dom.js';
-import { field } from '../components.js';
+import { field, button } from '../components.js';
+import { renderQuickConnect } from './quickconnect.js';
 import { state, onSignedIn, setTitle } from '../app.js';
 
 function errorBox() {
@@ -103,6 +104,9 @@ export async function render(el, { setup }) {
         h('h1', {}, 'Sign in'),
         state.status?.loginMessage ? h('p', { class: 'muted' }, state.status.loginMessage) : null,
         form,
+        state.status?.quickConnect
+          ? h('div', { class: 'auth-alt' }, button('Sign in with a code', { variant: 'ghost', icon: 'grid', onClick: () => renderQuickConnect(el, { serverName, onBack: () => (el.replaceChildren(), render(el, { setup })) }) }))
+          : null,
       ),
     ),
   );

@@ -259,7 +259,7 @@ test('"Send a test message" button', { skip }, async () => {
   const before = received.discord.length;
   const r = await admin.post('/api/admin/plugins/notifications/actions/test', {});
   assert.equal(r.status, 200);
-  assert.match(r.data.message, /Sent to Discord, webhook and email/);
+  assert.equal(r.data.message, 'Discord: sent · Webhook: sent · Email: sent');
   assert.equal(received.discord.length, before + 1);
   assert.match(received.discord.at(-1).content, /test message/i);
 });
@@ -268,6 +268,5 @@ test('a broken channel is reported but the others still send', { skip }, async (
   await admin.put('/api/admin/plugins/notifications/config', { webhookUrl: 'http://127.0.0.1:9/nothing-here' });
   const r = await admin.post('/api/admin/plugins/notifications/actions/test', {});
   assert.equal(r.status, 200);
-  assert.match(r.data.message, /Sent to Discord and email/);
-  assert.match(r.data.message, /webhook failed/i);
+  assert.match(r.data.message, /^Discord: sent · Webhook: (?!sent).+ · Email: sent$/);
 });

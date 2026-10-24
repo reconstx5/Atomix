@@ -97,6 +97,35 @@ test('an image route fetches the poster with the token and caches it', { skip },
   assert.ok(!jf.calls.some((c) => c.path.includes('/Images/Primary')), 'cached');
 });
 
+test('cached artwork shows while the connected server is down, and a hit is not sniffed again (v0.22)', { skip }, async () => {
+  const core = nf.app.core;
+  assert.equal((await admin.raw(`/api/items/${ids.film}/image/poster`)).status, 200, 'cached by the test above');
+  // The server is down: asking for it (its sign-in, its address) fails.
+  const real = core.remote.providers.for;
+  let signIns = 0;
+  core.remote.providers.for = () => {
+    signIns++;
+    throw new Error('the server is down');
+  };
+  const realSniff = core.images.isPageNotPicture.bind(core.images);
+  let sniffs = 0;
+  core.images.isPageNotPicture = (f) => (sniffs++, realSniff(f));
+  jf.calls.length = 0;
+  try {
+    for (let i = 0; i < 2; i++) {
+      const res = await admin.raw(`/api/items/${ids.film}/image/poster`);
+      assert.equal(res.status, 200);
+      assert.match(res.headers.get('content-type'), /image\/png/);
+    }
+    assert.equal(signIns, 0, 'no sign-in for a cached poster');
+    assert.equal(jf.calls.length, 0, 'the server is not asked');
+    assert.ok(sniffs <= 1, `${sniffs} sniffs`);
+  } finally {
+    core.remote.providers.for = real;
+    core.images.isPageNotPicture = realSniff;
+  }
+});
+
 test('progress is pushed to the server, at most once per 10 s plus the final one', { skip }, async () => {
   jf.calls.length = 0;
   for (const p of [40, 41, 42]) await admin.post(`/api/items/${ids.film}/progress`, { position: p, duration: 100 });
@@ -241,3 +270,4 @@ test('removing the server mid-play stops its live sessions, deletes its cached a
   assert.equal((await admin.raw(`/api/items/${ids.film}/file`)).status, 404);
   assert.equal((await admin.get('/api/status')).status, 200, 'the server is still up');
 });
+

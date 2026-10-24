@@ -40,6 +40,9 @@ export function detectCaps() {
   const hls = apple && can('application/vnd.apple.mpegurl');
   const hdr = video.includes('hevc') && matchMedia('(dynamic-range: high)').matches;
 
-  cached = { video, audio, containers, hls, hdr };
+  // MediaSource: the page can play Atomix's live buffer itself (iPhone Safari has none: it gets HLS instead).
+  const mse = typeof window.MediaSource !== 'undefined';
+
+  cached = { video, audio, containers, hls, hdr, mse };
   return cached;
 }

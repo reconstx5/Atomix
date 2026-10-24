@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT1M">
+  <Period id="ad" duration="PT15S"><AdaptationSet mimeType="video/mp4"><Representation id="a" bandwidth="1"/></AdaptationSet></Period>
+  <Period id="show"><AdaptationSet mimeType="video/mp4"><Representation id="b" bandwidth="1"/></AdaptationSet></Period>
+  <Period id="later" start="PT40.5S"><AdaptationSet mimeType="audio/mp4"><Representation id="c" bandwidth="1"/></AdaptationSet></Period>
+</MPD>

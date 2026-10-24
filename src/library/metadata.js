@@ -2,6 +2,7 @@
 // Providers run in priority order (lowest number first); earlier providers
 // win, later ones only fill in fields that are still empty.
 import fs from 'node:fs';
+import { restoreLocked, lockedFields } from './editing.js';
 import path from 'node:path';
 import { logger } from '../log.js';
 import { parseSeasonFolder, sortTitle } from './parser.js';
@@ -12,7 +13,25 @@ const log = logger('metadata');
 const FIELDS = [
   'title', 'originalTitle', 'year', 'overview', 'tagline', 'genres', 'rating', 'runtime', 'airDate',
   'poster', 'backdrop', 'logo', 'tmdbId', 'imdbId', 'certification', 'keywords', 'people', 'collection', 'trailer',
+  'scores',
+  // Passed between providers in one refresh (v0.23), never stored: TheTVDB id (Fanart.tv shows), MusicBrainz ids.
+  'tvdbId', 'musicbrainzId', 'musicbrainzArtistId',
 ];
+// Kinds whose own file names them (v0.23): a provider only fills what is empty, and never the title.
+const FILL_ONLY = new Set(['book', 'audiobook']);
+// v0.23: outside scores a provider may return; anything else in `scores` is dropped.
+const SCORE_FORMS = { imdb: /^\d+(\.\d+)?\/10$/, rt: /^\d{1,3}%$/, metacritic: /^\d{1,3}\/100$/ };
+/** Only known, well-formed scores ({ source, value }), once per source; null when none are left. */
+export function cleanScores(v) {
+  if (!Array.isArray(v)) return null;
+  const out = [];
+  for (const s of v) {
+    const form = SCORE_FORMS[s?.source];
+    const value = typeof s?.value === 'string' ? s.value.trim() : '';
+    if (form && form.test(value) && !out.some((o) => o.source === s.source)) out.push({ source: s.source, value });
+  }
+  return out.length ? out : null;
+}
 /** The YouTube trailer to offer: official first, the metadata language, then English, then the newest. */
 export function pickTrailer(videos, language = 'en-US') {
   const lang = String(language || 'en').slice(0, 2).toLowerCase();
@@ -26,10 +45,14 @@ export function pickTrailer(videos, language = 'en-US') {
 }
 /** TMDB keyword names, lower-cased, at most 30. */
 const keywordNames = (list) => [...new Set((list || []).map((k) => String(k.name || '').trim().toLowerCase()).filter(Boolean))].slice(0, 30);
-/** The director(s) or creator(s) first, then the top 8 of the cast. */
+/** The director(s) or creator(s) first, then the top 8 of the cast (with the character they play, when TMDB says). */
 function people(leads, role, cast) {
   const out = (leads || []).filter(Boolean).map((name) => ({ name, role }));
-  for (const c of [...(cast || [])].sort((a, b) => (a.order ?? 99) - (b.order ?? 99)).slice(0, 8)) if (c.name) out.push({ name: c.name, role: 'cast' });
+  for (const c of [...(cast || [])].sort((a, b) => (a.order ?? 99) - (b.order ?? 99)).slice(0, 8)) {
+    if (!c.name) continue;
+    const character = String(c.character || c.roles?.[0]?.character || '').trim(); // v0.24: the person page's "Actor · Ripley"
+    out.push(character ? { name: c.name, role: 'cast', character } : { name: c.name, role: 'cast' });
+  }
   return out;
 }
 // Kodi calls the transparent title artwork "clearlogo"; Plex/Jellyfin use "logo".
@@ -206,6 +229,14 @@ export class TmdbProvider {
     return p ? `${this.config.tmdbImageBase}/${size}${p}` : null;
   }
 
+  /** v0.20 Edit details: every poster, backdrop and logo TMDB has for a film or show (empty without a match). */
+  async images(item) {
+    const empty = { posters: [], backdrops: [], logos: [] };
+    if (!this.enabled() || !item.tmdb_id || !['movie', 'show'].includes(item.kind)) return empty;
+    const data = await this.request(`/${item.kind === 'movie' ? 'movie' : 'tv'}/${item.tmdb_id}/images`, { include_image_language: this.imageLanguages() });
+    return { posters: data?.posters || [], backdrops: data?.backdrops || [], logos: data?.logos || [] };
+  }
+
   /** Languages for TMDB artwork: the metadata language, English, and language-less images. */
   imageLanguages() {
     const lang = String(this.settings.get('metadataLanguage') || 'en').slice(0, 2).toLowerCase();
@@ -313,6 +344,7 @@ export class TmdbProvider {
         people: people((s.created_by || []).map((c) => c.name), 'creator', s.aggregate_credits?.cast),
         trailer: pickTrailer(s.videos?.results, this.settings.get('metadataLanguage')),
         tmdbId: s.id,
+        tvdbId: s.external_ids?.tvdb_id || null, // v0.23: for Fanart.tv (shows are looked up by TheTVDB id)
         imdbId: s.external_ids?.imdb_id || null,
         title: s.name,
         originalTitle: s.original_name !== s.name ? s.original_name : null,
@@ -371,8 +403,50 @@ export class MetadataManager {
 
   register(provider, owner) {
     if (!provider?.id || typeof provider.fetch !== 'function') throw new Error('Metadata provider needs an id and fetch()');
-    this.providers.push({ priority: 100, kinds: ['movie', 'show', 'season', 'episode'], ...provider, owner });
+    const entry = { priority: 100, kinds: ['movie', 'show', 'season', 'episode'], ...provider, owner };
+    this.providers.push(entry);
     this.providers.sort((a, b) => a.priority - b.priority);
+    this.offerExisting(entry);
+  }
+
+  /**
+   * v0.23: a plugin provider seen for the first time is offered the titles it lists that were filled before it
+   * came (the next scan's metadata pass picks them up again; only gaps fill). Remembered, so a restart doesn't.
+   */
+  offerExisting(provider) {
+    if (!provider.owner || provider.owner === 'core' || typeof this.settings?.set !== 'function') return;
+    const stored = this.settings.get('metadataProvidersSeen');
+    // The first start that remembers providers (an upgrade): the plugins already there are noted, not re-run.
+    if (this.baseline === undefined) this.baseline = !Array.isArray(stored);
+    const seen = Array.isArray(stored) ? stored : [];
+    if (seen.includes(provider.id)) return;
+    this.settings.set({ metadataProvidersSeen: [...seen, provider.id] });
+    if (this.baseline && !this.started) return;
+    const kinds = provider.kinds.filter((k) => typeof k === 'string');
+    if (!kinds.length) return;
+    this.db.run(`UPDATE items SET metadata_at = NULL WHERE kind IN (${kinds.map(() => '?').join(',')}) AND metadata_locked = 0`, ...kinds);
+  }
+
+  /**
+   * v0.23: the titles a plugin's providers list (these ids, or all of them) are fetched again at the next scan's
+   * metadata pass. Titles locked by Fix match stay. Returns how many were offered.
+   */
+  offerAgain(owner, ids) {
+    const kinds = [...new Set(this.providers.filter((p) => p.owner === owner).flatMap((p) => p.kinds.filter((k) => typeof k === 'string')))];
+    if (!kinds.length) return 0;
+    const list = Array.isArray(ids) ? ids.map(Number).filter(Number.isInteger) : null;
+    if (list && !list.length) return 0;
+    let count = 0;
+    const chunks = list ? Array.from({ length: Math.ceil(list.length / 500) }, (_, i) => list.slice(i * 500, i * 500 + 500)) : [null];
+    for (const chunk of chunks) {
+      const idClause = chunk ? ` AND id IN (${chunk.map(() => '?').join(',')})` : '';
+      count += Number(this.db.run(`UPDATE items SET metadata_at = NULL WHERE kind IN (${kinds.map(() => '?').join(',')}) AND metadata_locked = 0${idClause}`, ...kinds, ...(chunk || [])).changes);
+    }
+    return count;
+  }
+
+  tmdbPriority() {
+    return this.providers.find((p) => p.id === 'tmdb')?.priority ?? 50;
   }
 
   removeByOwner(owner) {
@@ -455,12 +529,21 @@ export class MetadataManager {
     if (item.metadata_locked && !opts.force) return item;
     const show = item.show_id ? this.db.get('SELECT * FROM items WHERE id = ?', item.show_id) : null;
     const ctx = { merged: {}, show, libraryRoots: this.libraryRoots(item.library_id), tmdbId: opts.tmdbId, force: opts.force, db: this.db };
+    // A built-in provider (TMDB) that failed this time: the artwork it gave before stays, so a plugin after it
+    // (Fanart.tv) only fills what is still empty instead of replacing it (v0.23 review fix).
+    let coreFailed = false;
     for (const provider of this.providers) {
       if (!provider.kinds.includes(item.kind)) continue;
-      if (opts.tmdbId && provider.id !== 'tmdb' && provider.id !== 'local-artwork') continue;
+      // Fix match: TMDB's chosen title decides; plugins after it may still add what isn't the match (scores, art).
+      const afterMatch = opts.tmdbId && provider.owner && provider.owner !== 'core' && provider.priority > this.tmdbPriority();
+      if (opts.tmdbId && provider.id !== 'tmdb' && provider.id !== 'local-artwork' && !afterMatch) continue;
       try {
-        const result = await provider.fetch(item, ctx);
+        let result = await provider.fetch(item, ctx);
         if (!result) continue;
+        if (afterMatch) {
+          const { title, originalTitle, year, tmdbId, imdbId, tvdbId, airDate, certification, ...rest } = result;
+          result = rest;
+        }
         for (const f of FIELDS) {
           const v = result[f];
           const empty = v == null || v === '' || (Array.isArray(v) && !v.length);
@@ -468,33 +551,40 @@ export class MetadataManager {
           if (!empty && !have) ctx.merged[f] = v;
         }
       } catch (err) {
+        if (!provider.owner || provider.owner === 'core') coreFailed = true;
         log.warn(`${provider.id} failed for "${item.title}": ${err.message}`);
       }
     }
     const m = ctx.merged;
     const [poster, backdrop, logo] = await Promise.all([this.images.store(m.poster), this.images.store(m.backdrop), this.images.store(m.logo)]);
-    const certification = m.certification || (keepOldValue(opts) ? item.certification : null) || null;
+    const certification = (FILL_ONLY.has(item.kind) && item.certification) || m.certification || (keepOldValue(opts) ? item.certification : null) || null;
     const minAge = certToAge(certification, this.settings?.get?.('ratingCountry'));
     const keepOld = !opts.clear;
-    const pick = (newV, oldV) => (newV != null ? newV : keepOld ? oldV : null);
+    const fillOnly = FILL_ONLY.has(item.kind);
+    const isEmpty = (v) => v == null || v === '' || (Array.isArray(v) && !v.length);
+    const pick = (newV, oldV) => (fillOnly && !isEmpty(oldV) ? oldV : newV != null ? newV : keepOld ? oldV : null);
+    const pickArt = (newV, oldV) => (coreFailed && !isEmpty(oldV) ? oldV : pick(newV, oldV));
     const now = Date.now();
+    // The row as it is now (the providers took a while): an edit made meanwhile, and its lock, are what stay. Nothing
+    // awaits between this read and the restore below.
+    const current = this.db.get('SELECT * FROM items WHERE id = ?', item.id) || item;
     this.db.run(
       `UPDATE items SET title = ?, original_title = ?, year = ?, overview = ?, tagline = ?, genres = ?, rating = ?,
          runtime = ?, air_date = ?, poster = ?, backdrop = ?, logo = ?, tmdb_id = ?, imdb_id = ?, metadata_at = ?, updated_at = ?,
-         metadata_locked = ?, certification = ?, min_age = ?, trailer = ?
+         metadata_locked = ?, certification = ?, min_age = ?, trailer = ?, scores = ?
        WHERE id = ?`,
-      m.title || item.title,
+      fillOnly ? item.title : m.title || item.title,
       pick(m.originalTitle, item.original_title),
       pick(m.year, item.year),
       pick(m.overview, item.overview),
       pick(m.tagline, item.tagline),
-      JSON.stringify(m.genres || (keepOld ? parseJson(item.genres, []) : [])),
+      JSON.stringify(pick(m.genres?.length ? m.genres : null, parseJson(item.genres, [])) || []),
       pick(m.rating, item.rating),
       pick(m.runtime, item.runtime),
       pick(m.airDate, item.air_date),
-      poster || (keepOld ? item.poster : null),
-      backdrop || (keepOld ? item.backdrop : null),
-      logo || (keepOld ? item.logo ?? null : null),
+      pickArt(poster || null, item.poster ?? null),
+      pickArt(backdrop || null, item.backdrop ?? null),
+      pickArt(logo || null, item.logo ?? null),
       item.kind === 'episode' ? item.tmdb_id : pick(m.tmdbId, item.tmdb_id),
       pick(m.imdbId, item.imdb_id),
       now,
@@ -503,11 +593,14 @@ export class MetadataManager {
       certification,
       minAge,
       JSON.stringify(pick(m.trailer, keepOld ? parseJson(item.trailer, null) : null)),
+      ((v) => (v ? JSON.stringify(v) : null))(pick(cleanScores(m.scores), keepOld ? parseJson(item.scores, null) : null)),
       item.id,
     );
+    restoreLocked(this.db, current); // fields edited by hand (v0.20) stay as they were
+    const locks = lockedFields(current);
     await this.applyEnrichment(item, m);
     const updated = this.db.get('SELECT * FROM items WHERE id = ?', item.id);
-    if (m.title && item.kind !== 'season') {
+    if (m.title && !fillOnly && item.kind !== 'season' && !locks.includes('title') && !locks.includes('sortTitle')) {
       this.db.run('UPDATE items SET sort_title = ? WHERE id = ?', sortTitle(updated.title), item.id);
     }
     // Extras take their owner's rating (a kids profile sees an extra exactly when it sees the film).

@@ -18,6 +18,7 @@ const DEFAULTS = {
   ffmpegPath: 'ffmpeg',
   ffprobePath: 'ffprobe',
   trustProxy: false,
+  bodyTimeoutMs: 30000, // a request body that trickles in longer than this is refused (408)
   sessionDays: 30,
   logLevel: 'info',
 };
@@ -35,6 +36,7 @@ const ENV_MAP = {
   trustProxy: ['TRUST_PROXY'],
   sessionDays: ['SESSION_DAYS'],
   logLevel: ['LOG_LEVEL'],
+  bodyTimeoutMs: ['BODY_TIMEOUT_MS'],
 };
 
 function readJson(file) {
@@ -47,6 +49,8 @@ function readJson(file) {
 }
 
 function coerce(key, value) {
+  // trustProxy: true/false, or a number of trusted proxies in front (a CDN and a reverse proxy: 2).
+  if (key === 'trustProxy' && /^\d+$/.test(String(value).trim()) && Number(value) > 1) return Number(value);
   if (typeof DEFAULTS[key] === 'number') return Number(value);
   if (typeof DEFAULTS[key] === 'boolean') return value === true || /^(1|true|yes|on)$/i.test(String(value));
   return value;
@@ -126,14 +130,27 @@ export function loadConfig({ env = process.env, root = ROOT } = {}) {
   cfg.cacheDir = path.join(cfg.dataDir, 'cache');
   cfg.transcodeDir = path.join(cfg.dataDir, 'transcode');
   cfg.previewsDir = path.join(cfg.dataDir, 'previews');
+  cfg.downloadsDir = path.join(cfg.dataDir, 'downloads'); // v0.21: prepared download copies (unless Settings name another folder)
+  // ATOMIX_LIVE_TUNERS=off: every viewer gets the provider connection of their own, as before 0.19 (no rewind).
+  cfg.liveTuners = env.ATOMIX_LIVE_TUNERS !== 'off';
+  cfg.recordingsDir = path.join(cfg.dataDir, 'recordings'); // Live TV recordings, unless Settings name another folder
+  cfg.timeshiftDir = path.join(cfg.dataDir, 'timeshift'); // the Live TV tuners' 30-minute buffers (wiped at start)
   cfg.pluginDataDir = path.join(cfg.dataDir, 'plugin-data');
   cfg.publicDir = path.join(ROOT, 'public');
   cfg.tmdbBase = fromEnv(env, 'TMDB_BASE', null, renamed) || 'https://api.themoviedb.org/3';
   cfg.tmdbImageBase = fromEnv(env, 'TMDB_IMAGE_BASE', null, renamed) || 'https://image.tmdb.org/t/p';
   cfg.lrclibBase = env.ATOMIX_LRCLIB_BASE || 'https://lrclib.net/api';
   cfg.plexTvBase = env.ATOMIX_PLEXTV_BASE || 'https://plex.tv';
+  // Scrobbling services (tests point these at fakes).
+  cfg.listenbrainzBase = env.ATOMIX_LISTENBRAINZ_BASE || 'https://api.listenbrainz.org';
+  cfg.lastfmBase = env.ATOMIX_LASTFM_BASE || 'https://ws.audioscrobbler.com/2.0/';
+  cfg.lastfmAuthBase = env.ATOMIX_LASTFM_AUTH_BASE || 'https://www.last.fm/api/auth/';
   // Casting: an address override for TVs, and (dev/test only) devices to list as if found: "chromecast:host:port,dlna:<url>".
   cfg.castBaseUrl = env.ATOMIX_CAST_BASE_URL || null;
+  // v0.27: the secure address's port (otherwise Settings → Server, 8443); 0 picks a free one (tests).
+  cfg.httpsPort = isSet(env.ATOMIX_HTTPS_PORT) ? Number(env.ATOMIX_HTTPS_PORT) : null;
+  // Extra names and addresses for Atomix's own certificate (Docker: the host's name and address), comma-separated.
+  cfg.httpsNames = String(env.ATOMIX_HTTPS_NAMES || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
   cfg.castDiscovery = env.ATOMIX_CAST_DISCOVERY !== 'off'; // off: only devices added by address (tests, locked-down networks)
   cfg.castDevices = String(env.ATOMIX_CAST_DEVICES || '').split(',').map((x) => x.trim()).filter(Boolean).map((x) => {
     const i = x.indexOf(':');
@@ -141,7 +158,7 @@ export function loadConfig({ env = process.env, root = ROOT } = {}) {
   }).filter((d) => ['chromecast', 'dlna'].includes(d.kind) && d.address);
   cfg.initialTmdbKey = env.TMDB_API_KEY || fromFile.tmdbApiKey || '';
 
-  for (const dir of [cfg.dataDir, cfg.imagesDir, cfg.cacheDir, cfg.transcodeDir, cfg.pluginDataDir, cfg.previewsDir]) {
+  for (const dir of [cfg.dataDir, cfg.imagesDir, cfg.cacheDir, cfg.transcodeDir, cfg.pluginDataDir, cfg.previewsDir, cfg.timeshiftDir]) {
     fs.mkdirSync(dir, { recursive: true });
   }
   cfg.dbFile = databaseIn(cfg.dataDir, notices);

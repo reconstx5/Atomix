@@ -1,10 +1,11 @@
 // Lists: the Lists page (Watchlist, playlists, collections), a list page (play, reorder with the remote,
 // rename/share/delete), and a collection page (the films in order, Play).
+import { downloadSheetItem } from '../offline/ui.js';
 import { h, icon, clear, formatRuntime } from '../dom.js';
 import { openCastPicker } from '../cast.js';
 import { api } from '../api.js';
-import { navigate, setTitle, refreshView, isKidsProfile } from '../app.js';
-import { button, moreButton, openDialog, confirmDialog, toast, grid, art, emptyState, field, posterCard, landscapeCard, squareCard } from '../components.js';
+import { navigate, setTitle, refreshView, isKidsProfile, state as app, canAdmin } from '../app.js';
+import { button, moreButton, openDialog, confirmDialog, toast, grid, art, emptyState, field, posterCard, landscapeCard, squareCard, browseTarget } from '../components.js';
 import { listCard } from '../lists.js';
 import { music } from '../music.js';
 import { setBackdrop } from '../backdrop.js';
@@ -25,6 +26,12 @@ export function collectionCard(c) {
   );
 }
 
+/** The "Browse …" offer for an empty list of `kind`, or null when no library of that kind exists. */
+function browseButton(kind) {
+  const t = browseTarget(app.libraries, kind);
+  return t ? button(t.label, { icon: t.icon, variant: 'ghost', href: t.href }) : null;
+}
+
 async function renderLists(el) {
   setTitle('Lists');
   const [lists, collections] = await Promise.all([api.get('/api/lists'), api.get('/api/collections')]);
@@ -32,14 +39,23 @@ async function renderLists(el) {
   const mine = lists.filter((l) => l.kind !== 'watchlist');
   el.classList.add('lists-view');
   el.append(h('header', { class: 'page-head' }, h('h1', {}, 'Lists')));
-  const sec = (title, cards, empty) => h('section', { class: 'detail-section' }, h('h2', {}, title), cards.length ? h('div', { class: 'grid grid-poster', role: 'list' }, cards) : h('p', { class: 'muted' }, empty));
-  el.append(sec('My Watchlist', wl && wl.count ? [listCard(wl)] : [], 'Press the plus on any film or show to keep it here.'));
-  el.append(sec('Playlists', mine.map(listCard), 'Add to playlist… from any title’s menu makes one.'));
-  el.append(sec('Collections', collections.map(collectionCard), 'Film series turn up here as your films are matched.'));
+  // An empty section says what fills it and, where there is somewhere to go, offers the way there.
+  const browse = browseButton('watchlist');
+  const sec = (title, cards, empty, action = null) =>
+    h('section', { class: 'detail-section' }, h('h2', {}, title), cards.length ? h('div', { class: 'grid grid-poster', role: 'list' }, cards) : h('div', { class: 'section-empty' }, emptyState({ title: `No ${title === 'My Watchlist' ? 'titles in your Watchlist' : title.toLowerCase()} yet`, text: empty, action, icon: 'list', level: 3 })));
+  el.append(sec('My Watchlist', wl && wl.count ? [listCard(wl)] : [], 'Press the plus on any movie or show to keep it here.', browse));
+  const playlists = sec('Playlists', mine.map(listCard), 'Use Add to playlist… on any title’s menu to make one.');
+  playlists.querySelector('h2').after(h('div', { class: 'actions section-actions' }, button('New smart playlist', { icon: 'sparkle', variant: 'ghost', href: '#/lists/smart/new' })));
+  el.append(playlists);
+  el.append(sec('Collections', collections.map(collectionCard), 'Collections appear here as your movies are matched.', canAdmin() ? button('Manage libraries', { icon: 'settings', variant: 'ghost', href: '#/settings/libraries' }) : null));
 }
 
 async function renderList(el, id) {
   const list = await api.get(`/api/lists/${id}`);
+  const smart = list.kind === 'smart';
+  const isMusic = list.kind === 'music' || (smart && list.media === 'music');
+  const editable = list.own && list.kind !== 'watchlist' && !smart; // a smart list fills itself: no reorder or remove
+  const browse = smart ? null : browseButton(list.kind);
   setTitle(list.name);
   el.classList.add('list-view');
   const state = { rows: list.items }; // a move or a remove redraws the rows in place; Play and the count read these
@@ -50,18 +66,22 @@ async function renderList(el, id) {
   const playable = () => playableOf(state.rows);
   const firstUnwatched = () => playable().find((i) => !i.progress?.watched) || playable()[0];
   const actions = [];
-  if (list.kind === 'music' && playable().length) {
+  if (isMusic && playable().length) {
     actions.push(button('Play', { icon: 'play', variant: 'primary', autofocus: true, onClick: () => music.playTracks(playable(), 0) }));
     actions.push(button('Shuffle', { icon: 'shuffle', onClick: () => music.playTracks(playable(), -1, { shuffle: true }) }));
   } else if (firstUnwatched()) actions.push(button('Play', { icon: 'play', variant: 'primary', autofocus: true, href: `#/play/${firstUnwatched().id}?list=${list.id}` }));
   const playLink = actions[0]?.tagName === 'A' ? actions[0] : null;
   // A music playlist casts as a queue: Atomix plays it on the TV, song after song.
-  const castItem = list.kind === 'music' && playable().length ? { label: 'Cast to…', icon: 'cast', onSelect: () => openCastPicker({ queue: { itemIds: playable().map((i) => i.id), index: 0 } }) } : null;
-  if (castItem && !(list.own && list.kind !== 'watchlist')) actions.push(moreButton(list.name, [castItem]));
+  const castItem = isMusic && playable().length ? { label: 'Cast to…', icon: 'cast', onSelect: () => openCastPicker({ queue: { itemIds: playable().map((i) => i.id), index: 0 } }) } : null;
+  // v0.21: the whole playlist into the app.
+  const dlItem = downloadSheetItem({ id: list.id, title: list.name, kind: isMusic ? 'album' : 'list' }, { label: 'Download all', listId: list.id });
+  if ((castItem || dlItem) && !(list.own && list.kind !== 'watchlist')) actions.push(moreButton(list.name, [castItem, dlItem].filter(Boolean)));
+  if (smart && list.own) actions.push(button('Edit rules', { icon: 'edit', variant: 'ghost', href: `#/lists/${list.id}/rules` }));
   if (list.own && list.kind !== 'watchlist') {
     actions.push(
       moreButton(list.name, [
         castItem,
+        dlItem,
         { label: 'Rename', icon: 'edit', onSelect: () => renameList(list) },
         // Kids profiles can't share (the server refuses too), so the switch isn't offered to them.
         isKidsProfile()
@@ -92,7 +112,7 @@ async function renderList(el, id) {
     );
   }
   const countLine = (rows) => {
-    const what = list.kind === 'music' ? (rows.length === 1 ? 'song' : 'songs') : rows.length === 1 ? 'title' : 'titles';
+    const what = isMusic ? (rows.length === 1 ? 'song' : 'songs') : rows.length === 1 ? 'title' : 'titles';
     const total = runtimeOf(rows);
     return `${rows.length} ${what}${total ? ` · ${formatRuntime(total / 60)}` : ''}${list.own ? '' : ' · shared with you'}`;
   };
@@ -101,12 +121,16 @@ async function renderList(el, id) {
     h(
       'header',
       { class: 'page-head list-head' },
-      h('div', {}, h('h1', {}, list.name), count),
+      h('div', {}, h('h1', {}, list.name), count, smart ? h('p', { class: 'muted small smart-line' }, smartLine(list)) : null),
       h('div', { class: 'actions' }, actions),
     ),
   );
   if (!items.length) {
-    el.append(emptyState({ title: 'Nothing here yet', text: list.kind === 'watchlist' ? 'Press the plus on any film or show.' : 'Use Add to playlist… from a title’s menu.' }));
+    if (smart) {
+      el.append(emptyState({ title: 'Nothing matches yet', text: 'Nothing in the library fits these rules today. Change the rules, or come back as the library grows.', action: list.own ? button('Edit rules', { icon: 'edit', variant: 'ghost', href: `#/lists/${list.id}/rules` }) : null, icon: 'sparkle' }));
+      return;
+    }
+    el.append(emptyState({ title: 'Nothing here yet', text: list.kind === 'watchlist' ? 'Press the plus on any movie or show to keep it here.' : 'Use Add to playlist… on any title’s menu to add songs or titles.', action: browse, icon: list.kind === 'music' ? 'music' : 'film' }));
     return;
   }
   const ul = h('ol', { class: 'list-items', role: 'list' });
@@ -118,7 +142,7 @@ async function renderList(el, id) {
     clear(ul);
     rows.forEach((item, i) => {
       const card = item.kind === 'track' ? squareCard(item) : item.kind === 'episode' ? landscapeCard(item) : posterCard(item);
-      const menu = list.own
+      const menu = editable
         ? moreButton(item.title, [
             i > 0 ? { label: 'Move up', icon: 'up', onSelect: () => moveItem(list, item, i - 1, rows, renderItems) } : null,
             i < rows.length - 1 ? { label: 'Move down', icon: 'chevronDown', onSelect: () => moveItem(list, item, i + 1, rows, renderItems) } : null,
@@ -136,13 +160,20 @@ async function renderList(el, id) {
             { label: 'Go to title', icon: 'forward', href: `#/item/${item.kind === 'track' ? item.parentId : item.id}` },
           ])
         : null;
-      ul.append(h('li', { class: 'list-item', draggable: list.own ? 'true' : null, dataset: { id: item.id } }, h('span', { class: 'list-index' }, String(i + 1)), card, menu));
+      ul.append(h('li', { class: 'list-item', draggable: editable ? 'true' : null, dataset: { id: item.id } }, h('span', { class: 'list-index' }, String(i + 1)), card, menu));
     });
     if (focusId != null) ul.querySelector(`.list-item[data-id="${focusId}"] [aria-haspopup="dialog"]`)?.focus();
   };
   renderItems(items);
-  if (list.own) dragToReorder(ul, list);
+  if (editable) dragToReorder(ul, list);
   el.append(ul);
+}
+
+/** "Smart playlist · matches all of 2 rules" (or "every song" with none). */
+function smartLine(list) {
+  const n = list.rules?.rules?.length || 0;
+  if (!n) return `Smart playlist · ${list.media === 'music' ? 'every song' : 'every film and episode'}`;
+  return `Smart playlist · matches ${n === 1 ? 'one rule' : `${list.rules.match === 'any' ? 'any' : 'all'} of ${n} rules`}`;
 }
 
 /** Run a list change; a refused or failed one says so instead of silently doing nothing. */

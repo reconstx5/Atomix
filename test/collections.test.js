@@ -134,3 +134,16 @@ test('detach takes a film out of its TMDB collection (unmatching), and a deleted
   assert.equal(collections.get(ids.alienCollection, adult), null, 'no visible members: nothing to show');
 });
 
+
+test('detaching the last member deletes an emptied TMDB collection; a detached film is no longer listed as missing', () => {
+  const pred = { tmdbId: 9001, name: 'Predator Collection', overview: null, poster: null, backdrop: null, parts: [{ tmdbId: 106, title: 'Predator', year: 1987 }, { tmdbId: 865, title: 'Predator 2', year: 1990 }, { tmdbId: 34851, title: 'Predators', year: 2010 }] };
+  const p1 = addItem({ title: 'Predator', year: 1987, tmdb_id: 106, min_age: 0 });
+  const p2 = addItem({ title: 'Predator 2', year: 1990, tmdb_id: 865, min_age: 0 });
+  const c = collections.upsertTmdb(pred, library.get(p1));
+  collections.upsertTmdb(pred, library.get(p2));
+  collections.detach(p2); // "Fix match": it wasn't Predator 2 after all
+  const got = collections.get(c.id, adult);
+  assert.deepEqual(got.missing.map((m) => m.title), ['Predators'], 'the detached film isn\'t "missing"');
+  collections.detach(p1);
+  assert.equal(db.get('SELECT COUNT(*) AS n FROM collections WHERE id = ?', c.id).n, 0, 'an emptied TMDB collection is deleted');
+});

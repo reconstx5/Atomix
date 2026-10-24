@@ -50,8 +50,25 @@ export class Collections {
     this.db.run('INSERT OR REPLACE INTO collection_items (collection_id, item_id, position) VALUES (?, ?, ?)', c.id, item.id, position);
     return this.row(c.id);
   }
+  /**
+   * Take a film out of its TMDB collection (an unmatch). The film leaves the collection's parts too, so it isn't
+   * listed as "missing" there; a TMDB collection left with no films is deleted.
+   */
   detach(itemId) {
-    this.db.run('DELETE FROM collection_items WHERE item_id = ? AND collection_id IN (SELECT id FROM collections WHERE tmdb_id IS NOT NULL)', Number(itemId));
+    const id = Number(itemId);
+    const tmdbId = this.db.get('SELECT tmdb_id FROM items WHERE id = ?', id)?.tmdb_id ?? null;
+    const old = this.db.all('SELECT c.id, c.parts FROM collections c JOIN collection_items ci ON ci.collection_id = c.id WHERE ci.item_id = ? AND c.tmdb_id IS NOT NULL', id);
+    this.db.run('DELETE FROM collection_items WHERE item_id = ? AND collection_id IN (SELECT id FROM collections WHERE tmdb_id IS NOT NULL)', id);
+    for (const c of old) {
+      if (!this.db.get('SELECT 1 AS x FROM collection_items WHERE collection_id = ? LIMIT 1', c.id)) {
+        this.db.run('DELETE FROM collections WHERE id = ?', c.id);
+        continue;
+      }
+      if (tmdbId == null) continue;
+      const parts = parseJson(c.parts, []);
+      const kept = parts.filter((p) => p.tmdbId !== tmdbId);
+      if (kept.length !== parts.length) this.db.run('UPDATE collections SET parts = ?, updated_at = ? WHERE id = ?', JSON.stringify(kept), Date.now(), c.id);
+    }
   }
   create({ name, overview = null, itemIds = [] }) {
     const clean = String(name || '').trim().slice(0, 80);

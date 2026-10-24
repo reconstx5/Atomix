@@ -3,8 +3,21 @@
 // Everything that returns items takes a `viewer` — who is watching:
 //   { userId, profileId, kids, maxAge, allowUnrated, libraryIds }
 // so library access and Kids-profile age limits are applied in one place.
+import { SPOKEN_KINDS, READING_KINDS } from './kinds.js';
+import { ratingsFor } from './userratings.js';
 import { serializeItem } from '../api/serialize.js';
 import { EXTRA_CAPTIONS } from './parser.js';
+import { ensureSearchKeys, keyMatch, keyPrefix } from './searchkey.js';
+
+const DEVICES = new Set(['phone', 'tablet', 'computer', 'TV']);
+/** A place in a book ({ chapter, offset }) or a comic ({ page }) — whole numbers — or null. */
+function cleanLocator(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const n = (x) => Number.isInteger(x) && x >= 0 && x < 1e9;
+  if (n(v.page)) return JSON.stringify({ page: v.page });
+  if (n(v.chapter) && n(v.offset)) return JSON.stringify({ chapter: v.chapter, offset: v.offset });
+  return null;
+}
 
 const SORTS = {
   title: 'i.sort_title COLLATE NOCASE ASC, i.year ASC',
@@ -14,6 +27,7 @@ const SORTS = {
   episode: 'i.season ASC, i.episode ASC',
   track: 'i.season ASC, i.episode ASC, i.sort_title COLLATE NOCASE ASC',
   random: 'RANDOM()',
+  shortest: 'length(i.title) ASC, i.sort_title COLLATE NOCASE ASC', // v0.24: suggestions
 };
 
 // Music isn't age-rated; parents limit it by taking the library away instead.
@@ -40,8 +54,23 @@ export class Library {
     }
     if (viewer?.maxAge != null) {
       const age = `COALESCE(${a}.min_age, (SELECT s.min_age FROM items s WHERE s.id = ${a}.show_id))`;
-      parts.push(`(${a}.kind IN ${UNRATED_KINDS} OR ${age} <= ?${viewer.allowUnrated ? ` OR ${age} IS NULL` : ''})`);
-      params.push(viewer.maxAge);
+      // v0.22: a series of books or comics shows when one of its titles may be seen (by its own rating, else the series').
+      const inner = `COALESCE(b.min_age, ${a}.min_age)`;
+      const series = `(${a}.kind = 'series' AND EXISTS (SELECT 1 FROM items b WHERE b.show_id = ${a}.id AND b.kind IN ('book', 'comic') AND (${inner} <= ?${viewer.allowUnrated ? ` OR ${inner} IS NULL` : ''})))`;
+      parts.push(`(${a}.kind IN ${UNRATED_KINDS} OR ${series} OR (${a}.kind != 'series' AND (${age} <= ?${viewer.allowUnrated ? ` OR ${age} IS NULL` : ''})))`);
+      params.push(viewer.maxAge, viewer.maxAge);
+    }
+    // Kids: a Live TV recording only from a channel in one of the profile's ticked groups (a show or season of the
+    // Recordings library only with such an episode).
+    if (viewer?.kids && viewer.profileId) {
+      const blocked = (e) =>
+        `EXISTS (SELECT 1 FROM live_recordings r WHERE r.item_id = ${e}.id AND NOT EXISTS (SELECT 1 FROM live_channels c, json_each(c.groups) j, live_kids_groups g WHERE c.id = r.channel_id AND g.profile_id = ? AND g.source = c.source AND g.grp = j.value))`;
+      const under = (e) => `(${e}.show_id = ${a}.id OR ${e}.parent_id = ${a}.id)`;
+      parts.push(
+        `NOT (${a}.kind = 'episode' AND ${blocked(a)})`,
+        `NOT (${a}.kind IN ('show','season') AND EXISTS (SELECT 1 FROM items e JOIN live_recordings r ON r.item_id = e.id WHERE ${under('e')}) AND NOT EXISTS (SELECT 1 FROM items e WHERE e.kind = 'episode' AND ${under('e')} AND NOT ${blocked('e')}))`,
+      );
+      params.push(viewer.profileId, viewer.profileId);
     }
     return { sql: parts.length ? parts.join(' AND ') : '1', params };
   }
@@ -57,6 +86,14 @@ export class Library {
   canSee(viewer, row) {
     if (!row) return false;
     if (viewer?.libraryIds && !viewer.libraryIds.includes(row.library_id)) return false;
+    if (viewer?.kids && viewer.profileId && ['episode', 'show', 'season'].includes(row.kind) && this.db.get('SELECT 1 FROM live_recordings LIMIT 1')) {
+      const vis = this.visibility({ kids: true, profileId: viewer.profileId });
+      if (!this.db.get(`SELECT 1 FROM items i WHERE i.id = ? AND ${vis.sql}`, row.id, ...vis.params)) return false;
+    }
+    if (viewer?.maxAge != null && row.kind === 'series') {
+      const vis = this.visibility({ maxAge: viewer.maxAge, allowUnrated: viewer.allowUnrated });
+      return Boolean(this.db.get(`SELECT 1 FROM items i WHERE i.id = ? AND ${vis.sql}`, row.id, ...vis.params));
+    }
     if (viewer?.maxAge != null && !['artist', 'album', 'track'].includes(row.kind)) {
       let age = row.min_age;
       if (age == null && row.show_id) age = this.db.get('SELECT min_age FROM items WHERE id = ?', row.show_id)?.min_age;
@@ -81,13 +118,27 @@ export class Library {
     return new Map(rows.map((r) => [r.item_id, r]));
   }
 
-  /** Serialize rows and attach the viewer's progress. */
-  withProgress(rows, viewer, extra = {}) {
-    const map = this.progressFor(viewer?.profileId, rows.map((r) => r.id));
-    return rows.map((r) => serializeItem(r, { ...extra, progress: map.get(r.id) || null }));
+  /** Counted plays and the last time each was played (any play): Map<id, { playCount, lastPlayed }>. */
+  statsFor(profileId, ids) {
+    if (!profileId || !ids.length) return new Map();
+    const rows = this.db.all(
+      `SELECT item_id, SUM(counted) AS n, MAX(updated_at) AS last FROM plays WHERE profile_id = ? AND item_id IN (${ids.map(() => '?').join(',')}) GROUP BY item_id`,
+      profileId,
+      ...ids,
+    );
+    return new Map(rows.map((r) => [r.item_id, { playCount: r.n || 0, lastPlayed: r.last ?? null }]));
   }
 
-  list({ viewer = EVERYONE, libraryId, kind, parentId, showId, sort = 'title', genre, unwatched, search, limit = 5000, offset = 0 } = {}) {
+  /** Serialize rows and attach the viewer's progress, play count, last played, stars and favourite. */
+  withProgress(rows, viewer, extra = {}) {
+    const ids = rows.map((r) => r.id);
+    const map = this.progressFor(viewer?.profileId, ids);
+    const stats = this.statsFor(viewer?.profileId, ids);
+    const rated = ratingsFor(this.db, viewer?.profileId, ids);
+    return rows.map((r) => serializeItem(r, { ...extra, progress: map.get(r.id) || null, mine: { ...(stats.get(r.id) || {}), ...(rated.get(r.id) || {}) } }));
+  }
+
+  list({ viewer = EVERYONE, libraryId, kind, parentId, showId, sort = 'title', genre, keyword, missingScores = false, releasedOn, unwatched, search, searchPrefix = false, limit = 5000, offset = 0, topLevel = false } = {}) {
     const pid = viewer?.profileId || 0;
     const params = [pid]; // placeholder inside the unwatched_count column
     const where = [];
@@ -108,11 +159,19 @@ export class Library {
       add(`i.kind IN (${kinds.map(() => '?').join(',')})`, ...kinds);
     }
     if (parentId) add('i.parent_id = ?', Number(parentId));
+    if (topLevel) add("(i.kind NOT IN ('book', 'comic') OR i.show_id IS NULL)"); // v0.22: a series stands for its titles
     if (showId) add('i.show_id = ?', Number(showId));
     if (genre) add('EXISTS (SELECT 1 FROM json_each(i.genres) g WHERE g.value = ?)', String(genre));
+    // v0.23: a TMDB keyword (they are stored lower-cased).
+    // v0.23: released on this day ('MM-DD') in an earlier year; only full dates count.
+    if (typeof releasedOn === 'string' && /^\d{2}-\d{2}$/.test(releasedOn)) add('i.air_date LIKE ? AND length(i.air_date) = 10 AND substr(i.air_date, 1, 4) < ?', `%-${releasedOn}`, String(new Date().getFullYear()));
+    if (missingScores) add("(i.scores IS NULL OR i.scores = 'null') AND NOT EXISTS (SELECT 1 FROM json_each(COALESCE(i.locked_fields, '[]')) lf WHERE lf.value = 'scores')"); // v0.23
+    if (keyword) add('EXISTS (SELECT 1 FROM json_each(i.keywords) k WHERE k.value = ?)', String(keyword).trim().toLowerCase());
     if (search) {
-      const like = `%${String(search).replace(/[\\%_]/g, (c) => '\\' + c)}%`;
-      add("(i.title LIKE ? ESCAPE '\\' OR i.original_title LIKE ? ESCAPE '\\')", like, like);
+      // v0.24: accents, case, punctuation and a leading "the" ignored (src/library/searchkey.js)
+      ensureSearchKeys(this.db);
+      const m = searchPrefix ? keyPrefix('i.search_key', search) : keyMatch('i.search_key', search); // prefix: suggestions' first pass
+      add(m.sql, ...m.params);
     }
     if (unwatched && pid) {
       add(
@@ -160,9 +219,10 @@ export class Library {
     if (artistId) where.push('i.show_id = ?') && params.push(Number(artistId));
     if (artistId && sort === 'track') sort = 'artist';
     if (search) {
-      where.push("(i.title LIKE ? ESCAPE '\\' OR i.artist LIKE ? ESCAPE '\\')");
-      const like = `%${String(search).replace(/[\\%_]/g, (c) => '\\' + c)}%`;
-      params.push(like, like);
+      ensureSearchKeys(this.db); // v0.24: the title's key, or the artist's
+      const t = keyMatch('i.search_key', search);
+      const a = keyMatch('atomix_key(i.artist)', search);
+      where.push(`(${t.sql} OR ${a.sql})`) && params.push(...t.params, ...a.params);
     }
     const order =
       sort === 'random' ? 'RANDOM()'
@@ -194,7 +254,192 @@ export class Library {
     );
   }
 
+  /** Books and podcast episodes the viewer started but didn't finish, newest first (v0.22: Continue listening). */
+  continueListening(viewer, limit = 20) {
+    const vis = this.visibility(viewer);
+    return this.db.all(
+      `SELECT i.*, s.title AS show_title FROM progress p JOIN items i ON i.id = p.item_id LEFT JOIN items s ON s.id = i.show_id
+       WHERE p.profile_id = ? AND p.watched = 0 AND p.position > 30 AND i.kind IN ('audiobook','podcast_episode') AND ${vis.sql}
+       ORDER BY p.updated_at DESC LIMIT ?`,
+      viewer.profileId,
+      ...vis.params,
+      limit,
+    );
+  }
+
+  /**
+   * Books and comics this profile is reading (v0.22), newest first: those open, and — in a series whose last title
+   * read was finished — the next one, within the viewer's rules.
+   */
+  continueReading(viewer, limit = 20) {
+    if (!viewer?.profileId) return [];
+    const vis = this.visibility(viewer);
+    const open = this.db.all(
+      `SELECT i.*, p.updated_at AS read_at FROM progress p JOIN items i ON i.id = p.item_id
+       WHERE p.profile_id = ? AND p.watched = 0 AND p.position > 0 AND i.kind IN ('book', 'comic') AND ${vis.sql}`,
+      viewer.profileId,
+      ...vis.params,
+    );
+    const busy = new Set(open.map((r) => r.show_id).filter(Boolean));
+    const finished = this.db.all(
+      `SELECT i.show_id, i.issue_sort, p.updated_at AS read_at FROM progress p JOIN items i ON i.id = p.item_id
+       WHERE p.profile_id = ? AND i.kind IN ('book', 'comic') AND i.show_id IS NOT NULL AND i.issue_sort IS NOT NULL
+         AND p.updated_at = (SELECT MAX(p2.updated_at) FROM progress p2 JOIN items i2 ON i2.id = p2.item_id WHERE p2.profile_id = p.profile_id AND i2.show_id = i.show_id)
+         AND p.watched = 1`,
+      viewer.profileId,
+    );
+    const next = [];
+    for (const f of finished) {
+      if (busy.has(f.show_id)) continue;
+      const row = this.db.get(
+        `SELECT i.* FROM items i LEFT JOIN progress p ON p.item_id = i.id AND p.profile_id = ?
+         WHERE i.show_id = ? AND i.kind IN ('book', 'comic') AND i.issue_sort > ? AND COALESCE(p.watched, 0) = 0 AND ${vis.sql}
+         ORDER BY i.issue_sort LIMIT 1`,
+        viewer.profileId,
+        f.show_id,
+        f.issue_sort,
+        ...vis.params,
+      );
+      if (row) next.push({ ...row, read_at: f.read_at });
+    }
+    return [...open, ...next].sort((a, b) => b.read_at - a.read_at).slice(0, limit);
+  }
+
+  // ---- v0.23: helpers for plugin Home rows (each within the viewer's rules) ----
+
+  /**
+   * Shows this profile started and left: at least one episode watched and one not, last watched more than
+   * `idleDays` ago. `next` is the first unwatched episode (seasons before specials); newest first.
+   * @returns {{ show: object, next: object, left: number, lastWatchedAt: number }[]}
+   */
+  startedShows(viewer, { idleDays = 14, limit = 20 } = {}) {
+    if (!viewer?.profileId) return [];
+    const vis = this.visibility(viewer, 's');
+    const cutoff = Date.now() - Math.max(0, Number(idleDays) || 0) * 86_400_000;
+    const shows = this.db.all(
+      `SELECT s.*, MAX(p.updated_at) AS last_watched FROM progress p JOIN items e ON e.id = p.item_id JOIN items s ON s.id = e.show_id
+       WHERE p.profile_id = ? AND e.kind = 'episode' AND s.kind = 'show' AND ${vis.sql}
+       GROUP BY s.id HAVING MAX(p.updated_at) <= ? AND SUM(p.watched) > 0 ORDER BY last_watched DESC`,
+      viewer.profileId,
+      ...vis.params,
+      cutoff,
+    );
+    const ev = this.visibility(viewer, 'e');
+    const out = [];
+    for (const show of shows) {
+      const left = this.db.all(
+        // Regular episodes only: a show whose seasons are all watched isn't "left" because of its specials (v0.23 review).
+        // The show's own title and art travel with the episode, as in Continue watching.
+        `SELECT e.*, sh.title AS show_title, sh.backdrop AS show_backdrop, sh.poster AS show_poster, sh.logo AS show_logo, sh.metadata_at AS show_meta FROM items e LEFT JOIN progress p ON p.item_id = e.id AND p.profile_id = ?
+         LEFT JOIN items sh ON sh.id = e.show_id
+         WHERE e.show_id = ? AND e.kind = 'episode' AND e.season > 0 AND COALESCE(p.watched, 0) = 0 AND ${ev.sql}
+         ORDER BY e.season, e.episode`,
+        viewer.profileId,
+        show.id,
+        ...ev.params,
+      );
+      if (!left.length) continue;
+      const { last_watched: lastWatchedAt, ...row } = show;
+      out.push({ show: row, next: left[0], left: left.length, lastWatchedAt });
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  /**
+   * Film series (collections, not hidden) with some parts watched and one not, among the parts this viewer may see.
+   * @returns {{ collection: { id, name, poster }, next: object, seen: number, total: number }[]}
+   */
+  partlySeenSeries(viewer, { limit = 20 } = {}) {
+    if (!viewer?.profileId) return [];
+    const vis = this.visibility(viewer);
+    const rows = this.db.all(
+      `SELECT c.id AS c_id, c.name AS c_name, c.poster AS c_poster, ci.position AS c_pos, COALESCE(p.watched, 0) AS seen_it, p.updated_at AS seen_at, i.*
+       FROM collections c JOIN collection_items ci ON ci.collection_id = c.id JOIN items i ON i.id = ci.item_id
+       LEFT JOIN progress p ON p.item_id = i.id AND p.profile_id = ?
+       WHERE c.hidden = 0 AND i.kind = 'movie' AND ${vis.sql}
+       ORDER BY c.id, ci.position`,
+      viewer.profileId,
+      ...vis.params,
+    );
+    const by = new Map();
+    for (const r of rows) {
+      if (!by.has(r.c_id)) by.set(r.c_id, { collection: { id: r.c_id, name: r.c_name, poster: r.c_poster }, parts: [], last: 0 });
+      const g = by.get(r.c_id);
+      const { c_id, c_name, c_poster, c_pos, seen_it, seen_at, ...item } = r;
+      g.parts.push({ item, seen: Boolean(seen_it) });
+      if (seen_it) g.last = Math.max(g.last, seen_at || 0);
+    }
+    const out = [];
+    for (const g of by.values()) {
+      const seen = g.parts.filter((x) => x.seen).length;
+      const next = g.parts.find((x) => !x.seen);
+      if (seen && next) out.push({ collection: g.collection, next: next.item, part: g.parts.indexOf(next) + 1, seen, total: g.parts.length, last: g.last });
+    }
+    return out.sort((a, b) => b.last - a.last).slice(0, limit).map(({ last, ...x }) => x);
+  }
+
+  /** What this profile played (counted plays) on one local day ('YYYY-MM-DD' in `tz`), newest first, once each. */
+  playedOn(viewer, date, { tz } = {}) {
+    if (!viewer?.profileId || !/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) return [];
+    const zone = tz || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const dayOf = (t) => new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(t));
+    // The plays within a day either side (every zone's day is inside it), then each play's own local day.
+    const mid = Date.parse(`${date}T12:00:00Z`);
+    const vis = this.visibility(viewer);
+    const rows = this.db.all(
+      `SELECT i.*, sh.title AS show_title, sh.backdrop AS show_backdrop, sh.poster AS show_poster, sh.logo AS show_logo, sh.metadata_at AS show_meta, pl.started_at AS played_at FROM plays pl JOIN items i ON i.id = pl.item_id
+       LEFT JOIN items sh ON sh.id = i.show_id
+       WHERE pl.profile_id = ? AND pl.counted = 1 AND pl.started_at BETWEEN ? AND ? AND ${vis.sql}
+       ORDER BY pl.started_at DESC`,
+      viewer.profileId,
+      mid - 2 * 86_400_000,
+      mid + 2 * 86_400_000,
+      ...vis.params,
+    );
+    const seen = new Set();
+    const out = [];
+    for (const r of rows) {
+      if (seen.has(r.id) || dayOf(r.played_at) !== date) continue;
+      seen.add(r.id);
+      const { played_at, ...item } = r;
+      out.push(item);
+    }
+    return out;
+  }
+
   /** For shows the viewer is watching: the first unwatched episode after the last watched one. */
+  /** The next unwatched episode of one show after the last one this profile finished, or null. */
+  nextUpFor(viewer, showId) {
+    const vis = this.visibility(viewer);
+    const show = this.db.get(`SELECT i.id FROM items i WHERE i.id = ? AND i.kind = 'show' AND ${vis.sql}`, Number(showId), ...vis.params);
+    if (!show) return null;
+    return this.nextEpisodeAfterLast(viewer, show.id);
+  }
+  nextEpisodeAfterLast(viewer, show_id) {
+    const last = this.db.get(
+      `SELECT i.season, i.episode FROM progress p JOIN items i ON i.id = p.item_id
+       WHERE p.profile_id = ? AND i.show_id = ? AND i.kind = 'episode' AND p.watched = 1 ORDER BY p.updated_at DESC LIMIT 1`,
+      viewer.profileId,
+      show_id,
+    );
+    if (!last) return null;
+    return (
+      this.db.get(
+        `SELECT i.*, s.title AS show_title, s.backdrop AS show_backdrop, s.poster AS show_poster, s.logo AS show_logo, s.metadata_at AS show_meta
+         FROM items i JOIN items s ON s.id = i.show_id
+         LEFT JOIN progress p ON p.item_id = i.id AND p.profile_id = ?
+         WHERE i.show_id = ? AND i.kind = 'episode' AND COALESCE(p.watched, 0) = 0 AND COALESCE(p.position, 0) <= 30
+           AND i.season > 0 AND (i.season > ? OR (i.season = ? AND i.episode > ?))
+         ORDER BY i.season, i.episode LIMIT 1`,
+        viewer.profileId,
+        show_id,
+        last.season,
+        last.season,
+        last.episode,
+      ) || null
+    );
+  }
   nextUp(viewer, limit = 20) {
     const vis = this.visibility(viewer);
     const shows = this.db.all(
@@ -207,25 +452,7 @@ export class Library {
     );
     const out = [];
     for (const { show_id } of shows) {
-      const last = this.db.get(
-        `SELECT i.season, i.episode FROM progress p JOIN items i ON i.id = p.item_id
-         WHERE p.profile_id = ? AND i.show_id = ? AND i.kind = 'episode' AND p.watched = 1 ORDER BY p.updated_at DESC LIMIT 1`,
-        viewer.profileId,
-        show_id,
-      );
-      const next = this.db.get(
-        `SELECT i.*, s.title AS show_title, s.backdrop AS show_backdrop, s.poster AS show_poster, s.logo AS show_logo, s.metadata_at AS show_meta
-         FROM items i JOIN items s ON s.id = i.show_id
-         LEFT JOIN progress p ON p.item_id = i.id AND p.profile_id = ?
-         WHERE i.show_id = ? AND i.kind = 'episode' AND COALESCE(p.watched, 0) = 0 AND COALESCE(p.position, 0) <= 30
-           AND i.season > 0 AND (i.season > ? OR (i.season = ? AND i.episode > ?))
-         ORDER BY i.season, i.episode LIMIT 1`,
-        viewer.profileId,
-        show_id,
-        last.season,
-        last.season,
-        last.episode,
-      );
+      const next = this.nextEpisodeAfterLast(viewer, show_id);
       if (next) out.push(next);
     }
     return out;
@@ -302,10 +529,11 @@ export class Library {
     return targets.length;
   }
 
-  saveProgress(profileId, item, position, duration) {
+  saveProgress(profileId, item, position, duration, { locator, device, watched: read } = {}) {
+    if (READING_KINDS.has(item.kind)) return this.saveReading(profileId, item, position, duration, { locator, device, read });
     const dur = Number(duration) || item.duration || null;
     const pos = Math.max(0, Number(position) || 0);
-    const watched = dur ? pos / dur >= 0.9 : false;
+    const watched = dur ? pos / dur >= (SPOKEN_KINDS.has(item.kind) ? 0.95 : 0.9) : false; // a spoken title: past 95%
     this.db.run(
       `INSERT INTO progress (profile_id, item_id, position, duration, watched, updated_at) VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(profile_id, item_id) DO UPDATE SET position = excluded.position, duration = excluded.duration,
@@ -319,6 +547,26 @@ export class Library {
     );
     // Rewatching a finished item: once they pass the start again, un-mark it.
     if (!watched && pos > 30) this.db.run('UPDATE progress SET watched = 0 WHERE profile_id = ? AND item_id = ?', profileId, item.id);
+    return { watched };
+  }
+
+  /**
+   * A book's or a comic's place (v0.22): percent read (a book) or the page (a comic), where exactly (the locator) and
+   * on what kind of device. Read only when the reader says it went past the last page.
+   */
+  saveReading(profileId, item, position, duration, { locator, device, read }) {
+    const pos = Math.max(0, Number(position) || 0);
+    const dur = Number(duration) || null;
+    const watched = read === true;
+    const loc = cleanLocator(locator);
+    const dev = DEVICES.has(device) ? device : null;
+    this.db.run(
+      `INSERT INTO progress (profile_id, item_id, position, duration, watched, updated_at, locator, device) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(profile_id, item_id) DO UPDATE SET position = excluded.position, duration = excluded.duration,
+         watched = CASE WHEN excluded.watched = 1 THEN 1 WHEN excluded.position > 0 THEN 0 ELSE progress.watched END,
+         updated_at = excluded.updated_at, locator = excluded.locator, device = excluded.device`,
+      profileId, item.id, watched ? 0 : pos, dur, watched ? 1 : 0, Date.now(), watched ? null : loc, dev,
+    );
     return { watched };
   }
 }

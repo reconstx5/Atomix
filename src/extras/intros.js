@@ -30,12 +30,13 @@ export async function readChapters(ffprobePath, file, { onSpawn } = {}) {
 /** How much of the start of an episode to search, in seconds. */
 export const searchWindow = (duration) => Math.min(600, 0.4 * duration);
 
-export async function audioFingerprint(ffmpegPath, file, duration, { onSpawn, matcher } = {}) {
-  const out = await run(
-    ffmpegPath,
-    ['-hide_banner', '-loglevel', 'error', '-nostdin', '-i', file, '-t', searchWindow(duration).toFixed(2), '-map', '0:a:0', '-vn', '-sn', '-dn', '-ac', '1', '-ar', String(SAMPLE_RATE), '-f', 's16le', '-'],
-    { timeout: 5 * 60 * 1000, maxBuffer: 20 * 1024 * 1024, onSpawn },
-  );
+/** The ffmpeg argv that pulls the first part of an episode's main audio track for fingerprinting. */
+export function fingerprintArgs(file, duration, audioIndex = 0) {
+  return ['-hide_banner', '-loglevel', 'error', '-nostdin', '-i', file, '-t', searchWindow(duration).toFixed(2), '-map', `0:a:${Number(audioIndex) || 0}`, '-vn', '-sn', '-dn', '-ac', '1', '-ar', String(SAMPLE_RATE), '-f', 's16le', '-'];
+}
+
+export async function audioFingerprint(ffmpegPath, file, duration, { onSpawn, matcher, audioIndex = 0 } = {}) {
+  const out = await run(ffmpegPath, fingerprintArgs(file, duration, audioIndex), { timeout: 5 * 60 * 1000, maxBuffer: 20 * 1024 * 1024, onSpawn });
   // Copy into a fresh ArrayBuffer (2-byte aligned) before reading it as 16-bit samples.
   const bytes = out.buffer.slice(out.byteOffset, out.byteOffset + (out.length & ~1));
   const samples = new Int16Array(bytes);
@@ -77,7 +78,7 @@ async function checkSeason({ pending, season, other, store, ffmpegPath, ffprobeP
       const entry = { fp: null, error: null };
       if (checkable(ep)) {
         try {
-          entry.fp = await audioFingerprint(ffmpegPath, ep.path, ep.duration, { onSpawn, matcher });
+          entry.fp = await audioFingerprint(ffmpegPath, ep.path, ep.duration, { onSpawn, matcher, audioIndex: parseJson(ep.media, null)?.defaultAudio || 0 });
         } catch (err) {
           signal?.throwIfAborted();
           entry.error = err.message;
@@ -100,8 +101,9 @@ async function checkSeason({ pending, season, other, store, ffmpegPath, ffprobeP
         store.deleteMarker(ep.id, 'credits', { sources: ['chapter', 'audio'] });
       }
       let chapters = { intro: null, credits: null };
+      const probed = parseJson(ep.media, null)?.chapters; // in the summary since 0.15 (one ffprobe per file, at scan)
       try {
-        chapters = markersFromChapters(await readChapters(ffprobePath, ep.path, { onSpawn }));
+        chapters = markersFromChapters(Array.isArray(probed) ? probed.map((c) => ({ start_time: c.start, end_time: c.end, tags: { title: c.title } })) : await readChapters(ffprobePath, ep.path, { onSpawn }));
       } catch {
         signal?.throwIfAborted(); // no readable chapters: carry on with the audio
       }

@@ -2,7 +2,7 @@
 // keys do with the floating menu, what Back does on Home, and how artwork is cropped.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { menuKey, menuStep, homeBack, sameLine, leftOnPage, coverRect, FRAME_QUERY } from '../public/js/orbit-rules.js';
+import { menuKey, menuStep, homeBack, sameLine, leftOnPage, coverRect, FRAME_QUERY, orbitLibraryIcon, pillShown } from '../public/js/orbit-rules.js';
 
 test('Left enters the menu when nothing is to the left on the same line', () => {
   assert.equal(menuKey({ key: 'left', inMenu: false, leftTarget: 'none' }), 'enter');
@@ -60,4 +60,20 @@ test('Left stays on the page for a control on the same line or wholly to the lef
   assert.equal(leftOnPage(at, { top: 250, bottom: 314, left: 264, right: 564 }), true, 'a section tab further up the left column');
   assert.equal(leftOnPage(at, { top: 700, bottom: 900, left: 264, right: 1344 }), false, 'a wide row below that starts further left is not "to the left"');
   assert.equal(leftOnPage(at, null), false, 'nothing at all');
+});
+
+test('Orbit gives each kind of library its own icon; the recordings library is marked apart from TV', () => {
+  const kinds = { movies: 'film', tv: 'tv', music: 'music', podcasts: 'mic', audiobooks: 'audiobook', books: 'book', comics: 'comic' };
+  for (const [type, name] of Object.entries(kinds)) assert.equal(orbitLibraryIcon({ type }), name, type);
+  assert.equal(orbitLibraryIcon({ type: 'tv', recordings: true }), 'recording');
+  assert.equal(orbitLibraryIcon({ type: 'something-new' }), 'film');
+  assert.equal(new Set(Object.values(kinds).concat('recording')).size, 8, 'no two kinds share an icon');
+});
+
+test('the phone pill hides scrolling down and comes back on any scroll up or at the top', () => {
+  assert.equal(pillShown({ y: 200, lastY: 100, shown: true }), false);
+  assert.equal(pillShown({ y: 190, lastY: 200, shown: false }), true);
+  assert.equal(pillShown({ y: 202, lastY: 200, shown: true }), true, 'a 2-px wobble changes nothing');
+  assert.equal(pillShown({ y: 202, lastY: 200, shown: false }), false);
+  assert.equal(pillShown({ y: 4, lastY: 0, shown: false }), true, 'at the top it shows');
 });

@@ -18,9 +18,14 @@ services:
       - ATOMIX_TRUST_PROXY=${ATOMIX_TRUST_PROXY:-${NODEFLIX_TRUST_PROXY:-false}}
       # Optional: pre-fill the TMDB key (can also be set in Settings → Server)
       - TMDB_API_KEY=${TMDB_API_KEY:-}
+      # Optional (v0.27): extra names and addresses for Atomix's own HTTPS certificate, e.g. mypc.local,192.168.1.20
+      - ATOMIX_HTTPS_NAMES=${ATOMIX_HTTPS_NAMES:-}
     ports:
       # With the https profile you can remove this, so only Caddy is reachable.
       - "${ATOMIX_PORT:-${NODEFLIX_PORT:-8787}}:8787"
+      # The secure address for phones (Settings → Server → Secure address). With Atomix's own certificate, set
+      # ATOMIX_HTTPS_NAMES below to the names/addresses phones use (the container can't see the host's).
+      - "${ATOMIX_HTTPS_PORT_PUBLISHED:-8443}:8443"
     volumes:
       - ./data:/data                      # database, artwork cache, plugin data
       - ${MEDIA_MOVIES:-./media/movies}:/media/movies:ro

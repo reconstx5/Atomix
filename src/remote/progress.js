@@ -6,7 +6,9 @@ import { resolveSource, isRemotePath } from './index.js';
 
 const log = logger('remote');
 
-export function attachReporter(core, { everyMs = 10000 } = {}) {
+const KEEP_MS = 3600 * 1000; // a position entry older than this is pruned
+
+export function attachReporter(core, { everyMs = 10000, now: clock = Date.now } = {}) {
   const last = new Map(); // session (else item) → when its position was last pushed
   const warned = new Map(); // server id → when a failure was last logged
   const chains = new Map(); // server id → the promise of its last report
@@ -60,22 +62,26 @@ export function attachReporter(core, { everyMs = 10000 } = {}) {
 
   core.hooks.on('playback:progress', ({ item, position, watched, sessionId }) => {
     if (!item || !isRemotePath(item.path)) return;
-    const now = Date.now();
+    const now = clock();
+    for (const [k, at] of last) if (now - at > KEEP_MS) last.delete(k);
     const slot = slotKey(item, sessionId);
     if (!watched && now - (last.get(slot) || 0) < reporter.everyMs) return;
-    last.set(slot, now);
+    // A late report for a session that has already stopped isn't remembered (its stop already cleared it).
+    if (!sessionId || core.playback.sessions.has(sessionId)) last.set(slot, now);
     const live = (sessionId && core.playback.sessions.get(sessionId)) || [...core.playback.sessions.values()].find((s) => s.itemId === item.id);
     enqueue(item, 'progress', (p, server, it) => p.reportProgress(server, it, { position, duration: item.duration, watched: Boolean(watched), paused: Boolean(live?.paused), sessionId: sessionId || live?.id }), { coalesce: true, watched: Boolean(watched), sessionId });
   });
 
   core.hooks.on('playback:stop', ({ session }) => {
+    last.delete(`s:${session.id}`);
     if (!started.delete(session.id)) return; // never started remotely, or already reported
     const item = itemOf(session.itemId);
     if (!item) return;
-    last.delete(slotKey(item, session.id));
     enqueue(item, 'the stop', (p, server, it) => p.reportStop(server, it, { position: session.position || 0, duration: item.duration, sessionId: session.id }));
   });
 
+  /** How many position entries are kept (tests). */
+  reporter.tracked = () => last.size;
   /** Resolves when every queued report has been sent (tests and shutdown). */
   reporter.idle = () => Promise.all([...chains.values()]);
   return reporter;

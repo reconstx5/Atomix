@@ -207,3 +207,24 @@ test('serializeLibrary carries the server name', async () => {
   const movies = libs.find((l) => l.id === ids.movies);
   assert.deepEqual([movies.serverId, movies.serverName, movies.remoteId], [ids.server, 'Fake Jellyfin', 'lib-m']);
 });
+
+test('an unreachable server raises a problem and a good sync clears it (v0.23)', async () => {
+  const db = nf.app.core.db;
+  const seen = [];
+  nf.app.core.hooks.on('server:problem', (p) => seen.push(['problem', p]));
+  nf.app.core.hooks.on('server:recovered', (p) => seen.push(['recovered', p]));
+  await admin.post(`/api/libraries/${ids.movies}/scan`, {}); // a good sync first (an earlier test left it unreachable)
+  await waitForScan(admin);
+  seen.length = 0;
+  db.run("UPDATE servers SET url = 'http://127.0.0.1:1' WHERE id = ?", ids.server);
+  await admin.post(`/api/libraries/${ids.movies}/scan`, {});
+  await waitForScan(admin);
+  const raised = seen.find(([k, p]) => k === 'problem' && p.kind === 'remote-server');
+  assert.ok(raised, JSON.stringify(seen));
+  assert.match(raised[1].text, /^Fake Jellyfin isn't answering \(.+\)\.$/);
+  assert.ok(!raised[1].text.includes('tok'), 'no token in the sentence');
+  db.run('UPDATE servers SET url = ? WHERE id = ?', jf.url, ids.server);
+  await admin.post(`/api/libraries/${ids.movies}/scan`, {});
+  await waitForScan(admin);
+  assert.ok(seen.some(([k, p]) => k === 'recovered' && p.kind === 'remote-server'));
+});

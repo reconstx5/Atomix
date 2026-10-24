@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tv SYSTEM "xmltv.dtd">
+<!-- a small guide in the shape providers publish -->
+<tv generator-info-name="test">
+  <channel id="tvnz1.nz">
+    <display-name lang="en">TVNZ 1</display-name>
+    <display-name>TVNZ1</display-name>
+    <icon src="http://logos.example/tvnz1.png"/>
+  </channel>
+  <channel id="three.nz"><display-name>Three</display-name></channel>
+  <programme start="20261010190000 +1300" stop="20261010193000 +1300" channel="tvnz1.nz">
+    <title lang="en">1 News at Six &amp; Seven</title>
+    <sub-title>Tonight&#39;s headlines</sub-title>
+    <desc lang="en"><![CDATA[The day's <news>, weather & sport.]]></desc>
+    <category>News</category>
+    <category>Current affairs</category>
+    <episode-num system="xmltv_ns">1.4.</episode-num>
+    <icon src="http://img.example/news.jpg" />
+  </programme>
+  <programme start="20261010193000 +1300" stop="20261010200000 +1300" channel="tvnz1.nz">
+    <title>Seven Sharp</title>
+    <episode-num system="xmltv_ns">.4.</episode-num>
+    <episode-num system="onscreen">S12E80</episode-num>
+  </programme>
+  <programme start="20261010060000" channel="three.nz">
+    <title>The Chase</title>
+  </programme>
+  <programme start="20261010070000" stop="20261010080000" channel="three.nz">
+    <title>Hope Street</title>
+  </programme>
+  <programme start="20261010080000" channel="three.nz">
+    <title>No end</title>
+  </programme>
+</tv>

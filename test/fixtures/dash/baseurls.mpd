@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT10S">
+  <BaseURL>https://cdn1.example/root/</BaseURL>
+  <Period>
+    <BaseURL>p1/</BaseURL>
+    <AdaptationSet mimeType="video/mp4">
+      <BaseURL>video/</BaseURL>
+      <SegmentTemplate media="$Number$.m4s" initialization="init.mp4" duration="2" startNumber="1"/>
+      <Representation id="hd" bandwidth="1"><BaseURL>hd/</BaseURL></Representation>
+      <Representation id="sd" bandwidth="1"/>
+    </AdaptationSet>
+    <AdaptationSet mimeType="audio/mp4">
+      <BaseURL>https://cdn2.example/audio/</BaseURL>
+      <Representation id="aud" bandwidth="1"><SegmentTemplate media="a$Number$.m4s" initialization="a-init.mp4" duration="2"/></Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>

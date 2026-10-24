@@ -1,13 +1,21 @@
 {
+  "id": "/",
   "name": "Atomix",
   "short_name": "Atomix",
   "description": "Your self-hosted media hub",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#17191c",
   "theme_color": "#17191c",
   "icons": [
     { "src": "/img/favicon.svg", "sizes": "any", "type": "image/svg+xml" },
-    { "src": "/img/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    { "src": "/img/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/img/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/img/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Downloads", "url": "/#/downloads", "icons": [{ "src": "/img/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Live TV", "url": "/#/live", "icons": [{ "src": "/img/icon-192.png", "sizes": "192x192" }] }
   ]
 }

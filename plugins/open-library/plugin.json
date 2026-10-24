@@ -1,0 +1,11 @@
+{
+  "id": "open-library",
+  "name": "Open Library",
+  "version": "1.0.0",
+  "description": "Fills missing descriptions, covers, first-published years and subjects for books and audiobooks from Open Library. No key needed.",
+  "author": "Atomix",
+  "homepage": "https://openlibrary.org",
+  "main": "index.js",
+  "enabledByDefault": false,
+  "settings": []
+}

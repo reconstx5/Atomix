@@ -61,7 +61,7 @@ export function safeJoin(root, rel) {
  * Send a file, honouring Range and If-Modified-Since.
  * @returns {Promise<boolean>} false if the file does not exist
  */
-export async function sendFile(req, res, file, { cacheControl = 'no-cache', contentType } = {}) {
+export async function sendFile(req, res, file, { cacheControl = 'no-cache', contentType, headers: extra } = {}) {
   let stat;
   try {
     stat = await fs.promises.stat(file);
@@ -79,6 +79,7 @@ export async function sendFile(req, res, file, { cacheControl = 'no-cache', cont
     ETag: etag,
     'Cache-Control': cacheControl,
     'Accept-Ranges': 'bytes',
+    ...(extra || {}),
   };
 
   if (req.headers['if-none-match'] === etag) {
@@ -87,7 +88,9 @@ export async function sendFile(req, res, file, { cacheControl = 'no-cache', cont
     return true;
   }
 
-  const range = req.headers.range;
+  // If-Range: a resume only when the file is still the one the device started (else the whole file, 200).
+  const ifRange = req.headers['if-range'];
+  const range = ifRange && ifRange !== etag && ifRange !== lastModified ? null : req.headers.range;
   let start = 0;
   let end = stat.size - 1;
   let status = 200;
@@ -100,7 +103,7 @@ export async function sendFile(req, res, file, { cacheControl = 'no-cache', cont
       if (e) end = Math.min(Number(e), stat.size - 1);
     }
     if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= stat.size) {
-      res.writeHead(416, { 'Content-Range': `bytes */${stat.size}` });
+      res.writeHead(416, { 'Content-Range': `bytes */${stat.size}`, 'Cache-Control': cacheControl });
       res.end();
       return true;
     }
@@ -119,3 +122,6 @@ export async function sendFile(req, res, file, { cacheControl = 'no-cache', cont
   stream.pipe(res);
   return true;
 }
+
+/** What /themes/ serves from a theme's folder (styles, its theme.json, pictures, web fonts) — and so all the app shell keeps of it. */
+export const THEME_FILE = /\.(css|json|png|jpe?g|svg|webp|woff2?)$/i;

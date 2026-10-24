@@ -14,6 +14,7 @@ export class Picks {
   }
   clear() {
     this.cache.clear();
+    this.profiles?.clear();
   }
   /** The cache is keyed on what the viewer may see, so a changed age limit or library access misses it at once. */
   cached(viewer, key, make) {
@@ -29,17 +30,25 @@ export class Picks {
   collectionMap() {
     return new Map(this.db.all('SELECT item_id, MIN(collection_id) AS collection_id FROM collection_items GROUP BY item_id').map((r) => [r.item_id, r.collection_id]));
   }
+  /** A title's scoring profile; the JSON is parsed once per title per cache lifetime (clear() drops these too). */
   profile(row, collectionOf) {
-    const people = parseJson(row.people, []);
-    return {
-      id: row.id,
-      genres: new Set(parseJson(row.genres, [])),
-      keywords: new Set(parseJson(row.keywords, [])),
-      leads: new Set(people.filter((p) => p.role === 'director' || p.role === 'creator').map((p) => p.name)),
-      cast: new Set(people.filter((p) => p.role === 'cast').map((p) => p.name)),
-      decade: row.year ? Math.floor(row.year / 10) : null,
-      collection: collectionOf.get(row.id) ?? null,
-    };
+    this.profiles ||= new Map();
+    const k = `${row.id}:${row.updated_at || 0}`;
+    let p = this.profiles.get(k);
+    if (!p) {
+      const people = parseJson(row.people, []);
+      p = {
+        id: row.id,
+        genres: new Set(parseJson(row.genres, [])),
+        keywords: new Set(parseJson(row.keywords, [])),
+        leads: new Set(people.filter((x) => x.role === 'director' || x.role === 'creator').map((x) => x.name)),
+        cast: new Set(people.filter((x) => x.role === 'cast').map((x) => x.name)),
+        decade: row.year ? Math.floor(row.year / 10) : null,
+      };
+      if (this.profiles.size > 20000) this.profiles.clear();
+      this.profiles.set(k, p);
+    }
+    return { ...p, collection: collectionOf.get(row.id) ?? null };
   }
   score(a, b) {
     let s = 0;
@@ -51,9 +60,10 @@ export class Picks {
     if (a.decade != null && a.decade === b.decade) s += 1;
     return s;
   }
+  /** The columns scoring reads — not the whole row (overview, media, people JSON would be parsed for nothing). */
   candidates(viewer) {
     const vis = this.library.visibility(viewer);
-    return this.db.all(`SELECT i.* FROM items i WHERE i.kind IN ('movie', 'show') AND ${vis.sql}`, ...vis.params);
+    return this.db.all(`SELECT i.id, i.kind, i.year, i.rating, i.genres, i.keywords, i.people, i.library_id, i.min_age, i.show_id, i.updated_at FROM items i WHERE i.kind IN ('movie', 'show') AND ${vis.sql}`, ...vis.params);
   }
   /** Titles like this one, for its page. */
   similar(itemId, viewer = EVERYONE, { limit = 20 } = {}) {
@@ -77,8 +87,9 @@ export class Picks {
   /** Up to two seeds: the most recently watched or in-progress titles (an episode counts as its show, once). */
   becauseYouWatched(viewer, { seeds = 2 } = {}) {
     if (!viewer.profileId) return [];
-    const seedIds = this.cached(viewer, 'byw', () => {
-      const recent = this.db.all('SELECT i.*, p.updated_at AS seen_at FROM progress p JOIN items i ON i.id = p.item_id WHERE p.profile_id = ? ORDER BY p.updated_at DESC LIMIT 40', viewer.profileId);
+    // The seeds follow what was just watched, so they aren't cached (40 rows); the similar lists behind them are.
+    const seedIds = (() => {
+      const recent = this.db.all('SELECT i.id, i.kind, i.show_id, i.library_id, i.min_age, p.updated_at AS seen_at FROM progress p JOIN items i ON i.id = p.item_id WHERE p.profile_id = ? ORDER BY p.updated_at DESC LIMIT 40', viewer.profileId);
       const out = [];
       const used = new Set();
       for (const r of recent) {
@@ -89,7 +100,7 @@ export class Picks {
         if (out.length >= seeds) break;
       }
       return out;
-    });
+    })();
     return seedIds
       .map((id) => this.library.get(id))
       .filter(Boolean)

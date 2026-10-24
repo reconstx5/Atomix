@@ -1,6 +1,7 @@
-// Announces new movies and episodes on Discord, a generic webhook and email.
-// Items found during one library scan are collected and sent as one message.
+// Alerts (renamed from "New-episode alerts" in v0.23): new films and episodes — one message per scan — and server
+// problems, to ntfy, Telegram, Pushover, Discord, a generic webhook and email. The Test button reports each channel.
 import { sendMail } from './smtp.js';
+import { sendNtfy, sendTelegram, sendPushover } from './channels.js';
 
 const DISCORD_LIMIT = 2000;
 
@@ -55,47 +56,72 @@ export function buildMessage({ serverName = 'Atomix', publicUrl = '', items }) {
   return { subject, text, discord: discord.trim(), lines };
 }
 
+const ORDER = ['ntfy', 'Telegram', 'Pushover', 'Discord', 'Webhook', 'Email'];
+const NOTHING = 'Nothing is set up yet. Fill in a channel (ntfy, Telegram, Pushover, Discord, a webhook or email) first.';
+const DAY = 86_400_000;
+
+/** Each channel's result in one line: "ntfy: sent · Telegram: Unauthorized (check the bot token)". */
+export function report(results) {
+  if (!results.length) return NOTHING;
+  return [...results]
+    .sort((a, b) => ORDER.indexOf(a.name) - ORDER.indexOf(b.name))
+    .map((r) => `${r.name}: ${r.error ? r.error : 'sent'}`)
+    .join(' · ');
+}
+
 export function setup(api) {
   const pending = new Map(); // libraryId → items found in the current scan
 
-  async function send(message, items = []) {
+  /**
+   * Send one message to every channel that is filled in. Resolves to [{ name, error? }] — never throws.
+   * @param {{ subject: string, text: string, discord: string }} message
+   */
+  async function send(message, { items = [], event = items.length ? 'items.added' : 'test' } = {}) {
     const cfg = api.config;
-    const sent = [];
-    const failed = [];
     const jobs = [];
-    if (cfg.discordWebhook) {
+    const run = (name, fn) =>
       jobs.push(
         (async () => {
-          const res = await api.fetch(cfg.discordWebhook, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content: message.discord, username: api.serverName, allowed_mentions: { parse: [] } }),
-            signal: AbortSignal.timeout(15000),
-          });
-          if (!res.ok) throw new Error(`Discord answered ${res.status}`);
-        })().then(() => sent.push('Discord'), (err) => failed.push(`Discord failed: ${err.message}`)),
+          try {
+            await fn();
+            return { name };
+          } catch (err) {
+            return { name, error: String(err?.cause?.code || err?.message || 'failed').slice(0, 160) };
+          }
+        })(),
       );
+    if (cfg.ntfyTopic) run('ntfy', () => sendNtfy(api, cfg, { title: message.subject, text: message.text }));
+    if (cfg.telegramToken && cfg.telegramChat) run('Telegram', () => sendTelegram(api, cfg, { text: message.text }));
+    if (cfg.pushoverToken && cfg.pushoverUser) run('Pushover', () => sendPushover(api, cfg, { title: message.subject, text: message.text }));
+    if (cfg.discordWebhook) {
+      run('Discord', async () => {
+        const res = await api.fetch(cfg.discordWebhook, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: message.discord, username: api.serverName, allowed_mentions: { parse: [] } }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!res.ok) throw new Error(`answered ${res.status}`);
+      });
     }
     if (cfg.webhookUrl) {
-      jobs.push(
-        (async () => {
-          const res = await api.fetch(cfg.webhookUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              event: items.length ? 'items.added' : 'test',
-              server: api.serverName,
-              text: message.text,
-              items: items.map((i) => ({ id: i.id, kind: i.kind, title: i.title, year: i.year ?? null, season: i.season ?? null, episode: i.episode ?? null, show: i.show?.title ?? null, url: link(cfg.publicUrl, i.kind === 'episode' ? i.show?.id : i.id) })),
-            }),
-            signal: AbortSignal.timeout(15000),
-          });
-          if (!res.ok) throw new Error(`answered ${res.status}`);
-        })().then(() => sent.push('webhook'), (err) => failed.push(`Webhook failed: ${err.cause?.code || err.message}`)),
-      );
+      run('Webhook', async () => {
+        const res = await api.fetch(cfg.webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            event,
+            server: api.serverName,
+            text: message.text,
+            items: items.map((i) => ({ id: i.id, kind: i.kind, title: i.title, year: i.year ?? null, season: i.season ?? null, episode: i.episode ?? null, show: i.show?.title ?? null, url: link(cfg.publicUrl, i.kind === 'episode' ? i.show?.id : i.id) })),
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!res.ok) throw new Error(`answered ${res.status}`);
+      });
     }
     if (cfg.smtpHost && cfg.emailTo) {
-      jobs.push(
+      run('Email', () =>
         sendMail({
           host: cfg.smtpHost,
           port: cfg.smtpPort,
@@ -106,28 +132,18 @@ export function setup(api) {
           to: String(cfg.emailTo).split(',').map((s) => s.trim()).filter(Boolean),
           subject: message.subject,
           text: message.text,
-        }).then(() => sent.push('email'), (err) => failed.push(`Email failed: ${err.message}`)),
+        }),
       );
     }
-    await Promise.all(jobs);
-    // Keep a stable order in the summary.
-    const order = ['Discord', 'webhook', 'email'];
-    sent.sort((a, b) => order.indexOf(a) - order.indexOf(b));
-    for (const f of failed) api.log.warn(f);
-    return { sent, failed };
-  }
-
-  function summary({ sent, failed }) {
-    const list = sent.length > 1 ? `${sent.slice(0, -1).join(', ')} and ${sent.at(-1)}` : sent[0];
-    const parts = [];
-    if (sent.length) parts.push(`Sent to ${list}.`);
-    else if (!failed.length) parts.push('Nothing is set up yet — add a Discord webhook, a webhook URL or email settings first.');
-    if (failed.length) parts.push(failed.join(' '));
-    return parts.join(' ');
+    const results = await Promise.all(jobs);
+    // Only the channel and its reason are logged: addresses carry tokens.
+    for (const r of results) if (r.error) api.log.warn(`${r.name} failed: ${r.error}`);
+    return results;
   }
 
   api.on('item:added', ({ item, firstScan }) => {
     const cfg = api.config;
+    if (cfg.alertNew === false) return;
     if (firstScan && cfg.skipFirstScan !== false) return;
     if (item.kind === 'movie' && cfg.notifyMovies === false) return;
     if (item.kind === 'episode' && cfg.notifyEpisodes === false) return;
@@ -142,16 +158,68 @@ export function setup(api) {
     pending.delete(library.id);
     if (!items.length) return;
     const message = buildMessage({ serverName: api.serverName, publicUrl: api.config.publicUrl, items });
-    const result = await send(message, items);
-    api.log.info(`Announced ${items.length} new item${items.length === 1 ? '' : 's'}: ${summary(result)}`);
+    const results = await send(message, { items });
+    api.log.info(`Announced ${items.length} new item${items.length === 1 ? '' : 's'}: ${report(results)}`);
+  });
+
+  // Server problems (v0.23): sent once, and again at most once a day if it comes back — a problem that comes back
+  // within the day is held and sent when the day is up, if it's still open then. Only a send that reached at least
+  // one channel counts. Its clearing is said only when asked, once per sent problem.
+  const repeatMs = () => Number(process.env.ATOMIX_ALERTS_REPEAT_MS) || DAY; // the env value is for tests
+  const open = new Map(); // "sent:kind:key" → the problem's text, while it's open
+  const held = new Map(); // "sent:kind:key" → timer for a problem held until its day is up
+
+  async function sendProblem(id, text) {
+    const server = api.serverName;
+    const line = `⚠ ${server}: ${text}`;
+    const results = await send({ subject: `Problem on ${server}`, text: line, discord: line }, { event: 'server.problem' });
+    if (results.some((r) => !r.error)) api.storage.set(id, { at: Date.now(), text, cleared: false });
+  }
+
+  api.on('server:problem', async ({ kind, key, text }) => {
+    if (api.config.alertProblems === false) return;
+    const id = `sent:${kind}:${key}`;
+    open.set(id, text);
+    const last = api.storage.get(id);
+    const wait = last ? last.at + repeatMs() - Date.now() : 0;
+    if (wait > 0) {
+      clearTimeout(held.get(id));
+      const timer = setTimeout(() => {
+        held.delete(id);
+        if (open.has(id) && api.config.alertProblems !== false) sendProblem(id, open.get(id)).catch(() => {});
+      }, wait);
+      timer.unref?.();
+      held.set(id, timer);
+      return;
+    }
+    await sendProblem(id, text);
+  });
+
+  api.on('server:recovered', async ({ kind, key }) => {
+    const id = `sent:${kind}:${key}`;
+    open.delete(id);
+    clearTimeout(held.get(id));
+    held.delete(id);
+    if (!api.config.alertRecovered) return;
+    const last = api.storage.get(id);
+    if (!last || last.cleared) return; // only a problem that was sent, and only once
+    api.storage.set(id, { ...last, cleared: true });
+    const server = api.serverName;
+    const line = `✓ ${server}: back to normal — ${last.text}`;
+    await send({ subject: `Back to normal on ${server}`, text: line, discord: line }, { event: 'server.recovered' });
   });
 
   api.registerAction('test', async () => {
     const message = {
       subject: `Test message from ${api.serverName}`,
-      text: `This is a test message from ${api.serverName}. New movies and episodes will be announced like this.\n`,
-      discord: `**${api.serverName}** — this is a test message. New movies and episodes will be announced here.`,
+      text: `This is a test message from ${api.serverName}. New films, episodes and server problems will be sent like this.\n`,
+      discord: `**${api.serverName}** — this is a test message. New films, episodes and server problems will be sent here.`,
     };
-    return { message: summary(await send(message)) };
+    return { message: report(await send(message)) };
   });
+
+  return () => {
+    for (const t of held.values()) clearTimeout(t);
+    held.clear();
+  };
 }

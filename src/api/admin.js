@@ -1,15 +1,61 @@
 // Admin-only endpoints: dashboard, settings, plugins, folder browser.
+import { householdStats } from '../stats.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { HttpError } from '../http/router.js';
+import { checkedLayout } from '../home/layout.js';
+import { parseJson } from '../db.js';
 import { detectTools } from '../library/probe.js';
+import { detectArchiveTool, ARCHIVE_CANDIDATES } from '../books/archive-tool.js';
 
-const SECRET_SETTINGS = ['tmdbApiKey'];
+/** An absolute folder Atomix can make (if needed) and write a file in. */
+function writableFolder(dir) {
+  if (!path.isAbsolute(dir)) return false;
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const probe = path.join(dir, `.atomix-write-${process.pid}`);
+    fs.writeFileSync(probe, '');
+    fs.rmSync(probe, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const SECRET_SETTINGS = ['tmdbApiKey', 'lastfmSecret'];
+
+const HW_ACCELS = ['none', 'nvenc', 'qsv', 'vaapi', 'videotoolbox', 'amf'];
+const X264_PRESETS = ['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow'];
+const SOFTWARE_HEIGHTS = [720, 1080, 1440, 2160];
 
 export function registerAdminRoutes(r, core) {
   const { db, settings, playback, scanner, plugins, config, version } = core;
   const admin = { auth: 'admin' };
+
+  // ---- Web apps (v0.22): shortcut tiles to sites with no API, kept by admins ----
+  r.get('/api/admin/web-apps', () => core.webApps.list(), admin);
+  r.post('/api/admin/web-apps', async (ctx) => core.webApps.add(await ctx.body()), admin);
+  r.patch('/api/admin/web-apps/:id', async (ctx) => core.webApps.update(ctx.params.id, await ctx.body()), admin);
+  r.delete(
+    '/api/admin/web-apps/:id',
+    (ctx) => {
+      core.webApps.remove(ctx.params.id);
+      return { ok: true };
+    },
+    admin,
+  );
+
+  // ---- The household's Home arrangement (v0.22): the default every profile follows until it changes its own ----
+  r.get('/api/admin/home-layout', () => ({ layout: core.home.household() }), admin);
+  r.put(
+    '/api/admin/home-layout',
+    async (ctx) => {
+      core.home.saveHousehold(checkedLayout((await ctx.body()).layout, core, ctx.viewer, core.home.household()?.pins || []));
+      return { ok: true };
+    },
+    admin,
+  );
 
   r.get(
     '/api/admin/dashboard',
@@ -35,7 +81,16 @@ export function registerAdminRoutes(r, core) {
           tracks: counts.track || 0,
           users: db.get('SELECT COUNT(*) AS n FROM users').n,
         },
-        sessions: playback.list(),
+        sessions: [...playback.list(), ...(core.live?.drm?.list() || []), ...(core.live?.streams?.viewerList?.() || [])],
+        downloadsPreparing: core.downloads?.preparingCount() ?? 0, // v0.21
+        // Live TV tuners in use (v0.19): the channel, who's watching it, and (Plan B) what it's recording.
+        tuners: (core.live?.tuners?.list() || []).filter((t) => t.holders.length).map((t) => ({
+          channel: t.label,
+          viewers: t.holders.filter((h) => h.kind !== 'recording').map((h) => core.live.streams.holderInfo(h)?.username).filter(Boolean),
+          recording: t.holders.find((h) => h.kind === 'recording')?.title || null,
+        })),
+        // The next 3 recordings to start (v0.19).
+        nextRecordings: (core.live?.recordings?.list({ status: 'scheduled' }) || []).slice(0, 3).map((x) => ({ id: x.id, title: x.title, channel: x.channelName, start: x.start, end: x.end })),
         scan: scanner.status,
         tmdbConfigured: core.metadata.tmdb.enabled(),
         servers: db.all('SELECT id, name, kind, status, status_detail, last_sync FROM servers ORDER BY name').map((s) => ({ id: s.id, name: s.name, kind: s.kind, status: s.status, statusDetail: s.status_detail || null, lastSync: s.last_sync || null })),
@@ -47,7 +102,7 @@ export function registerAdminRoutes(r, core) {
   r.post(
     '/api/admin/tools/recheck',
     async () => {
-      core.tools = await detectTools(config);
+      core.tools = await detectTools(config, settings);
       scanner.tools = core.tools;
       return core.tools;
     },
@@ -57,7 +112,9 @@ export function registerAdminRoutes(r, core) {
   r.post(
     '/api/admin/sessions/:sid/stop',
     (ctx) => {
-      playback.stop(ctx.params.sid, 'admin');
+      if (core.live?.drm?.sessions.has(ctx.params.sid)) core.live.drm.stop(ctx.params.sid, 'admin');
+      else if (core.live?.streams?.viewers.has(ctx.params.sid)) core.live.streams.viewerStop(ctx.params.sid, 'admin', 'An admin stopped this stream.');
+      else playback.stop(ctx.params.sid, 'admin');
       return { ok: true };
     },
     admin,
@@ -68,10 +125,25 @@ export function registerAdminRoutes(r, core) {
     () => {
       const s = settings.all();
       for (const k of SECRET_SETTINGS) s[k] = s[k] ? '••••••••' + String(s[k]).slice(-4) : '';
+      s.recordingsDirDefault = config.recordingsDir; // where Live TV recordings go when the folder is left empty
       return s;
     },
     admin,
   );
+
+  // v0.27: the secure address (Settings → Server): its mode, address, and why it isn't running if it isn't.
+  r.get('/api/admin/https', () => {
+    const st = core.https?.state() || { mode: 'off', listening: false, secureUrl: null, sentence: null, command: null, name: null, port: null };
+    return { ...st, own: st.mode === 'own' && st.listening ? { caDownload: '/tls/atomix-home-ca.crt', profileDownload: '/tls/atomix-home-ca.mobileconfig' } : null };
+  }, { auth: 'admin' });
+
+  // Dashboard → Household: every profile's hours this week, month and year.
+  r.get('/api/admin/stats', () => householdStats(core.db), { auth: 'admin' });
+  // Every account's profiles (Settings → Activity's filter): id, name and whose.
+  r.get('/api/admin/profiles', () => core.db.all('SELECT p.id, p.name, u.username AS owner FROM profiles p JOIN users u ON u.id = p.user_id ORDER BY u.username COLLATE NOCASE, p.created_at, p.id'), { auth: 'admin' });
+
+  // Settings → Activity: newest first, 50 at a time, filtered by type, profile and day.
+  r.get('/api/admin/activity', (ctx) => core.activity.list({ type: ctx.query.type || null, profileId: ctx.query.profile ? Number(ctx.query.profile) : null, day: ctx.query.day || null, before: ctx.query.before ? Number(ctx.query.before) : null }), { auth: 'admin' });
 
   r.put(
     '/api/admin/settings',
@@ -96,6 +168,12 @@ export function registerAdminRoutes(r, core) {
         }
       }
       if (body.maxTranscodes != null) body.maxTranscodes = Math.max(1, Math.min(32, Number(body.maxTranscodes) || 1));
+      // These go straight into ffmpeg's command line: only the known values.
+      if (body.hwAccel != null && !HW_ACCELS.includes(body.hwAccel)) throw new HttpError(400, `Hardware acceleration must be one of ${HW_ACCELS.join(', ')}.`);
+      if (body.x264Preset != null && !X264_PRESETS.includes(body.x264Preset)) throw new HttpError(400, `The x264 preset must be one of ${X264_PRESETS.join(', ')}.`);
+      if (body.vaapiDevice != null && body.vaapiDevice !== '' && !/^\/[^\0]+$/.test(String(body.vaapiDevice))) throw new HttpError(400, 'The VA-API device must be a full path, like /dev/dri/renderD128.');
+      if (body.maxSoftwareHeight != null && !SOFTWARE_HEIGHTS.includes(Number(body.maxSoftwareHeight))) throw new HttpError(400, 'Max software conversion height must be 720, 1080, 1440 or 2160.');
+      if (body.maxSoftwareHeight != null) body.maxSoftwareHeight = Number(body.maxSoftwareHeight);
       if (body.scanIntervalMinutes != null) body.scanIntervalMinutes = Math.max(0, Math.min(10080, Number(body.scanIntervalMinutes) || 0));
       if (body.remoteSyncHours != null) body.remoteSyncHours = Math.max(0, Math.min(168, Number(body.remoteSyncHours) || 0));
       if (body.pickerIdleMinutes !== undefined) {
@@ -103,9 +181,46 @@ export function registerAdminRoutes(r, core) {
         const v = typeof body.pickerIdleMinutes === 'number' || (typeof body.pickerIdleMinutes === 'string' && body.pickerIdleMinutes.trim() !== '') ? Number(body.pickerIdleMinutes) : NaN;
         body.pickerIdleMinutes = [0, 15, 30, 60, 240].includes(v) ? v : 30;
       }
+      if (body.recordingsDir !== undefined) {
+        const v = String(body.recordingsDir ?? '').trim();
+        if (v) {
+          // Not the data folder or anywhere in it (its default recordings folder aside), not a drive's top level.
+          const full = path.resolve(v);
+          const data = path.resolve(config.dataDir);
+          const rel = path.relative(data, full);
+          const inData = rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+          if ((inData && full !== path.resolve(config.recordingsDir)) || full === path.parse(full).root) throw new HttpError(400, "Pick a folder that isn't the Atomix data folder or a drive's top level");
+        }
+        if (v && !writableFolder(v)) throw new HttpError(400, "Atomix can't write to that folder");
+        body.recordingsDir = v;
+      }
+      if (body.downloadsDir !== undefined) {
+        const v = String(body.downloadsDir ?? '').trim();
+        const inside = (root) => {
+          const rel = path.relative(path.resolve(root), path.resolve(v));
+          return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+        };
+        if (v && db.all('SELECT paths FROM libraries').some((l) => parseJson(l.paths, []).some(inside))) throw new HttpError(400, 'Pick a folder outside your libraries (they would be scanned as titles).');
+        if (v && !writableFolder(v)) throw new HttpError(400, "Atomix can't write to that folder");
+        body.downloadsDir = v;
+      }
+      if (body.httpsPort != null && Number(body.httpsPort) === Number(core.listening?.port ?? config.port)) throw new HttpError(400, "Pick a port that isn't the one Atomix already uses");
+      const before = settings.all();
       settings.set(body);
+      // v0.27: the secure address follows at once (the answer comes once it has started, stopped or said why not).
+      if (body.httpsMode !== undefined || body.httpsPort !== undefined) await core.https?.apply();
+      if (body.quickConnect === false) core.quickConnect?.clear(); // codes approved but not yet collected go too
+      if (body.archiveToolPath !== undefined) {
+        // v0.22: a new 7-Zip/unrar path is looked for at once (Settings → Server then says what was found).
+        core.tools = { ...core.tools, archive: await detectArchiveTool([String(settings.get('archiveToolPath') || '').trim(), ...ARCHIVE_CANDIDATES]) };
+        scanner.tools = core.tools;
+      }
+      const after = settings.all();
+      const changed = Object.keys(body).filter((k) => k in after && JSON.stringify(before[k]) !== JSON.stringify(after[k]));
+      if (changed.length) core.activity?.add({ type: 'settings', userId: ctx.user.id, profileId: ctx.profile?.id ?? null, text: `${ctx.user.username} changed ${changed.join(', ')}`, ip: core.auth.clientIp(ctx.req) });
       const s = settings.all();
       for (const k of SECRET_SETTINGS) s[k] = s[k] ? '••••••••' + String(s[k]).slice(-4) : '';
+      s.recordingsDirDefault = config.recordingsDir; // where Live TV recordings go when the folder is left empty
       return s;
     },
     admin,

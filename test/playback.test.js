@@ -52,7 +52,7 @@ test('ffmpeg arguments', () => {
   assert.match(joined, /-ss 42\.500 -i \/x\/a\.mkv/);
   assert.match(joined, /\[0:v:0\]\[0:s:0\]overlay\[burned\];\[burned\]scale=-2:720,format=yuv420p\[vout\]/);
   assert.match(joined, /-c:v libx264/);
-  assert.match(joined, /-map 0:a:1\?/);
+  assert.match(joined, /-map 0:a:1 /); // no "?": a missing track is refused up front, not silently dropped
   assert.match(joined, /-c:a aac/);
   assert.match(joined, /frag_keyframe\+empty_moov/);
   const nv = buildFfmpegArgs({ ...plan, burnSubtitle: null }, { hwAccel: 'nvenc' }, { type: 'hls', dir: '/tmp/s' }).join(' ');
@@ -61,4 +61,31 @@ test('ffmpeg arguments', () => {
   const copy = buildFfmpegArgs({ mode: 'remux', target: 'mp4', file: 'a.mkv', start: 0, media: media('hevc', 'aac'), quality: 'original', audio: { index: 0 }, audioCopy: true }, {}, { type: 'progressive' }).join(' ');
   assert.match(copy, /-c:v copy -tag:v hvc1/);
   assert.match(copy, /-c:a copy/);
+});
+
+test('audio delay: a second input shifted with -itsoffset, audio mapped from it', () => {
+  const plan = { mode: 'remux', target: 'mp4', file: '/x/a.mp4', start: 12, media: media('h264', 'aac'), quality: 'original', audio: { index: 0 }, audioCopy: true, audioDelay: 0.5 };
+  const args = buildFfmpegArgs(plan, {}, { type: 'progressive' });
+  const j = args.join(' ');
+  assert.match(j, /-ss 12\.000 -i \/x\/a\.mp4 -itsoffset 0\.5 -ss 12\.000 -i \/x\/a\.mp4/);
+  assert.match(j, /-map 0:v:0 -c:v copy/);
+  assert.match(j, /-map 1:a:0 /);
+  assert.match(j, /-c:a copy/);
+  const none = buildFfmpegArgs({ ...plan, audioDelay: 0 }, {}, { type: 'progressive' });
+  assert.deepEqual(none, buildFfmpegArgs({ ...plan, audioDelay: undefined }, {}, { type: 'progressive' }), 'no delay: the args as before');
+  assert.equal(none.filter((a) => a === '-i').length, 1);
+  const neg = buildFfmpegArgs({ ...plan, audioDelay: -1.2, start: 0 }, {}, { type: 'progressive' }).join(' ');
+  assert.match(neg, /-i \/x\/a\.mp4 -itsoffset -1\.2 -i \/x\/a\.mp4/);
+});
+
+test('a burned picture subtitle with a delay overlays from a shifted second input', () => {
+  const plan = { mode: 'transcode', target: 'mp4', file: '/x/a.mkv', start: 0, media: media('hevc', 'aac'), quality: 'original', audio: { index: 0 }, audioCopy: true, burnSubtitle: 0, subtitleDelay: 1.5 };
+  const j = buildFfmpegArgs(plan, { hwAccel: 'none' }, { type: 'progressive' }).join(' ');
+  assert.match(j, /-i \/x\/a\.mkv -itsoffset 1\.5 -i \/x\/a\.mkv/);
+  assert.match(j, /\[0:v:0\]\[1:s:0\]overlay\[burned\]/);
+  // Both delays: audio from the first extra input, subtitles from the second.
+  const both = buildFfmpegArgs({ ...plan, audioDelay: 0.3 }, { hwAccel: 'none' }, { type: 'progressive' }).join(' ');
+  assert.match(both, /-itsoffset 0\.3 -i \/x\/a\.mkv -itsoffset 1\.5 -i \/x\/a\.mkv/);
+  assert.match(both, /\[0:v:0\]\[2:s:0\]overlay/);
+  assert.match(both, /-map 1:a:0/);
 });

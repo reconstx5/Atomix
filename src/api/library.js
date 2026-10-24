@@ -1,23 +1,31 @@
 // Library browsing, item details, artwork, progress and scanning endpoints.
+import { shiftVtt } from '../stream/vttshift.js';
 import fs from 'node:fs';
 import { recordProgress } from '../library/progress.js';
 import path from 'node:path';
-import { HttpError } from '../http/router.js';
+import { HttpError, readBody } from '../http/router.js';
 import { sendFile, mimeFor } from '../http/static.js';
 import { serializeItem, serializeLibrary } from './serialize.js';
 import { listSubtitles, getSubtitleVtt, saveDownloaded, deleteDownloaded } from '../stream/subtitles.js';
 import { parseJson } from '../db.js';
 import { isRemotePath, resolveSource } from '../remote/index.js';
-import { fetchFollowing } from '../remote/provider.js';
-import { Readable } from 'node:stream';
+import { proxyRemoteFile } from '../stream/remotefile.js';
+import { sendArtwork } from '../library/artwork.js';
 import { logger } from '../log.js';
+import { ensureSearchKeys, keyMatch } from '../library/searchkey.js';
+import { applyLayout, checkedLayout } from '../home/layout.js';
+import { homeRows, groupByKey } from '../home/rows.js';
+import { bookParts, bookChapters, placeOnBook } from '../library/audiobooks.js';
+import { AUDIO_KINDS } from '../library/kinds.js';
+import { EDITABLE, editDetails, detailValues, lockedFields, ARTWORK_TYPES, UPLOAD_MAX, artworkOptions, previewRef, setArtwork, isTmdbPath } from '../library/editing.js';
 
 const log = logger('api');
+const LIBRARY_TYPES = ['movies', 'tv', 'music', 'podcasts', 'audiobooks', 'books', 'comics'];
 
 /** Load an item the current viewer is allowed to see (404 otherwise, so hidden titles stay hidden). */
 function requireItem(core, id, viewer) {
   const item = core.library.get(id);
-  if (!item || (viewer && !core.library.canSee(viewer, item))) throw new HttpError(404, 'Item not found');
+  if (!item || (viewer && !core.library.canSee(viewer, item))) throw new HttpError(404, 'This title no longer exists.');
   return item;
 }
 
@@ -30,16 +38,6 @@ function cleanPaths(paths) {
     if (!fs.statSync(p).isDirectory()) throw new HttpError(400, `"${p}" is a file, not a folder.`);
   }
   return [...new Set(list.map((p) => path.resolve(p)))];
-}
-
-async function withTimeout(promise, ms, fallback) {
-  let timer;
-  const t = new Promise((resolve) => (timer = setTimeout(() => resolve(fallback), ms)));
-  try {
-    return await Promise.race([promise, t]);
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 /** Library options an admin can set. Only known keys are kept, as booleans. */
@@ -70,13 +68,14 @@ export function registerLibraryRoutes(r, core) {
   // ---- Libraries ----
   const visibleLibrary = (ctx, id) => {
     const lib = library.visibleLibraries(ctx.viewer).find((l) => l.id === Number(id));
-    if (!lib) throw new HttpError(404, 'Library not found');
+    if (!lib) throw new HttpError(404, 'This library no longer exists.');
     return lib;
   };
 
   r.get('/api/libraries', (ctx) => {
     const c = counts();
-    return library.visibleLibraries(ctx.viewer).map((l) => serializeLibrary(l, c));
+    const recordingsId = core.live?.scheduler?.recordingsLibrary()?.id ?? null;
+    return library.visibleLibraries(ctx.viewer).map((l) => serializeLibrary(l, c, { recordingsId }));
   });
 
   r.post(
@@ -85,8 +84,9 @@ export function registerLibraryRoutes(r, core) {
       const body = await ctx.body();
       const name = String(body.name || '').trim().slice(0, 60);
       if (!name) throw new HttpError(400, 'Give the library a name.');
-      if (!['movies', 'tv', 'music'].includes(body.type)) throw new HttpError(400, 'Type must be "movies", "tv" or "music".');
+      if (!LIBRARY_TYPES.includes(body.type)) throw new HttpError(400, 'Type must be "movies", "tv", "music", "podcasts", "audiobooks", "books" or "comics".');
       const paths = cleanPaths(body.paths);
+      if (body.type === 'podcasts' && paths.length !== 1) throw new HttpError(400, 'A podcasts library keeps its episodes in one folder.');
       const res = db.run(
         'INSERT INTO libraries (name, type, paths, options, created_at) VALUES (?, ?, ?, ?, ?)',
         name,
@@ -106,7 +106,7 @@ export function registerLibraryRoutes(r, core) {
     '/api/libraries/:id',
     async (ctx) => {
       const lib = db.get('SELECT * FROM libraries WHERE id = ?', Number(ctx.params.id));
-      if (!lib) throw new HttpError(404, 'Library not found');
+      if (!lib) throw new HttpError(404, 'This library no longer exists.');
       const body = await ctx.body();
       const name = body.name != null ? String(body.name).trim().slice(0, 60) || lib.name : lib.name;
       const paths = body.paths != null ? cleanPaths(body.paths) : parseJson(lib.paths, []);
@@ -136,7 +136,8 @@ export function registerLibraryRoutes(r, core) {
       const rows = library.tracks({ viewer: ctx.viewer, libraryId: lib.id, sort: q.sort || 'title', search: q.q, limit });
       return { library: serializeLibrary(lib), items: library.withProgress(rows, ctx.viewer) };
     }
-    const kind = lib.type === 'movies' ? 'movie' : lib.type === 'tv' ? 'show' : q.view === 'artists' ? 'artist' : 'album';
+    // v0.22: books and comics list their series and the titles that stand alone.
+    const kind = lib.type === 'movies' ? 'movie' : lib.type === 'tv' ? 'show' : lib.type === 'podcasts' ? 'podcast' : lib.type === 'audiobooks' ? 'audiobook' : lib.type === 'books' ? ['series', 'book'] : lib.type === 'comics' ? ['series', 'comic'] : q.view === 'artists' ? 'artist' : 'album';
     const rows = library.list({
       viewer: ctx.viewer,
       libraryId: lib.id,
@@ -147,8 +148,82 @@ export function registerLibraryRoutes(r, core) {
       search: q.q,
       limit,
       offset: Number(q.offset) || 0,
+      topLevel: lib.type === 'books' || lib.type === 'comics',
     });
-    return { library: serializeLibrary(lib), items: library.withProgress(rows, ctx.viewer) };
+    const items = library.withProgress(rows, ctx.viewer);
+    if (lib.type === 'podcasts') {
+      const counts = newEpisodeCounts(ctx.viewer, lib.id);
+      for (const it of items) it.newCount = counts.get(it.id) || 0;
+    }
+    return { library: serializeLibrary(lib), items };
+  });
+
+  // v0.25: the library's titles this profile is part-way through, newest first: a film or episode started and not
+  // finished, or a show whose next episode is waiting. Films by their own id, episodes by their show's, which carries
+  // `episode`: the one part-watched, else the next one waiting.
+  r.get('/api/libraries/:id/recent', (ctx) => {
+    const lib = visibleLibrary(ctx, ctx.params.id);
+    const pid = ctx.viewer?.profileId;
+    if (!pid || (lib.type !== 'movies' && lib.type !== 'tv')) return [];
+    const vis = library.visibility(ctx.viewer);
+    const rows = db.all(
+      `SELECT i.id, i.kind, i.show_id, p.position, p.watched, p.updated_at AS at FROM progress p JOIN items i ON i.id = p.item_id
+       WHERE p.profile_id = ? AND i.library_id = ? AND i.kind IN ('movie', 'episode')
+         AND ((p.watched = 0 AND p.position > 30) OR (p.watched = 1 AND i.kind = 'episode')) AND ${vis.sql}
+       ORDER BY p.updated_at DESC`,
+      pid,
+      lib.id,
+      ...vis.params,
+    );
+    const out = [];
+    const seen = new Set();
+    const waiting = new Map(); // show id → its next episode after the last watched one (null: none)
+    for (const r of rows) {
+      const id = r.kind === 'episode' ? r.show_id : r.id;
+      if (id == null || seen.has(id)) continue;
+      let episode = null; // a show's episode to play: the one part-watched, else the next one waiting
+      if (r.kind === 'episode') {
+        if (r.watched) {
+          if (!waiting.has(id)) waiting.set(id, library.nextUpFor(ctx.viewer, id));
+          episode = waiting.get(id);
+          if (!episode) continue;
+        } else episode = db.get('SELECT * FROM items WHERE id = ?', r.id);
+      }
+      seen.add(id);
+      out.push(episode ? { id, at: r.at, episode: library.withProgress([episode], ctx.viewer)[0] } : { id, at: r.at });
+      if (out.length >= 50) break;
+    }
+    return out;
+  });
+
+  // v0.22: a podcast's new episodes for this profile are its downloaded episodes not yet played, within its rules.
+  const newEpisodeRows = (viewer, libraryId, limit) =>
+    db
+      .all(
+        `SELECT i.* FROM items i LEFT JOIN progress p ON p.item_id = i.id AND p.profile_id = ?
+         WHERE i.library_id = ? AND i.kind = 'podcast_episode' AND i.path IS NOT NULL AND COALESCE(p.watched, 0) = 0
+         ORDER BY i.published_at IS NULL, i.published_at DESC, i.id DESC`,
+        viewer?.profileId || 0,
+        Number(libraryId),
+      )
+      .filter((r) => library.canSee(viewer, r))
+      .slice(0, limit);
+  function newEpisodeCounts(viewer, libraryId) {
+    const counts = new Map();
+    for (const r of newEpisodeRows(viewer, libraryId, Infinity)) counts.set(r.show_id, (counts.get(r.show_id) || 0) + 1);
+    return counts;
+  }
+  r.get('/api/libraries/:id/new-episodes', (ctx) => {
+    const lib = visibleLibrary(ctx, ctx.params.id);
+    if (lib.type !== 'podcasts') return [];
+    const rows = newEpisodeRows(ctx.viewer, lib.id, 20);
+    const shows = new Map();
+    for (const r of rows) {
+      if (shows.has(r.show_id)) continue;
+      const show = db.get('SELECT * FROM items WHERE id = ?', r.show_id);
+      shows.set(r.show_id, show ? serializeItem(show, { full: false }) : null);
+    }
+    return library.withProgress(rows, ctx.viewer).map((e, i) => ({ ...e, showTitle: shows.get(rows[i].show_id)?.title ?? null, showPoster: shows.get(rows[i].show_id)?.poster ?? null }));
   });
 
   r.get('/api/libraries/:id/genres', (ctx) => library.genres(visibleLibrary(ctx, ctx.params.id).id, ctx.viewer));
@@ -159,9 +234,24 @@ export function registerLibraryRoutes(r, core) {
     async (ctx) => {
       const body = await ctx.body();
       const lib = db.get('SELECT id FROM libraries WHERE id = ?', Number(ctx.params.id));
-      if (!lib) throw new HttpError(404, 'Library not found');
+      if (!lib) throw new HttpError(404, 'This library no longer exists.');
       scanner.enqueue(lib.id, { refreshMetadata: Boolean(body.refreshMetadata) }).catch((e) => log.error(e.message));
       return { queued: true };
+    },
+    { auth: 'admin' },
+  );
+
+  // "Remove missing titles": a dry run counts them (for the confirmation), then a scan removes them even from a
+  // folder that is now empty (normally kept, in case it's a drive that isn't connected).
+  r.post(
+    '/api/admin/libraries/:id/remove-missing',
+    async (ctx) => {
+      const body = await ctx.body();
+      const lib = db.get('SELECT id FROM libraries WHERE id = ?', Number(ctx.params.id));
+      if (!lib) throw new HttpError(404, 'This library no longer exists.');
+      if (body.dryRun) return { count: scanner.missingCount(lib.id) };
+      const result = await scanner.enqueue(lib.id, { removeMissing: true });
+      return { removed: result?.removed ?? 0 };
     },
     { auth: 'admin' },
   );
@@ -176,57 +266,14 @@ export function registerLibraryRoutes(r, core) {
     { auth: 'admin' },
   );
 
-  r.get('/api/scan/status', () => ({ ...scanner.status, queued: scanner.queue.filter((q) => !q.started).length }), { profile: false });
+  r.get('/api/scan/status', (ctx) => (ctx.user?.role === 'admin' && !ctx.profile?.kids ? { ...scanner.status, queued: scanner.queue.filter((q) => !q.started).length } : { running: scanner.status.running }), { profile: false });
 
   // ---- Home ----
   r.get('/api/home', async (ctx) => {
     const viewer = ctx.viewer;
-    const rows = [];
-    const seen = new Set();
-    const cont = [...library.continueWatching(viewer, 20), ...library.nextUp(viewer, 20)].filter((i) => {
-      const key = i.kind === 'episode' ? `show:${i.show_id}` : `item:${i.id}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-    if (cont.length) rows.push({ id: 'continue', title: 'Continue watching', style: 'landscape', items: library.withProgress(cont, viewer) });
-    // The Watchlist (newest first) and the profile's playlists, when they have anything in them.
-    const wlRows = core.lists.rows(core.lists.watchlist(viewer.profileId).id).filter((i) => library.canSee(viewer, i)).sort((a, b) => b.list_added_at - a.list_added_at);
-    if (wlRows.length) rows.push({ id: 'watchlist', title: 'My Watchlist', style: 'poster', items: library.withProgress(wlRows, viewer) });
-    const myLists = core.lists.forProfile(ctx.profile, viewer).filter((l) => l.kind !== 'watchlist' && l.count > 0);
-    if (myLists.length) rows.push({ id: 'lists', title: 'Playlists', style: 'list', items: myLists });
-
     const libs = library.visibleLibraries(viewer);
-    for (const lib of libs) {
-      if (lib.type === 'movies') {
-        const items = library.recentlyAdded({ viewer, kind: 'movie', libraryId: lib.id, limit: 24 });
-        if (items.length) rows.push({ id: `recent-${lib.id}`, title: `Recently added in ${lib.name}`, style: 'poster', libraryId: lib.id, items: library.withProgress(items, viewer) });
-      } else if (lib.type === 'tv') {
-        const shows = library.list({ viewer, libraryId: lib.id, kind: 'show', sort: 'added', limit: 24 });
-        if (shows.length) rows.push({ id: `recent-${lib.id}`, title: `Latest in ${lib.name}`, style: 'poster', libraryId: lib.id, items: library.withProgress(shows, viewer) });
-      } else if (lib.type === 'music') {
-        const albums = library.list({ viewer, libraryId: lib.id, kind: 'album', sort: 'added', limit: 24 });
-        if (albums.length) rows.push({ id: `recent-${lib.id}`, title: `New albums in ${lib.name}`, style: 'square', libraryId: lib.id, items: library.withProgress(albums, viewer) });
-      }
-    }
-
-    for (const p of core.picks.becauseYouWatched(viewer)) rows.push({ id: `picks-${p.seed.id}`, title: `Because you watched ${p.seed.title}`, style: 'poster', seed: p.seed, items: p.items });
-
-    for (const row of plugins.homeRows) {
-      try {
-        const items = await withTimeout(Promise.resolve(row.items(viewer)), 5000, []);
-        if (!items?.length) continue;
-        // Plugins get the viewer too, but double-check nothing hidden slips through.
-        const rowsFromDb = items.filter((i) => i && i.library_id !== undefined && library.canSee(viewer, i));
-        const plainCards = items.filter((i) => i && i.library_id === undefined);
-        if (viewer.kids && plainCards.length && !rowsFromDb.length) continue; // unrated outside content
-        const cards = rowsFromDb.length ? library.withProgress(rowsFromDb, viewer) : plainCards;
-        if (!cards.length) continue;
-        rows.push({ id: row.key, title: row.title, style: row.style, items: cards, plugin: row.owner.replace('plugin:', '') });
-      } catch (err) {
-        log.warn(`Home row ${row.key} failed: ${err.message}`);
-      }
-    }
+    const { layout } = core.home.effective(ctx.profile?.id);
+    const rows = applyLayout(groupByKey(await homeRows(core, ctx, { pins: layout?.pins || [] })), layout).flatMap((g) => g.rows);
 
     // Hero: something recent with nice artwork.
     const vis = library.visibility(viewer);
@@ -244,19 +291,63 @@ export function registerLibraryRoutes(r, core) {
     return { hero, rows, libraries: libs.map((l) => serializeLibrary(l)) };
   });
 
+  // ---- Arrange home (v0.22) ----
+  // Every row this viewer could have, in the order Home shows them (hidden ones included, marked).
+  r.get('/api/home/layout', async (ctx) => {
+    // ?scope=household: the household's own arrangement, for an admin editing it (rows as this admin would see them).
+    const household = ctx.query.scope === 'household';
+    if (household && (ctx.user?.role !== 'admin' || ctx.profile?.kids)) throw new HttpError(403, 'Only admins arrange the household’s Home.');
+    const house = household ? core.home.household() : null;
+    const { layout, source } = household ? { layout: house, source: house ? 'household' : 'default' } : core.home.effective(ctx.profile?.id);
+    const rows = await homeRows(core, ctx, { editor: true, pins: layout?.pins || [] });
+    const hidden = new Set((layout?.order || []).filter((e) => e.hidden).map((e) => e.key));
+    const shown = applyLayout(rows, layout ? { ...layout, order: layout.order.map((e) => ({ key: e.key })) } : null);
+    return {
+      source,
+      layout,
+      rows: shown.map((row) => ({ key: row.key, title: row.title, hidden: hidden.has(row.key), ...(row.pin ? { pin: row.pin } : {}), ...(row.unavailable ? { unavailable: true } : {}) })),
+    };
+  });
+  r.put('/api/home/layout', async (ctx) => {
+    const own = core.home.profile(ctx.profile.id);
+    const house = core.home.household();
+    const layout = checkedLayout((await ctx.body()).layout, core, ctx.viewer, [...(own?.pins || []), ...(house?.pins || [])]);
+    if (layout) {
+      // The household's pins this save leaves out were removed by this profile: remembered, so they stay gone.
+      const kept = new Set(layout.pins.map((p) => p.key));
+      const removed = (house?.pins || []).map((p) => p.key).filter((k) => !kept.has(k));
+      if (removed.length) layout.removed = removed;
+      else delete layout.removed;
+    }
+    core.home.saveProfile(ctx.profile.id, layout);
+    return { ok: true };
+  });
+  r.delete('/api/home/layout', (ctx) => {
+    core.home.resetProfile(ctx.profile.id);
+    return { ok: true };
+  });
+
+  r.get('/api/web-apps/:id/image', async (ctx) => {
+    const file = core.webApps.pictureFor(ctx.params.id, ctx.viewer);
+    if (!file || !(await sendFile(ctx.req, ctx.res, file, { cacheControl: 'private, max-age=86400' }))) throw new HttpError(404, 'No image');
+  });
+
   // ---- Search ----
   r.get('/api/search', (ctx) => {
     const q = String(ctx.query.q || '').trim();
-    if (q.length < 2) return { movies: [], shows: [], episodes: [], artists: [], albums: [], tracks: [] };
+    if (q.length < 2) return { movies: [], shows: [], episodes: [], artists: [], albums: [], tracks: [], podcasts: [], audiobooks: [], books: [], comics: [] };
     const viewer = ctx.viewer;
     const find = (kind, limit) => library.withProgress(library.list({ viewer, kind, search: q, sort: 'title', limit }), viewer);
+    const types = new Map(db.all('SELECT id, type FROM libraries').map((l) => [l.id, l.type]));
+    const series = find('series', 30);
     const vis = library.visibility(viewer);
-    const like = `%${q.replace(/[\\%_]/g, (c) => '\\' + c)}%`;
+    ensureSearchKeys(db);
+    const m = keyMatch('i.search_key', q); // v0.24: accents, punctuation and a leading "the" ignored
     const episodes = db.all(
       `SELECT i.*, s.title AS show_title, s.backdrop AS show_backdrop, s.poster AS show_poster, s.logo AS show_logo, s.metadata_at AS show_meta
        FROM items i JOIN items s ON s.id = i.show_id
-       WHERE i.kind = 'episode' AND i.title LIKE ? ESCAPE '\\' AND ${vis.sql} ORDER BY s.sort_title, i.season, i.episode LIMIT 30`,
-      like,
+       WHERE i.kind = 'episode' AND ${m.sql} AND ${vis.sql} ORDER BY s.sort_title, i.season, i.episode LIMIT 30`,
+      ...m.params,
       ...vis.params,
     );
     return {
@@ -266,6 +357,11 @@ export function registerLibraryRoutes(r, core) {
       artists: find('artist', 30),
       albums: find('album', 60),
       tracks: library.withProgress(library.tracks({ viewer, search: q, sort: 'title', limit: 50 }), viewer),
+      podcasts: find('podcast', 30),
+      audiobooks: find('audiobook', 30),
+      // v0.22: books and comics, each library's series with them
+      books: [...series.filter((x) => types.get(x.libraryId) === 'books'), ...find('book', 60)],
+      comics: [...series.filter((x) => types.get(x.libraryId) === 'comics'), ...find('comic', 60)],
     };
   });
 
@@ -273,10 +369,34 @@ export function registerLibraryRoutes(r, core) {
   r.get('/api/items/:id', (ctx) => {
     const viewer = ctx.viewer;
     const row = requireItem(core, ctx.params.id, viewer);
-    const progress = library.progressFor(viewer.profileId, [row.id]).get(row.id) || null;
-    const item = serializeItem(row, { full: true, progress });
+    const item = library.withProgress([row], viewer, { full: true })[0];
+    if (ctx.user?.role === 'admin' && !ctx.profile?.kids) item.lockedFields = lockedFields(row); // v0.20 Edit details
     if (item.remote) item.serverName = db.get('SELECT s.name FROM libraries l JOIN servers s ON s.id = l.server_id WHERE l.id = ?', row.library_id)?.name || null;
     const out = { item };
+    if (row.kind === 'audiobook') {
+      out.parts = bookParts(db, row);
+      out.chapters = bookChapters(db, row);
+    }
+    if (row.kind === 'book') {
+      // v0.22: the table of contents and the reading order's length (the chapters themselves come from /api/books).
+      const m = parseJson(row.media, {}) || {};
+      out.toc = m.toc || [];
+      out.spineCount = (m.spine || []).length;
+      // The reading order as entries of the file (what /api/books/:id/file/ serves), and where the TOC's links point from.
+      out.spine = (m.spine || []).map((s) => (m.opfDir ? `${m.opfDir}/${s.href}` : s.href));
+      out.opfDir = m.opfDir || '';
+      if (m.language) item.language = m.language;
+    }
+    if (row.kind === 'comic') out.pages = (parseJson(row.media, {}) || {}).pages || []; // the entries Downloads' CBZ has
+    if (row.kind === 'series') {
+      // A series' books or issues the viewer may see, in number order.
+      const kids = db.all("SELECT * FROM items WHERE show_id = ? AND kind IN ('book', 'comic') ORDER BY issue_sort IS NULL, issue_sort, sort_title COLLATE NOCASE", row.id).filter((r) => library.canSee(viewer, r));
+      out.books = library.withProgress(kids, viewer);
+    }
+    if (row.kind === 'podcast' && core.podcasts) {
+      out.episodes = core.podcasts.episodesFor(row.id, viewer);
+      if (ctx.user?.role === 'admin' && !ctx.profile?.kids) out.feed = core.podcasts.feedStatus(row.id); // admin data
+    }
     if (row.show_id) {
       const show = library.get(row.show_id);
       out.show = serializeItem(show, { full: false });
@@ -284,7 +404,7 @@ export function registerLibraryRoutes(r, core) {
     if (row.kind === 'show') {
       const seasons = library.list({ viewer, parentId: row.id, kind: 'season', sort: 'title' });
       out.seasons = library.withProgress(seasons, viewer);
-      const next = library.nextUp(viewer, 50).find((e) => e.show_id === row.id)
+      const next = library.nextUpFor(viewer, row.id)
         || db.get(`SELECT * FROM items WHERE show_id = ? AND kind = 'episode' ORDER BY season = 0, season, episode LIMIT 1`, row.id);
       if (next) out.nextEpisode = library.withProgress([next], viewer)[0];
       const counts = db.get(`SELECT COUNT(*) AS n FROM items WHERE show_id = ? AND kind = 'episode'`, row.id);
@@ -366,76 +486,15 @@ export function registerLibraryRoutes(r, core) {
     const row = requireItem(core, ctx.params.id, ctx.viewer);
     const type = ctx.params.type;
     if (!['poster', 'backdrop', 'logo'].includes(type)) throw new HttpError(404, 'No such image');
-    let ref = row[type];
-    // Tracks use their album's cover.
-    if (!ref && row.kind === 'track' && row.parent_id) ref = library.get(row.parent_id)?.[type];
-    // A connected server's artwork is fetched with that server's sign-in and cached here, never redirected to.
-    if (isRemotePath(row.path) && /^https?:\/\//i.test(ref || '')) {
-      const src = await resolveSource({ db, providers: core.remote.providers }, row);
-      // The sign-in only goes to the server's own host: an image a Plex agent left on a CDN gets no token.
-      const cached = src.provider ? await images.download(ref, src.provider.imageHeaders(src.server, ref)).catch(() => null) : null;
-      if (!cached) throw new HttpError(404, 'No image');
-      const ok = await sendFile(ctx.req, ctx.res, images.resolve(cached).file, { cacheControl: 'private, max-age=604800' });
-      if (!ok) throw new HttpError(404, 'Image missing');
-      return;
-    }
-    const resolved = images.resolve(ref);
-    if (!resolved) throw new HttpError(404, 'No image');
-    if (resolved.url) return ctx.redirect(resolved.url);
-    const ok = await sendFile(ctx.req, ctx.res, resolved.file, { cacheControl: 'private, max-age=604800' });
-    if (!ok) throw new HttpError(404, 'Image missing');
+    await sendArtwork(core, ctx, row, type);
   }, { cast: 'image' });
 
   // Direct play: the original file, with range requests.
-  /** The bytes of a connected server's title, passed through with Range so seeking works; the TV never sees the server. */
-  async function proxyRemote(ctx, row) {
-    const src = await resolveSource({ db, providers: core.remote.providers }, row);
-    if (!src.file) throw new HttpError(404, src.server ? `${src.server.name} has no playable file for this title.` : 'The server this title came from is no longer connected.');
-    const ac = new AbortController();
-    ctx.req.on('close', () => ac.abort());
-    // Bytes as they are on the server (no gzip: the Range offsets must mean the file's own bytes).
-    const headers = { ...src.headers, 'accept-encoding': 'identity' };
-    for (const h of ['range', 'if-range']) if (ctx.req.headers[h]) headers[h] = ctx.req.headers[h];
-    let up;
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      ac.abort();
-    }, core.remote.proxyHeaderTimeoutMs ?? 15000);
-    try {
-      up = await fetchFollowing(src.file, { method: ctx.req.method === 'HEAD' ? 'HEAD' : 'GET', headers, signal: ac.signal, sameOriginOnly: true });
-    } catch (err) {
-      if (timedOut) throw new HttpError(504, `${src.server.name} didn't answer in time`);
-      if (ac.signal.aborted) return;
-      if (err.code === 'ECROSSORIGIN') throw new HttpError(502, `${src.server.name} sent this title to another address; Atomix only plays from the server itself.`);
-      throw new HttpError(502, `Can't reach ${src.server.name}: ${err.cause?.code || err.message}`);
-    } finally {
-      clearTimeout(timer);
-    }
-    if (up.status === 416) {
-      await up.body?.cancel().catch(() => {});
-      ctx.res.writeHead(416, { 'content-range': up.headers.get('content-range') || '', 'Cache-Control': 'private, no-cache' });
-      return void ctx.res.end();
-    }
-    if (up.status === 401) {
-      db.run("UPDATE servers SET status = 'unauthorized', status_detail = 'The sign-in was refused while playing' WHERE id = ?", src.server.id);
-      throw new HttpError(502, `Can't reach ${src.server.name}: sign in again in Settings.`);
-    }
-    if (up.status === 403) throw new HttpError(502, `${src.server.name} refused to play this title (403).`);
-    if (!up.ok && up.status !== 206) throw new HttpError(502, `Can't reach ${src.server.name}: it answered ${up.status}.`);
-    const out = { 'Cache-Control': 'private, no-cache' };
-    for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges']) if (up.headers.get(h)) out[h] = up.headers.get(h);
-    ctx.res.writeHead(up.status, out);
-    if (ctx.req.method === 'HEAD' || !up.body) return void ctx.res.end();
-    const body = Readable.fromWeb(up.body);
-    body.on('error', () => ctx.res.destroy());
-    body.pipe(ctx.res);
-    await new Promise((resolve) => { ctx.res.on('close', resolve); ctx.res.on('finish', resolve); });
-  }
+  const proxyRemote = (ctx, row) => proxyRemoteFile(core, ctx, row);
 
   r.get('/api/items/:id/file', async (ctx) => {
     const row = requireItem(core, ctx.params.id, ctx.viewer);
-    if (!row.path || !['movie', 'episode', 'track', 'extra'].includes(row.kind)) throw new HttpError(400, 'Not a playable item');
+    if (!row.path || !(['movie', 'episode', 'extra'].includes(row.kind) || AUDIO_KINDS.has(row.kind))) throw new HttpError(400, 'Not a playable item');
     if (isRemotePath(row.path)) return proxyRemote(ctx, row);
     const type = mimeFor(row.path);
     const ok = await sendFile(ctx.req, ctx.res, row.path, { cacheControl: 'private, no-cache', contentType: type });
@@ -447,7 +506,7 @@ export function registerLibraryRoutes(r, core) {
     '/api/items/:id/download',
     async (ctx) => {
       const row = requireItem(core, ctx.params.id, ctx.viewer);
-      if (!row.path || !['movie', 'episode', 'track'].includes(row.kind)) throw new HttpError(400, 'Not a playable item');
+      if (!row.path || !(['movie', 'episode'].includes(row.kind) || AUDIO_KINDS.has(row.kind))) throw new HttpError(400, 'Not a playable item');
       if (isRemotePath(row.path)) throw new HttpError(400, 'Downloads come from the server that holds the file.');
       ctx.res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(path.basename(row.path))}`);
       const ok = await sendFile(ctx.req, ctx.res, row.path, { cacheControl: 'private, no-cache', contentType: 'application/octet-stream' });
@@ -521,10 +580,12 @@ export function registerLibraryRoutes(r, core) {
     const row = requireItem(core, ctx.params.id, ctx.viewer);
     const subId = ctx.params.sub.replace(/\.vtt$/, '');
     if (!/^[sed]\d+$/.test(subId)) throw new HttpError(400, 'Bad subtitle id');
-    const vtt = await getSubtitleVtt(row, subId, config, isRemotePath(row.path) ? await resolveSource({ db, providers: core.remote.providers }, row) : null);
+    const vtt = await getSubtitleVtt(row, subId, config, isRemotePath(row.path) ? await resolveSource({ db, providers: core.remote.providers }, row) : null, { slot: () => core.playback.extractionSlot() });
     if (vtt == null) throw new HttpError(404, 'Subtitle not found');
+    // ?delay=s (v0.21): a cast's subtitle delay, the cues moved as the browser player moves them.
+    const delay = Math.max(-10, Math.min(10, Number(ctx.query.delay) || 0));
     ctx.res.writeHead(200, { 'Content-Type': 'text/vtt; charset=utf-8', 'Cache-Control': 'private, max-age=3600' });
-    ctx.res.end(vtt);
+    ctx.res.end(delay ? shiftVtt(vtt, delay) : vtt);
   }, { cast: 'subtitle' });
 
   r.post('/api/items/:id/watched', async (ctx) => {
@@ -534,11 +595,42 @@ export function registerLibraryRoutes(r, core) {
     return { ok: true, updated: n };
   });
 
-  r.post('/api/items/:id/progress', async (ctx) => {
+  // The player's audio and subtitle delay for this profile and title (films and episodes).
+  const delayable = (ctx) => {
     const row = requireItem(core, ctx.params.id, ctx.viewer);
+    if (!['movie', 'episode'].includes(row.kind)) throw new HttpError(400, 'Delays are for films and episodes.');
+    return row;
+  };
+  r.get('/api/items/:id/play-settings', (ctx) => core.playSettings.get(ctx.viewer.profileId, delayable(ctx).id));
+  r.put('/api/items/:id/play-settings', async (ctx) => {
+    const row = delayable(ctx);
+    const b = await ctx.body();
+    return core.playSettings.set(ctx.viewer.profileId, row.id, { audioDelay: b.audioDelay, subtitleDelay: b.subtitleDelay });
+  });
+
+  // Stars and hearts (any profile that can see the title). Fields left out keep their value; stars: null clears.
+  r.put('/api/items/:id/rating', async (ctx) => {
+    const row = requireItem(core, ctx.params.id, ctx.viewer);
+    if (!ctx.profile) throw new HttpError(403, 'Choose a profile first.');
+    const body = await ctx.body();
+    return core.ratings.set(ctx.profile.id, row, { stars: body.stars, favourite: body.favourite });
+  });
+
+  r.post('/api/items/:id/progress', async (ctx) => {
+    // Live TV and catch-up keep no history: the player's reports only keep the session alive.
+    if (/^(live|catchup):/.test(String(ctx.params.id))) {
+      const body = await ctx.body();
+      if (body.sessionId) core.playback.heartbeat(String(body.sessionId), ctx.user, body);
+      return { ok: true };
+    }
+    let row = requireItem(core, ctx.params.id, ctx.viewer);
     const body = await ctx.body();
     if (body.sessionId) core.playback.heartbeat(body.sessionId, ctx.user, body);
-    return recordProgress(core, { user: ctx.user, viewer: ctx.viewer, item: row, position: body.position, duration: body.duration, sessionId: body.sessionId ? String(body.sessionId) : null });
+    let { position, duration } = body;
+    ({ row, position, duration } = placeOnBook(db, library, row, position, duration)); // a book's part: the book's place
+    // v0.22: a book or comic also says where (locator), on what (device), pages turned, and whether it was finished.
+    const reading = { locator: body.locator, device: body.device, watched: body.watched === true, pages: body.pages };
+    return recordProgress(core, { user: ctx.user, viewer: ctx.viewer, item: row, position, duration, sessionId: body.sessionId ? String(body.sessionId) : null, paused: body.paused === true, ...reading });
   });
 
   // ---- Metadata fixes (admin) ----
@@ -587,6 +679,75 @@ export function registerLibraryRoutes(r, core) {
         updated = library.get(row.id);
       }
       return serializeItem(updated, { full: true });
+    },
+    { auth: 'admin' },
+  );
+
+  // ---- Edit details (v0.20, admins on a grown-up profile; admin routes are closed to Kids) ----
+  const editable = (ctx) => {
+    const row = requireItem(core, ctx.params.id, ctx.viewer);
+    if (isRemotePath(row.path)) throw new HttpError(400, 'This title comes from a connected server; its details live there.');
+    if (!EDITABLE[row.kind]) throw new HttpError(400, "This title's details can't be edited.");
+    return row;
+  };
+  const fullItem = (ctx, row) => ({ ...library.withProgress([row], ctx.viewer, { full: true })[0], lockedFields: lockedFields(row) });
+  r.get(
+    '/api/items/:id/details',
+    (ctx) => {
+      const row = editable(ctx);
+      return { kind: row.kind, fields: EDITABLE[row.kind], values: detailValues(row, db), locked: lockedFields(row) };
+    },
+    { auth: 'admin' },
+  );
+  // Artwork: TMDB's choices, a preview of one, and setting a picture (from TMDB, an address, or uploaded bytes).
+  const artworkType = (ctx) => {
+    if (!ARTWORK_TYPES.includes(ctx.params.type)) throw new HttpError(404, 'Pictures are a poster, a background or a logo.');
+    return ctx.params.type;
+  };
+  r.get('/api/items/:id/artwork', async (ctx) => artworkOptions(core, editable(ctx)), { auth: 'admin' });
+  r.get(
+    '/api/items/:id/artwork/preview',
+    async (ctx) => {
+      editable(ctx);
+      const p = String(ctx.query.path || '');
+      if (!isTmdbPath(p)) throw new HttpError(400, 'Not one of the pictures shown.');
+      const ref = await previewRef(core, p);
+      const file = ref && core.images.resolve(ref)?.file;
+      if (!file || !(await sendFile(ctx.req, ctx.res, file, { cacheControl: 'private, max-age=604800' }))) throw new HttpError(404, 'No image');
+    },
+    { auth: 'admin' },
+  );
+  r.put(
+    '/api/items/:id/artwork/:type',
+    async (ctx) => {
+      const row = editable(ctx);
+      const type = artworkType(ctx);
+      const body = await ctx.body();
+      return fullItem(ctx, await setArtwork(core, row, type, { tmdbPath: body.tmdbPath ?? undefined, url: body.tmdbPath == null ? body.url : undefined }));
+    },
+    { auth: 'admin' },
+  );
+  r.post(
+    '/api/items/:id/artwork/:type',
+    async (ctx) => {
+      const row = editable(ctx);
+      const type = artworkType(ctx);
+      if (!String(ctx.req.headers['content-type'] || '').startsWith('application/octet-stream')) throw new HttpError(415, 'Send the picture itself.');
+      if (Number(ctx.req.headers['content-length']) > UPLOAD_MAX) throw new HttpError(413, 'Pictures can be 10 MB at most.');
+      const buffer = await readBody(ctx.req, UPLOAD_MAX, { timeoutMs: 60000 }).catch((err) => {
+        throw err.status === 413 ? new HttpError(413, 'Pictures can be 10 MB at most.') : err;
+      });
+      return fullItem(ctx, await setArtwork(core, row, type, { buffer }));
+    },
+    { auth: 'admin', body: 'binary' },
+  );
+  r.patch(
+    '/api/items/:id/details',
+    async (ctx) => {
+      const row = editable(ctx);
+      const body = await ctx.body();
+      const unlock = Array.isArray(body.unlock) ? body.unlock.map(String) : [];
+      return fullItem(ctx, await editDetails(core, row, body.changes && typeof body.changes === 'object' ? body.changes : {}, { unlock, clearScores: body.clearScores === true }));
     },
     { auth: 'admin' },
   );

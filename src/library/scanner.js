@@ -6,6 +6,10 @@ import { logger } from '../log.js';
 import { parseJson } from '../db.js';
 import { probe } from './probe.js';
 import { removeAllDownloaded } from '../stream/subtitles.js';
+import { AUDIOBOOK_EXTS, scanAudiobooks } from './audiobooks.js';
+import { BOOK_EXTS, COMIC_EXTS, PAGE_EXTS, scanBooks, scanComics } from '../books/scan.js';
+
+const COMIC_WALK = new Set([...COMIC_EXTS, ...PAGE_EXTS]);
 import { AUDIO_EXTS, parseTrack, normaliseTags } from './music.js';
 import { run } from './probe.js';
 import crypto from 'node:crypto';
@@ -86,6 +90,12 @@ async function walk(root, out = [], seen = new Set(), exts = VIDEO_EXTS, top = r
   return out;
 }
 
+/** The ffmpeg argv for an album's embedded cover: copied as-is when it's already a JPEG (most ID3 covers), else re-encoded. */
+export function albumArtArgs(trackPath, dest, coverCodec) {
+  const pic = coverCodec === 'mjpeg' ? ['-c:v', 'copy'] : ['-c:v', 'mjpeg', '-q:v', '3'];
+  return ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-i', trackPath, '-map', '0:v:0', '-an', '-sn', '-frames:v', '1', ...pic, dest];
+}
+
 export class Scanner {
   constructor({ db, config, settings, metadata, hooks, tools }) {
     this.db = db;
@@ -95,7 +105,7 @@ export class Scanner {
     this.hooks = hooks;
     this.tools = tools; // { ffprobe: { available } }
     this.queue = [];
-    this.status = { running: false, library: null, phase: 'idle', done: 0, total: 0, added: 0, removed: 0, startedAt: null, finishedAt: null, error: null };
+    this.status = { running: false, library: null, phase: 'idle', done: 0, total: 0, added: 0, removed: 0, startedAt: null, finishedAt: null, error: null, warning: null };
     this.timer = null;
   }
 
@@ -140,6 +150,7 @@ export class Scanner {
     if (!job) return;
     job.started = true;
     this.status.running = true;
+    this.status.warning = null;
     try {
       const result = await this.scanLibrary(job.libraryId, job.opts);
       job.resolve(result);
@@ -160,7 +171,16 @@ export class Scanner {
     Object.assign(this.status, { phase, done: 0, total });
   }
 
-  async scanLibrary(libraryId, { refreshMetadata = false } = {}) {
+  /** How many of a library's titles point at files that are gone (what "Remove missing titles" would remove). */
+  missingCount(libraryId) {
+    return this.db.all('SELECT path FROM items WHERE library_id = ? AND path IS NOT NULL', libraryId).filter((r) => !fs.existsSync(r.path)).length;
+  }
+
+  /**
+   * @param {{ refreshMetadata?: boolean, removeMissing?: boolean }} [opts] removeMissing: a folder that is there but
+   *   empty is taken at its word (its titles go) — the person said they emptied it, it isn't an unplugged drive
+   */
+  async scanLibrary(libraryId, { refreshMetadata = false, removeMissing = false } = {}) {
     const lib = this.db.get('SELECT * FROM libraries WHERE id = ?', libraryId);
     if (!lib) return null;
     const roots = parseJson(lib.paths, []);
@@ -188,27 +208,54 @@ export class Scanner {
       return { files: r.files, added: newItems.length, removed: r.removed };
     }
 
+    // A podcasts library's files come from its feeds (src/podcasts), not from a walk of its folder.
+    if (lib.type === 'podcasts') return { files: 0, added: 0, removed: 0 };
+
     this.setPhase('Finding files');
     const reachable = [];
     const files = [];
+    const warnings = [];
     for (const root of roots) {
       try {
         const st = await fs.promises.stat(root);
         if (!st.isDirectory()) throw new Error('not a folder');
+        const found = await walk(root, [], new Set(), lib.type === 'music' ? AUDIO_EXTS : lib.type === 'audiobooks' ? AUDIOBOOK_EXTS : lib.type === 'books' ? BOOK_EXTS : lib.type === 'comics' ? COMIC_WALK : VIDEO_EXTS);
+        // A folder that exists but holds nothing while we already have titles under it is a drive that isn't
+        // mounted (or a share that didn't connect): its titles and their watch history stay until it is back.
+        const rootPrefix = root.replace(/[\\/]+$/, '');
+        if (!found.length && !removeMissing && this.db.get('SELECT 1 FROM items WHERE library_id = ? AND path LIKE ? LIMIT 1', lib.id, `${rootPrefix}${path.sep}%`)) {
+          warnings.push(`${root} looks empty — not removing its titles`);
+          this.problems?.report('library-folder', `${lib.id}:${root}`, `The ${lib.name} folder ${root} looks empty, so its titles were kept.`);
+          log.warn(`${root} looks empty — not removing its titles (is the drive connected?)`);
+          continue;
+        }
         reachable.push(root);
-        for (const f of await walk(root, [], new Set(), lib.type === 'music' ? AUDIO_EXTS : VIDEO_EXTS)) files.push({ ...f, root });
+        this.problems?.clear('library-folder', `${lib.id}:${root}`);
+        for (const f of found) files.push({ ...f, root });
       } catch (err) {
         log.warn(`Skipping unreachable folder ${root}: ${err.message} (existing items kept)`);
+        this.problems?.report('library-folder', `${lib.id}:${root}`, `The ${lib.name} folder ${root} is missing.`);
       }
     }
+    this.status.warning = warnings.join('; ') || null;
 
     const scanId = Date.now();
     const firstScan = !lib.last_scan;
     const newItems = [];
-    const extrasFound = lib.type === 'music' ? [] : files.filter((f) => f.extra);
-    const mainFiles = lib.type === 'music' ? files : files.filter((f) => !f.extra);
+    const noExtras = lib.type === 'music' || lib.type === 'books' || lib.type === 'comics';
+    const extrasFound = noExtras ? [] : files.filter((f) => f.extra);
+    const mainFiles = noExtras ? files : files.filter((f) => !f.extra);
     if (lib.type === 'music') {
       newItems.push(...(await this.scanMusic(lib, mainFiles, scanId, firstScan)));
+    } else if (lib.type === 'books') {
+      this.setPhase('Reading books', mainFiles.length);
+      newItems.push(...(await scanBooks(this, lib, mainFiles, scanId)));
+    } else if (lib.type === 'comics') {
+      this.setPhase('Reading comics', mainFiles.length);
+      newItems.push(...(await scanComics(this, lib, mainFiles, scanId, reachable)));
+    } else if (lib.type === 'audiobooks') {
+      this.setPhase('Reading books', mainFiles.length);
+      newItems.push(...(await scanAudiobooks(this, lib, mainFiles, scanId, reachable)));
     } else {
       this.setPhase('Updating library', mainFiles.length);
       this.db.transaction(() => {
@@ -513,7 +560,7 @@ export class Scanner {
       const dest = path.join(this.config.imagesDir, name);
       try {
         if (!fs.existsSync(dest)) {
-          await run(this.config.ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-i', track.path, '-map', '0:v:0', '-frames:v', '1', '-c:v', 'mjpeg', '-q:v', '3', dest], { timeout: 30000 });
+          await run(this.config.ffmpegPath, albumArtArgs(track.path, dest, parseJson(track.media, {})?.coverCodec), { timeout: 30000 });
         }
         this.db.run('UPDATE items SET poster = ? WHERE id = ?', `cache:${name}`, album.id);
       } catch (err) {
@@ -522,12 +569,24 @@ export class Scanner {
     }
   }
 
+  /** Remove these files' titles now (a recording deleted), and any season or show left empty. */
+  removePaths(libraryId, paths) {
+    const rows = paths.map((p) => this.db.get('SELECT id FROM items WHERE library_id = ? AND path = ?', libraryId, p)).filter(Boolean);
+    for (const row of rows) removeAllDownloaded(this.config, row.id);
+    this.db.transaction(() => {
+      for (const row of rows) this.db.run('DELETE FROM items WHERE id = ?', row.id);
+      this.db.run(`DELETE FROM items WHERE library_id = ? AND kind = 'season' AND NOT EXISTS (SELECT 1 FROM items c WHERE c.parent_id = items.id)`, libraryId);
+      this.db.run(`DELETE FROM items WHERE library_id = ? AND kind = 'show' AND NOT EXISTS (SELECT 1 FROM items e WHERE e.show_id = items.id AND e.kind = 'episode')`, libraryId);
+    });
+    return rows.length;
+  }
+
   prune(lib, reachable, scanId, roots = reachable) {
     const within = (list) => (p) => list.some((r) => p === r || p.startsWith(r.endsWith(path.sep) || isRemotePath(r) ? r : r + path.sep));
     const underReachable = within(reachable);
     const underAnyRoot = within(roots);
     const stale = this.db
-      .all(`SELECT id, path FROM items WHERE library_id = ? AND kind IN ('movie','episode','track','extra') AND (seen_scan IS NULL OR seen_scan != ?)`, lib.id, scanId)
+      .all(`SELECT id, path FROM items WHERE library_id = ? AND kind IN ('movie','episode','track','extra','audiobook','chapter','book','comic') AND (seen_scan IS NULL OR seen_scan != ?)`, lib.id, scanId)
       .filter((row) => row.path && (underReachable(row.path) || !underAnyRoot(row.path)));
     if (!stale.length && !reachable.length) return 0;
     for (const row of stale) removeAllDownloaded(this.config, row.id); // subtitles fetched for it
@@ -536,6 +595,10 @@ export class Scanner {
       // Containers left empty: seasons/albums first, then shows/artists.
       this.db.run(`DELETE FROM items WHERE library_id = ? AND kind IN ('season','album') AND NOT EXISTS (SELECT 1 FROM items c WHERE c.parent_id = items.id)`, lib.id);
       this.db.run(`DELETE FROM items WHERE library_id = ? AND kind IN ('show','artist') AND NOT EXISTS (SELECT 1 FROM items c WHERE c.parent_id = items.id)`, lib.id);
+      // A book in several files whose parts have all gone (v0.22).
+      this.db.run(`DELETE FROM items WHERE library_id = ? AND kind = 'audiobook' AND path IS NULL AND NOT EXISTS (SELECT 1 FROM items c WHERE c.parent_id = items.id)`, lib.id);
+      // A series of books or comics with none left (v0.22).
+      this.db.run(`DELETE FROM items WHERE library_id = ? AND kind = 'series' AND NOT EXISTS (SELECT 1 FROM items c WHERE c.show_id = items.id)`, lib.id);
       // A show left with only extras (its episodes went) goes too, extras and all; it comes back with an episode.
       this.db.run(`DELETE FROM items WHERE library_id = ? AND kind = 'show' AND NOT EXISTS (SELECT 1 FROM items e WHERE e.show_id = items.id AND e.kind = 'episode')`, lib.id);
       this.db.run(`DELETE FROM items WHERE library_id = ? AND kind IN ('season','extra') AND show_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM items s WHERE s.id = items.show_id)`, lib.id);
@@ -563,7 +626,7 @@ export class Scanner {
   async fetchMetadata(libraryId, force) {
     const where = force ? '' : 'AND metadata_at IS NULL';
     // Albums before artists: an artist's picture is found through its albums' folders.
-    const top = this.db.all(`SELECT * FROM items WHERE library_id = ? AND kind IN ('movie','show','album') ${where} ORDER BY id`, libraryId);
+    const top = this.db.all(`SELECT * FROM items WHERE library_id = ? AND kind IN ('movie','show','album','book','audiobook') ${where} ORDER BY id`, libraryId);
     const children = () => this.db.all(`SELECT * FROM items WHERE library_id = ? AND kind IN ('season','episode','artist') ${where} ORDER BY show_id, season, episode`, libraryId);
     const total = top.length + (force ? 0 : children().length);
     if (!total) return;

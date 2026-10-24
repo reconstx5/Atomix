@@ -5,6 +5,7 @@ import os from 'node:os';
 import { HttpError } from '../http/router.js';
 import { parseJson } from '../db.js';
 import { normaliseUrl } from '../remote/urls.js';
+import { isPrivateTarget, checkResolved } from '../http/net.js';
 import { chooseConnection } from '../remote/plextv.js';
 import { logger } from '../log.js';
 
@@ -138,6 +139,7 @@ export function registerServerRoutes(r, core) {
       if (body.kind === 'plex') return connectPlex(body);
       const url = normaliseUrl(body.url);
       if (isSelf(url, listening())) throw new HttpError(400, "That's this Atomix.");
+      if (isPrivateTarget(url) || (await checkResolved(url).then(() => false, () => true))) throw new HttpError(400, 'That address points at this server or a private network.');
       const username = String(body.username || '').trim();
       const password = String(body.password || '');
       if (!username || !password) throw new HttpError(400, 'Enter the username and password for that server.');

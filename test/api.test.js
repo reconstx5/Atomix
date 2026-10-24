@@ -95,6 +95,8 @@ after(async () => {
 });
 
 test('first-run setup, sign-in and protection', async () => {
+  // Setup from this machine with no proxy in front (trustProxy says one is in front, which needs the setup code).
+  app.core.config.trustProxy = false;
   let r = await call('GET', '/api/status');
   assert.equal(r.data.setupRequired, true);
   assert.equal(r.data.setupCodeRequired, false, 'loopback does not need a code');
@@ -106,6 +108,7 @@ test('first-run setup, sign-in and protection', async () => {
   r = await call('POST', '/api/setup', { username: 'admin', password: 'short' });
   assert.equal(r.status, 400);
   r = await call('POST', '/api/setup', { username: 'admin', password: 'password123', serverName: 'Test' });
+  app.core.config.trustProxy = true; // the rest of this file runs behind a (pretend) proxy
   assert.equal(r.status, 200);
   assert.equal(r.data.user.role, 'admin');
   r = await call('POST', '/api/setup', { username: 'again', password: 'password123' });
@@ -274,4 +277,10 @@ test('settings hide secrets and themes are listed', async () => {
     await call('PUT', '/api/admin/settings', { pickerIdleMinutes: bad });
     assert.equal((await call('GET', '/api/status')).data.pickerIdleMinutes, 30, String(bad));
   }
+});
+
+test('the version is 0.26.0', async () => {
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(pkg.version, '0.27.0');
+  assert.equal((await call('GET', '/api/status')).data.version, '0.27.0');
 });

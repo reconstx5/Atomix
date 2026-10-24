@@ -2,6 +2,7 @@
 // it for the title on screen; home and library pages make it follow focus.
 // Each picture also sets --tint: the colour it would cast into a dark room,
 // which themes use for glows, progress bars and highlights.
+import { sizedAttrs } from './sized.js';
 import { h } from './dom.js';
 import { ambientColour } from './tint.js';
 import { coverRect } from './orbit-rules.js';
@@ -102,7 +103,10 @@ export function setBackdrop(url) {
   next.onerror = () => {
     if (my === token && current === url) current = null;
   };
-  next.src = url;
+  // v0.24 (Orbit): a copy the size of the screen; the hero's picture comes first.
+  const orbit = document.body?.dataset.layout === 'orbit';
+  if (orbit) next.fetchPriority = 'high';
+  next.src = sizedAttrs(url, 'backdrop', { orbit, width: window.innerWidth * (window.devicePixelRatio || 1) }).src;
 }
 
 /** Called by the router: views that don't set a backdrop get a plain one. */
@@ -117,22 +121,36 @@ export const artFor = (item) => item?.backdrop || item?.showBackdrop || item?.po
 
 /**
  * Update something (the backdrop, a spotlight…) when a card inside `root` gets focus or the mouse.
- * `lookup(card)` returns the item for a card element.
+ * `lookup(card)` returns the item for a card element; `selector` names the cards (Live TV's are `.live-card`).
  */
-export function followFocus(root, lookup, onItem = (item) => setBackdrop(artFor(item))) {
+export function followFocus(root, lookup, onItem = (item) => setBackdrop(artFor(item)), { selector = '.card' } = {}) {
   let timer = null;
   let last = null;
-  const pick = (card, delay) => {
-    const item = card && lookup(card);
-    if (!item || item === last) return;
+  let pending; // the item waiting to be shown (undefined: none)
+  let byMouse = false; // whether the pick waiting came from the mouse (only those end when it leaves)
+  const pick = (card, delay, mouse = false) => {
+    const item = (card && lookup(card)) || null;
+    if (item === pending) return;
+    // A new pick cancels the one waiting: a card the pointer only crossed is never chosen.
     clearTimeout(timer);
+    pending = item;
+    byMouse = mouse;
+    if (!item || item === last) return;
     timer = setTimeout(() => {
       last = item;
+      pending = undefined;
       onItem(item);
     }, delay);
   };
-  root.addEventListener('focusin', (e) => pick(e.target.closest?.('.card'), 120));
-  root.addEventListener('pointerover', (e) => {
-    if (e.pointerType === 'mouse') pick(e.target.closest?.('.card'), 260);
+  root.addEventListener('focusin', (e) => pick(e.target.closest?.(selector), 120));
+  // The mouse counts only when it moves: cards redrawn or scrolled under a resting pointer aren't a choice.
+  root.addEventListener('pointermove', (e) => {
+    if (e.pointerType === 'mouse' && (e.movementX || e.movementY)) pick(e.target.closest?.(selector), 260, true);
+  });
+  root.addEventListener('pointerleave', (e) => {
+    // Layout changes fire this too, without the mouse moving: a focus pick waiting is kept.
+    if (e.pointerType !== 'mouse' || !byMouse) return;
+    clearTimeout(timer);
+    pending = undefined;
   });
 }

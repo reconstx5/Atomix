@@ -127,6 +127,7 @@ test('songs probed before 0.10 get their embedded lyrics once', { skip }, async 
   delete media.tags.lyricsChecked;
   core.db.run('UPDATE items SET media = ? WHERE id = ?', JSON.stringify(media), opening.id);
   core.db.run('DELETE FROM lyrics WHERE item_id = ?', opening.id);
+  core.extras.scanned(); // the edit above stands in for a scan (or a start) finding a pre-0.10 song
   assert.equal(core.extras.pendingCounts().lyrics, 1);
   // Intros and previews go first; with those switched off the song is next.
   core.settings.set({ introDetection: false, previewsEnabled: false });
@@ -155,4 +156,18 @@ test("a re-tagged song's stored \"no lyrics\" is retried", { skip }, async () =>
   await admin.post(`/api/libraries/${ids.music}/scan`, {});
   await waitForScan(admin);
   assert.equal(core.db.get('SELECT COUNT(*) AS n FROM lyrics WHERE item_id = ?', closer.id).n, 0, 'the stored "none" is gone');
+});
+
+test('a missing ffprobe leaves songs unchecked for lyrics', async () => {
+  const { openDatabase } = await import('../src/db.js');
+  const { ExtrasStore } = await import('../src/extras/store.js');
+  const { makeJobs } = await import('../src/extras/jobs.js');
+  const d = openDatabase(path.join(tempDir(), 'noprobe.db'));
+  const store = new ExtrasStore(d);
+  const at = Date.now();
+  const lib = Number(d.run('INSERT INTO libraries (name, type, paths, created_at) VALUES (?, ?, ?, ?)', 'M', 'music', '[]', at).lastInsertRowid);
+  const id = Number(d.run("INSERT INTO items (library_id, kind, title, path, media, added_at, updated_at) VALUES (?, 'track', 'S', '/m/s.mp3', ?, ?, ?)", lib, JSON.stringify({ tags: {} }), at, at).lastInsertRowid);
+  const jobs = makeJobs({ store, config: { ffprobePath: path.join(tempDir(), 'no-such-ffprobe') }, tools: () => ({}) });
+  await jobs.lyrics(d.get('SELECT * FROM items WHERE id = ?', id), {});
+  assert.equal(JSON.parse(d.get('SELECT media FROM items WHERE id = ?', id).media).tags.lyricsChecked, undefined, 'tried again once ffprobe is there');
 });

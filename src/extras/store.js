@@ -16,6 +16,12 @@ const THUMBABLE = `i.kind = 'extra' AND i.path IS NOT NULL AND i.path NOT LIKE '
 const ONLY = 'AND i.id IN (SELECT value FROM json_each(?))';
 const LYRICS_PENDING = `i.kind = 'track' AND i.path IS NOT NULL AND i.path NOT LIKE 'remote:%' AND i.media IS NOT NULL
   AND json_extract(i.media, '$.tags.lyrics') IS NULL AND json_extract(i.media, '$.tags.lyricsChecked') IS NULL`;
+// Local films/episodes with embedded text subtitles not yet extracted to the cache (the player's VTT).
+const SUBTITLES_PENDING = `i.kind IN ('movie', 'episode') AND i.path IS NOT NULL AND i.path NOT LIKE 'remote:%' AND i.media IS NOT NULL
+  AND json_extract(i.media, '$.subtitlesExtracted') IS NULL
+  AND EXISTS (SELECT 1 FROM json_each(i.media, '$.subtitles') s WHERE json_extract(s.value, '$.codec') IN ('subrip', 'srt', 'ass', 'ssa', 'webvtt', 'mov_text', 'text'))`;
+
+const LYRICS_COUNT_MS = 60_000;
 
 const pad = (n) => String(n ?? 0).padStart(2, '0');
 function label({ kind, title, season, episode }, showTitle) {
@@ -34,8 +40,17 @@ function unlessGone(fn) {
 }
 
 export class ExtrasStore {
-  constructor(db) {
+  constructor(db, { now = Date.now } = {}) {
     this.db = db;
+    this.now = now;
+    this.lyricsNone = false; // the catch-up found nothing pending: not looked for again until the next scan
+    this.lyricsCount = null; // { n, at }: the Settings count, reused for LYRICS_COUNT_MS
+  }
+
+  /** A scan finished: songs may need their lyrics checked again. */
+  scanned() {
+    this.lyricsNone = false;
+    this.lyricsCount = null;
   }
 
   job(itemId, job) {
@@ -91,12 +106,17 @@ export class ExtrasStore {
 
   /** A song probed before 0.10 (no lyrics key in its tags and never checked since): its tags are read once more. */
   nextLyricsItem(onlyIds = null) {
-    return (
+    if (this.lyricsNone && !onlyIds) return null;
+    const row =
       this.db.get(
         `SELECT i.* FROM items i WHERE ${LYRICS_PENDING} ${onlyIds ? ONLY : ''} ORDER BY i.id LIMIT 1`,
         ...(onlyIds ? [JSON.stringify(onlyIds)] : []),
-      ) || null
-    );
+      ) || null;
+    if (!row && !onlyIds) {
+      this.lyricsNone = true;
+      this.lyricsCount = null;
+    }
+    return row;
   }
 
   /** The season of the oldest episode still needing an intro check. */
@@ -175,8 +195,27 @@ export class ExtrasStore {
       `SELECT COUNT(*) AS n FROM items i JOIN libraries l ON l.id = i.library_id
        LEFT JOIN media_jobs j ON j.item_id = i.id AND j.job = 'thumb' WHERE ${THUMBABLE} AND ${STALE}`,
     ).n;
-    const lyrics = this.db.get(`SELECT COUNT(*) AS n FROM items i WHERE ${LYRICS_PENDING}`).n;
-    return { previews, intros, thumbs, lyrics };
+    const lyrics = this.lyricsPending();
+    const subtitles = this.db.get(`SELECT COUNT(*) AS n FROM items i WHERE ${SUBTITLES_PENDING}`).n;
+    return { previews, intros, thumbs, lyrics, subtitles };
+  }
+  /** The catch-up checked one song: the cached count drops by one (no new count query). */
+  lyricsChecked() {
+    if (this.lyricsCount) this.lyricsCount.n = Math.max(0, this.lyricsCount.n - 1);
+  }
+  /** Songs still waiting for the lyrics catch-up (cached 60 s; 0 once the catch-up found none). */
+  lyricsPending() {
+    if (this.lyricsNone) return 0;
+    const t = this.now();
+    if (this.lyricsCount && t - this.lyricsCount.at < LYRICS_COUNT_MS) return this.lyricsCount.n;
+    const n = this.db.get(`SELECT COUNT(*) AS n FROM items i WHERE ${LYRICS_PENDING}`).n;
+    this.lyricsCount = { n, at: t };
+    return n;
+  }
+  nextSubtitleItem(onlyIds = null) {
+    return (
+      this.db.get(`SELECT i.* FROM items i WHERE ${SUBTITLES_PENDING} ${onlyIds ? ONLY : ''} ORDER BY i.id LIMIT 1`, ...(onlyIds ? [JSON.stringify(onlyIds)] : [])) || null
+    );
   }
 
   // ---- Previews ----

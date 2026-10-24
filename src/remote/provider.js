@@ -24,12 +24,16 @@ const REDIRECTS = new Set([301, 302, 303, 307, 308]);
  * streams: code ECROSSORIGIN) or followed with no headers at all (images on a CDN).
  * @returns {Promise<Response>}
  */
-export async function fetchFollowing(url, { headers = {}, method = 'GET', signal, sameOriginOnly = false, max = 3 } = {}) {
+export async function fetchFollowing(url, { headers = {}, method = 'GET', body, signal, sameOriginOnly = false, max = 3, check = null, keepHeader = null } = {}) {
   const origin = new URL(url).origin;
   let current = url;
   let h = { ...headers };
+  let m = method;
+  let b = body;
   for (let hops = 0; ; hops++) {
-    const res = await fetch(current, { method, headers: h, signal, redirect: 'manual' });
+    // `check(url)` may refuse an address — the first one and every redirect (a link-local hop, say) — by throwing.
+    if (check) await check(current);
+    const res = await fetch(current, { method: m, headers: h, body: b, signal, redirect: 'manual' });
     const location = REDIRECTS.has(res.status) && res.headers.get('location');
     if (!location) return res;
     await res.body?.cancel().catch(() => {});
@@ -37,8 +41,15 @@ export async function fetchFollowing(url, { headers = {}, method = 'GET', signal
     const next = new URL(location, current);
     if (!/^https?:$/.test(next.protocol)) throw Object.assign(new Error('Redirected to an unsupported address'), { code: 'EREDIRECT' });
     if (next.origin !== origin) {
-      if (sameOriginOnly) throw Object.assign(new Error('Redirected to another site'), { code: 'ECROSSORIGIN' });
-      h = {};
+      if (sameOriginOnly) throw Object.assign(new Error(`Redirected to ${next.origin}`), { code: 'ECROSSORIGIN', location: next.origin });
+      // Another server: headers are dropped, except those the caller says belong to the request itself.
+      h = keepHeader ? Object.fromEntries(Object.entries(h).filter(([k]) => keepHeader(k.toLowerCase()))) : {};
+    }
+    // 301/302/303 turn a POST into a GET (as browsers do); 307/308 keep the method and body.
+    if (res.status !== 307 && res.status !== 308 && m !== 'GET' && m !== 'HEAD') {
+      m = 'GET';
+      b = undefined;
+      delete h['content-type'];
     }
     current = next.href;
   }
@@ -53,8 +64,11 @@ export class RemoteProvider {
   async request(server, url, { method = 'GET', headers = {}, body, timeoutMs = 15000, raw = false } = {}) {
     let res;
     try {
-      res = await fetch(url, { method, headers: { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...headers }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs), redirect: 'follow' });
+      // Redirects stay on the server's own origin: the sign-in header never travels to another site.
+      res = await fetchFollowing(url, { method, headers: { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...headers }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs), sameOriginOnly: true });
     } catch (err) {
+      if (err.code === 'ECROSSORIGIN') throw new HttpError(502, `${server?.name || 'The server'} didn't answer: it redirected to ${err.location} — use that address instead.`);
+      if (err.code === 'EREDIRECT') throw new HttpError(502, `${server?.name || 'The server'} didn't answer: it kept redirecting.`);
       throw new HttpError(502, `Can't reach ${server?.name || 'the server'}: ${err.cause?.code || (err.name === 'TimeoutError' ? 'no answer' : err.cause?.message || err.message)}`);
     }
     if (res.status === 401) throw new HttpError(401, `${server?.name || 'The server'} no longer accepts this sign-in.`);

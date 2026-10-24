@@ -3,11 +3,12 @@
 import { h, icon, clear, formatClock } from '../dom.js';
 import { api } from '../api.js';
 import { setTitle, goBack } from '../app.js';
-import { button, emptyState, art, openSheet } from '../components.js';
+import { button, emptyState, art, openSheet, sliderText, percentSlider } from '../components.js';
 import { seekPreview } from '../seekpreview.js';
 import { Scrubber, COMMIT_AFTER_MS } from '../scrub.js';
 import { setBackdrop } from '../backdrop.js';
 import { castState, castEnded, onCastChange, castCommand, refreshCast, setFastPoll } from '../cast.js';
+import { clockTime } from '../live.js';
 
 export async function render(el) {
   el.classList.add('remote-view');
@@ -44,9 +45,15 @@ export async function render(el) {
   const left = h('span', { class: 'time' }, '');
   const play = h('button', { type: 'button', class: 'rbtn rbtn-play remote-play', 'aria-label': 'Pause', onClick: () => togglePlay() }, icon('pause', { size: 34 }));
   const back10 = h('button', { type: 'button', class: 'rbtn remote-back10', 'aria-label': 'Back 10 seconds', title: 'Back 10 seconds', onClick: () => castCommand('skip', { by: -10 }) }, icon('replay', { size: 30 }));
-  const fwd10 = h('button', { type: 'button', class: 'rbtn remote-fwd10', 'aria-label': 'Forward 10 seconds', title: 'Forward 10 seconds', onClick: () => castCommand('skip', { by: 10 }) }, icon('forward10', { size: 30 }));
+  const fwd10 = h('button', { type: 'button', class: 'rbtn remote-fwd10', 'aria-label': 'Forward 30 seconds', title: 'Forward 30 seconds', onClick: () => castCommand('skip', { by: 30 }) }, icon('forward30', { size: 30 }));
+  // Live TV: LIVE and the programme's end in place of the seek bar; channel up/down in place of the skips.
+  const prevChan = h('button', { type: 'button', class: 'rbtn remote-chan-down', 'aria-label': 'Previous channel', title: 'Previous channel', hidden: true, onClick: () => castCommand('channelDown') }, icon('chan-down', { size: 30 }));
+  const nextChan = h('button', { type: 'button', class: 'rbtn remote-chan-up', 'aria-label': 'Next channel', title: 'Next channel', hidden: true, onClick: () => castCommand('channelUp') }, icon('chan-up', { size: 30 }));
+  const liveBadge = h('span', { class: 'live-badge' }, 'LIVE');
+  const liveUntil = h('span', { class: 'muted' });
+  const liveRow = h('div', { class: 'remote-live', hidden: true }, liveBadge, liveUntil);
   const nextBtn = h('button', { type: 'button', class: 'rbtn remote-next', 'aria-label': 'Next', title: 'Next', hidden: true, onClick: () => castCommand('next') }, icon('next', { size: 28 }));
-  const volume = h('input', { type: 'range', class: 'remote-volume', min: 0, max: 1, step: 0.05, value: 1, 'aria-label': 'TV volume' });
+  const volume = percentSlider(h('input', { type: 'range', class: 'remote-volume', min: 0, max: 1, step: 0.05, value: 1, 'aria-label': 'TV volume' }));
   const subsBtn = button('Subtitles', { icon: 'subtitles', variant: 'ghost', onClick: () => chooseSubtitle(), attrs: { class: 'btn btn-ghost remote-subs' } });
   const audioBtn = button('Audio', { icon: 'audio', variant: 'ghost', onClick: () => chooseAudio(), attrs: { class: 'btn btn-ghost remote-audio' } });
   const stopBtn = button('Stop casting', { icon: 'close', variant: 'secondary', onClick: () => stop(), attrs: { class: 'btn btn-secondary remote-stop' } });
@@ -74,8 +81,9 @@ export async function render(el) {
         title,
         sub,
         status,
+        liveRow,
         h('div', { class: 'remote-seek-wrap' }, cur, track, left),
-        h('div', { class: 'remote-transport' }, back10, play, fwd10, nextBtn),
+        h('div', { class: 'remote-transport' }, back10, prevChan, play, nextChan, fwd10, nextBtn),
         h('div', { class: 'remote-row' }, h('span', { class: 'remote-volume-wrap' }, icon('volume', { size: 22 }), volume), subsBtn, audioBtn, stopBtn),
         upnext,
         lyricsEl,
@@ -114,6 +122,7 @@ export async function render(el) {
     seek.style.setProperty('--pct', s.duration ? `${(t / s.duration) * 100}%` : '0%');
     cur.textContent = formatClock(t);
     bubble.show(t, s.duration || 0);
+    sliderText(seek, `${formatClock(t)} of ${formatClock(s.duration || 0)}`, { force: true });
   };
   const commit = () => {
     clearTimeout(commitTimer);
@@ -204,9 +213,11 @@ export async function render(el) {
       return;
     }
     s = next;
-    if (s.itemId !== itemId) {
-      itemId = s.itemId;
-      clear(artEl).append(art(s.image, s.title, { kind: s.itemKind === 'track' ? 'square' : 'poster', eager: true }));
+    const isLive = s.live?.kind === 'live';
+    const shownKey = s.live ? `${s.live.kind}:${s.live.channel.id}:${s.live.programme?.id ?? ''}` : s.itemId;
+    if (shownKey !== itemId) {
+      itemId = shownKey;
+      clear(artEl).append(art(s.image, s.title, { kind: s.itemKind === 'track' || s.live ? 'square' : 'poster', eager: true }));
       setBackdrop(s.backdrop || s.image);
       bubble.setManifest(s.previews);
       if (s.itemKind === 'track') loadLyrics(s.itemId);
@@ -216,9 +227,10 @@ export async function render(el) {
       }
     }
     device.replaceChildren(icon(s.kind === 'chromecast' ? 'cast' : 'tv', { size: 20 }), h('span', {}, `on ${s.deviceName}`));
-    title.textContent = s.title;
-    sub.textContent = s.subtitle || '';
-    status.textContent = s.reconnecting ? `Reconnecting to ${s.deviceName}…` : s.state === 'buffering' ? 'Loading on the TV…' : '';
+    const put = (el, text) => el.textContent !== text && (el.textContent = text); // the 1 s poll rewrites nothing that's the same
+    put(title, s.title);
+    put(sub, s.subtitle || '');
+    put(status, s.reconnecting ? `Reconnecting to ${s.deviceName}…` : s.state === 'buffering' ? 'Loading on the TV…' : s.notice || ''); // the session's notice (a subtitle the TV can't show)
     const playing = s.state === 'playing' || s.state === 'buffering';
     play.setAttribute('aria-label', playing ? 'Pause' : 'Play');
     play.title = playing ? 'Pause (Space)' : 'Play (Space)';
@@ -231,8 +243,13 @@ export async function render(el) {
       cur.textContent = formatClock(s.position);
     }
     left.textContent = total ? `-${formatClock(Math.max(0, total - s.position))}` : '';
-    seek.setAttribute('aria-valuetext', `${formatClock(s.position)} of ${formatClock(total)}`);
+    if (!scrubbing) sliderText(seek, `${formatClock(s.position)} of ${formatClock(total)}`);
     if (s.volume != null && Date.now() > volumeHold && document.activeElement !== volume) volume.value = String(s.volume);
+    liveRow.hidden = !isLive;
+    el.querySelector('.remote-seek-wrap').hidden = isLive;
+    back10.hidden = fwd10.hidden = isLive;
+    prevChan.hidden = nextChan.hidden = !isLive;
+    if (isLive) put(liveUntil, s.live.programme ? `until ${clockTime(s.live.programme.end)}${s.live.next ? ` · Next: ${s.live.next.title}` : ''}` : 'No guide information');
     subsBtn.hidden = !s.subtitles.length || s.itemKind === 'track';
     audioBtn.hidden = s.audio.length < 2;
     const hasNext = Boolean(s.upNext || (s.queue && s.queue.index + 1 < s.queue.items.length));

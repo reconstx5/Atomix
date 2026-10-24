@@ -9,6 +9,9 @@ const SCRYPT = { N: 16384, r: 8, p: 1, keylen: 64 };
 export const SESSION_COOKIE = 'atomix_session';
 // The cookie's name from before the rename (NodeFlix), still accepted so nobody is signed out.
 export const OLD_SESSION_COOKIE = 'nf_session';
+// v0.27: the name on the secure address. Cookies ignore the port, so a Secure cookie the HTTPS address set under the plain
+// name would stop the plain address (http://, same host) from setting its own: browsers refuse to overwrite it.
+export const SECURE_SESSION_COOKIE = '__Secure-atomix_session';
 
 export async function hashPassword(password) {
   const salt = crypto.randomBytes(16);
@@ -46,6 +49,7 @@ export function publicUser(row) {
     username: row.username,
     displayName: row.display_name || row.username,
     role: row.role,
+    canDownload: row.role === 'admin' || row.can_download === 1, // v0.21: admins can always download
     libraryAccess: parseJson(row.library_access, null),
     createdAt: row.created_at,
     lastLogin: row.last_login,
@@ -63,9 +67,20 @@ export class Auth {
   clientIp(req) {
     if (this.config.trustProxy) {
       const fwd = req.headers['x-forwarded-for'];
-      if (fwd) return String(fwd).split(',')[0].trim();
+      // The last entry is the one our own proxy wrote; earlier ones are whatever the client claimed. trustProxy: N
+      // says N proxies are ours (a CDN in front of the proxy): the Nth from the right is the client.
+      const hops = this.config.trustProxy === true ? 1 : Math.max(1, Math.floor(Number(this.config.trustProxy)) || 1);
+      if (fwd) {
+        const parts = String(fwd).split(',').map((x) => x.trim()).filter(Boolean);
+        if (parts.length) return parts.at(-Math.min(hops, parts.length));
+      }
     }
     return req.socket.remoteAddress || '';
+  }
+
+  /** The session cookie's name for this request: its own name on a secure page. */
+  cookieName(req) {
+    return this.isSecure(req) ? SECURE_SESSION_COOKIE : SESSION_COOKIE;
   }
 
   isSecure(req) {
@@ -106,7 +121,7 @@ export class Auth {
     this.db.run('UPDATE users SET last_login = ? WHERE id = ?', Date.now(), row.id);
     const token = this.createSession(row.id, ctx.req);
     ctx.setCookie(
-      serializeCookie(SESSION_COOKIE, token, {
+      serializeCookie(this.cookieName(ctx.req), token, {
         maxAge: this.config.sessionDays * 86400,
         secure: this.isSecure(ctx.req),
       }),
@@ -133,7 +148,7 @@ export class Auth {
     const header = req.headers.authorization;
     if (header && header.startsWith('Bearer ')) return header.slice(7).trim();
     const cookies = parseCookies(req.headers.cookie);
-    return cookies[SESSION_COOKIE] || cookies[OLD_SESSION_COOKIE] || null;
+    return cookies[SECURE_SESSION_COOKIE] || cookies[SESSION_COOKIE] || cookies[OLD_SESSION_COOKIE] || null;
   }
 
   /** Returns the signed-in user row for a request, or null. */
@@ -172,7 +187,8 @@ export class Auth {
   logout(ctx) {
     const token = this.tokenFrom(ctx.req);
     if (token) this.db.run('DELETE FROM sessions WHERE token_hash = ?', sha256(token));
-    for (const name of [SESSION_COOKIE, OLD_SESSION_COOKIE]) ctx.setCookie(serializeCookie(name, '', { maxAge: 0, secure: this.isSecure(ctx.req) }));
+    const names = this.isSecure(ctx.req) ? [SECURE_SESSION_COOKIE, SESSION_COOKIE, OLD_SESSION_COOKIE] : [SESSION_COOKIE, OLD_SESSION_COOKIE];
+    for (const name of names) ctx.setCookie(serializeCookie(name, '', { maxAge: 0, secure: this.isSecure(ctx.req) }));
   }
 
   revokeUserSessions(userId, exceptToken) {

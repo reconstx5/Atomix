@@ -35,7 +35,7 @@ before(async () => {
         id: 348, title: 'Alien', release_date: '1979-05-25', genres: [{ name: 'Horror' }], overview: 'In space.',
         belongs_to_collection: { id: 8091, name: 'Alien Collection', poster_path: null, backdrop_path: null },
         keywords: { keywords: [{ name: 'Space' }, { name: 'Android' }] },
-        credits: { cast: [{ name: 'Tom Skerritt', order: 1 }, { name: 'Sigourney Weaver', order: 0 }], crew: [{ name: 'Ridley Scott', job: 'Director' }, { name: 'Someone', job: 'Editor' }] },
+        credits: { cast: [{ name: 'Tom Skerritt', order: 1, character: '' }, { name: 'Sigourney Weaver', order: 0, character: 'Ripley' }], crew: [{ name: 'Ridley Scott', job: 'Director' }, { name: 'Someone', job: 'Editor' }] },
         videos: { results: [{ site: 'YouTube', type: 'Trailer', official: true, iso_639_1: 'en', key: 'abc123', name: 'Official' }] },
       });
     }
@@ -45,7 +45,7 @@ before(async () => {
     }
     if (u.pathname === '/3/search/tv') return send({ results: [{ id: 33, name: 'Demo Show', first_air_date: '2022-01-01' }] });
     if (u.pathname === '/3/tv/33') {
-      return send({ id: 33, name: 'Demo Show', first_air_date: '2022-01-01', overview: 'A show.', genres: [{ name: 'Drama' }], keywords: { results: [{ name: 'Coast' }] }, aggregate_credits: { cast: [{ name: 'Theo', order: 0 }] }, created_by: [{ name: 'A. Writer' }] });
+      return send({ id: 33, name: 'Demo Show', first_air_date: '2022-01-01', overview: 'A show.', genres: [{ name: 'Drama' }], keywords: { results: [{ name: 'Coast' }] }, aggregate_credits: { cast: [{ name: 'Theo', order: 0 }] }, created_by: [{ name: 'A. Writer' }], external_ids: { imdb_id: 'tt0000033', tvdb_id: 81189 } });
     }
     send({}, 404);
   });
@@ -65,7 +65,7 @@ test('a matched movie stores keywords, people and its TMDB collection; a show st
   await metadata.refresh(alien);
   const r = row(alien.id);
   assert.deepEqual(JSON.parse(r.keywords), ['space', 'android']);
-  assert.deepEqual(JSON.parse(r.people), [{ name: 'Ridley Scott', role: 'director' }, { name: 'Sigourney Weaver', role: 'cast' }, { name: 'Tom Skerritt', role: 'cast' }]);
+  assert.deepEqual(JSON.parse(r.people), [{ name: 'Ridley Scott', role: 'director' }, { name: 'Sigourney Weaver', role: 'cast', character: 'Ripley' }, { name: 'Tom Skerritt', role: 'cast' }]);
   const c = db.get('SELECT * FROM collections WHERE tmdb_id = 8091');
   assert.equal(c.name, 'Alien Collection');
   assert.deepEqual(JSON.parse(c.parts).map((p) => p.title), ['Alien', 'Aliens'], 'parts in release order');
@@ -89,3 +89,27 @@ test('enrichMissing fills titles matched before v0.9.0, marks ones with nothing 
   assert.equal(row(noMatch).keywords, '[]');
   assert.equal((await metadata.enrichMissing()).done, 0, 'nothing left, Quiet Film included');
 });
+
+test('a TMDB show passes its TheTVDB id on to later providers (v0.23)', async () => {
+  let seen;
+  metadata.register({ id: 'sees-tvdb', priority: 60, kinds: ['show'], fetch: (item, ctx) => ((seen = ctx.merged.tvdbId), null) });
+  const id = addItem({ library_id: 2, kind: 'show', title: 'Demo Show', path: null, year: 2022 });
+  await metadata.refresh(row(id), { force: true });
+  metadata.providers = metadata.providers.filter((p) => p.id !== 'sees-tvdb');
+  assert.equal(seen, 81189);
+  assert.ok(!('tvdb_id' in row(id)), 'not stored');
+});
+
+test('Fix match keeps what later plugins add (scores, a logo), without letting them change the match (F4)', async () => {
+  metadata.register({ id: 'late-plugin', priority: 60, kinds: ['movie'], fetch: () => ({ title: 'Wrong', tmdbId: 1, scores: [{ source: 'imdb', value: '8.5/10' }], logo: '/tmp/logo.png' }) }, 'test');
+  const id = addItem({ title: 'Something', year: 1979 });
+  await metadata.refresh(row(id), { force: true, tmdbId: 348, clear: true });
+  metadata.removeByOwner('test');
+  const r = row(id);
+  assert.equal(r.title, 'Alien');
+  assert.equal(r.tmdb_id, 348);
+  assert.deepEqual(JSON.parse(r.scores), [{ source: 'imdb', value: '8.5/10' }]);
+  assert.equal(r.logo, '/tmp/logo.png');
+});
+
+// v0.24: an actor's character is kept for the person page ("Actor · Ripley"); an empty one is left out.

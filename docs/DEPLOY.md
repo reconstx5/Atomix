@@ -8,6 +8,29 @@ To keep it running in the background on Windows you can create a Task Scheduler 
 
 To only allow this computer (not your network), set `ATOMIX_HOST=127.0.0.1`.
 
+## 1b. A secure address at home (phones)
+
+Phones need `https://` to play encrypted Live TV channels and to install Atomix. In **Settings → Server → Secure
+address (HTTPS)** choose:
+
+- **Use Tailscale** (recommended): Tailscale on the PC and each phone, HTTPS certificates turned on in Tailscale's admin
+  page (DNS → HTTPS Certificates). Atomix runs `tailscale cert` itself and renews the certificate; it serves
+  `https://<pc>.<tailnet>.ts.net:8443`. On Windows, Tailscale may only issue certificates to an administrator: if the
+  card says "Run this once as administrator", copy the command into an administrator terminal, then choose Use
+  Tailscale again, or press **Try again** (Atomix uses that certificate until it's within 30 days of its end; if
+  renewing is refused then, the address keeps working and the card shows the command again).
+- **Use Atomix's own certificate**: no account. Each phone installs `atomix-home-ca.crt` (Android) or
+  `atomix-home-ca.mobileconfig` (iPhone, then trust it in Certificate Trust Settings) once, from the card's links.
+  Works on the home network only.
+
+The secure address listens on port 8443 (change it on the card; `ATOMIX_HTTPS_PORT` fixes it). Allow it through Windows
+Firewall on private networks when Windows asks. The plain address (8787) is unchanged.
+
+In Docker, the container can't see the host's name or home address: publish 8443 (the compose file does) and set
+`ATOMIX_HTTPS_NAMES` to the names and addresses phones use, comma-separated (`ATOMIX_HTTPS_NAMES=mypc.local,192.168.1.20`).
+`data/certs/own-ca.key` is the home certificate's key: keep the data folder private (it can only vouch for home names
+and private addresses).
+
 ## 2. On your home network (Docker)
 
 ```sh

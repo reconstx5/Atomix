@@ -1,0 +1,26 @@
+#EXTM3U
+#EXTINF:-1 tvg-id="mjh-tvnz-2" tvg-chno="2" group-title="NZ",TVNZ 2
+#KODIPROP:inputstream.adaptive.manifest_type=mpd
+#KODIPROP:inputstream.adaptive.license_type=com.widevine.alpha
+#KODIPROP:inputstream.adaptive.license_key=https://c.mjh.nz/tvnz-2-wv
+https://i.mjh.nz/.r/tvnz-2.mpd
+#EXTINF:-1 tvg-id="ck" tvg-chno="5" group-title="NZ",Clear Key Legacy
+#KODIPROP:inputstream.adaptive.drm_legacy=org.w3.clearkey|https://l.example/ck|X-A=1&X-B=two%20words
+https://cdn.example/ck/manifest.mpd
+#EXTINF:-1 tvg-id="hdr" tvg-chno="6" group-title="NZ",Headered
+#KODIPROP:inputstream.adaptive.license_type=com.widevine.alpha
+#KODIPROP:inputstream.adaptive.license_key=https://l.example/wv|X-Token=abc|R{SSM}|
+#KODIPROP:inputstream.adaptive.manifest_headers=Referer=https%3A%2F%2Fa.example%2F
+#KODIPROP:inputstream.adaptive.stream_headers=Referer=https%3A%2F%2Fa.example%2F&Origin=https%3A%2F%2Fa.example
+https://cdn.example/hdr/live.mpd
+#EXTINF:-1 tvg-id="keys" tvg-chno="7" group-title="NZ",Keys Inline
+#KODIPROP:inputstream.adaptive.license_type=clearkey
+#KODIPROP:inputstream.adaptive.license_key=a7e61c373e219033c21091fa607bf3b8:76a6c65c5ea762046bd749a2e632ccbb
+https://cdn.example/keys/live.mpd
+#EXTINF:-1 tvg-id="plain" tvg-chno="8" group-title="NZ",Plain
+https://cdn.example/plain/index.m3u8
+#EXTINF:-1 tvg-id="fp" tvg-chno="9" group-title="NZ",FP One
+#KODIPROP:inputstream.adaptive.license_type=com.apple.fps
+#KODIPROP:inputstream.adaptive.license_key=https://lic.example/fps|X-Key=abc|spc=b{SSM}&id={CONTENTID}|B
+#KODIPROP:inputstream.adaptive.server_certificate=https://lic.example/cert.der
+https://cdn.example/fp/master.m3u8

@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { logger } from './log.js';
+import { fetchFollowing } from './remote/provider.js';
+import { redactUrl, isPrivateTarget, checkResolved } from './http/net.js';
 import { parseJson } from './db.js';
 import { HttpError } from './http/router.js';
 import { listSubtitles, saveDownloaded } from './stream/subtitles.js';
@@ -44,6 +46,32 @@ export class PluginManager {
     this.subtitleSources = new Map(); // "pluginId/providerId" -> subtitle provider
     this.actions = new Map(); // "pluginId/actionId" -> handler (buttons in Settings → Plugins)
     this.homeRows = []; // { owner, id, title, style, items }
+    this.liveSources = new Map(); // "pluginId/sourceId" -> live source (Live TV channels and guide)
+    this.liveListeners = [];
+  }
+
+  /** Live TV sources, for the refresher and the Live TV routes. */
+  listLiveSources() {
+    return [...this.liveSources.entries()].map(([key, s]) => ({ key, name: s.name || s.id, pluginId: s.pluginId, source: s }));
+  }
+
+  getLiveSource(key) {
+    return this.liveSources.get(key) || null;
+  }
+
+  /** fn({ type: 'registered'|'removed'|'config', key }) when a live source comes, goes or its plugin is reconfigured. */
+  onLiveSourcesChanged(fn) {
+    this.liveListeners.push(fn);
+  }
+
+  emitLive(event) {
+    for (const fn of this.liveListeners) {
+      try {
+        fn(event);
+      } catch (err) {
+        log.warn(`Live source listener failed: ${err.message}`);
+      }
+    }
   }
 
   discover() {
@@ -105,6 +133,14 @@ export class PluginManager {
       get serverName() {
         return core.settings.get('serverName') || 'Atomix';
       },
+      /** v0.23: the server's metadata language (e.g. 'en-US'). */
+      get metadataLanguage() {
+        return core.settings.get('metadataLanguage') || 'en-US';
+      },
+      /** v0.23: a sentence on this plugin's card in Settings → Plugins while it's on ("Paste your key to start."); null clears it. */
+      setStatus(text) {
+        rec.status = text == null || text === '' ? null : String(text).slice(0, 300);
+      },
       /** Handle a button listed under "actions" in plugin.json (Settings → Plugins). */
       registerAction(actionId, handler) {
         manager.actions.set(`${id}/${actionId}`, { handler, owner });
@@ -115,6 +151,13 @@ export class PluginManager {
       log: logger(id),
       storage,
       fetch: (...args) => fetch(...args),
+      /** fetch with redirects handled by Atomix (headers never follow a redirect to another site). */
+      fetchFollowing: (url, opts) => fetchFollowing(url, opts),
+      /** An address safe to log: scheme, host and port only. */
+      redactUrl,
+      /** True for addresses Atomix refuses to be pointed at (the unspecified address, link-local). */
+      isPrivateTarget,
+      checkResolved,
       get config() {
         return manager.configFor(id);
       },
@@ -138,6 +181,21 @@ export class PluginManager {
       registerSource(source) {
         if (!source?.id || typeof source.browse !== 'function') throw new Error('A source needs an id and browse()');
         manager.sources.set(`${id}/${source.id}`, { ...source, pluginId: id, owner });
+      },
+      /**
+       * Live TV channels and guide (like a Kodi PVR client). refresh(ctx) → { channels, programmes, warnings? };
+       * stream(key, ctx) → { url, headers?, mime? }; catchup(key, programme, { from }, ctx) → { url, headers?, duration }.
+       * Optional: settingsSummary(), maxStreams(), refreshHours(), and imageRoots() — the only folders a channel's local
+       * logo file may be read from (a playlist is someone else's file and must not be able to name /etc/passwd).
+       * Atomix stores what refresh() returns; a source never touches the database.
+       */
+      registerLiveSource(source) {
+        if (!source?.id || typeof source.refresh !== 'function' || typeof source.stream !== 'function') {
+          throw new Error('A live source needs an id, refresh() and stream()');
+        }
+        const key = `${id}/${source.id}`;
+        manager.liveSources.set(key, Object.assign(source, { pluginId: id, owner, key }));
+        manager.emitLive({ type: 'registered', key });
       },
       /**
        * Online subtitles: search(item, ctx) → [{ id, language, label, downloads, hearingImpaired, hashMatch }],
@@ -180,6 +238,21 @@ export class PluginManager {
         serialize: (rows, viewer) => core.library.withProgress(rows, viewer),
         recentlyAdded: (opts) => core.library.recentlyAdded(opts),
         libraries: (viewer) => core.library.visibleLibraries(viewer).map((l) => ({ id: l.id, name: l.name, type: l.type })),
+        // v0.23: for Home rows (each within the viewer's rules).
+        startedShows: (viewer, opts) => core.library.startedShows(viewer, opts),
+        partlySeenSeries: (viewer, opts) => core.library.partlySeenSeries(viewer, opts),
+        playedOn: (viewer, date, opts) => core.library.playedOn(viewer, date, opts),
+        /** v0.23: the titles Home's Continue watching row holds for the viewer (in progress, then next up). */
+        continueWatching: (viewer) => [...core.library.continueWatching(viewer, 20), ...core.library.nextUp(viewer, 20)],
+      },
+      /** v0.23: run every metadata provider for one title now (locked fields stay; only gaps fill for books). */
+      metadata: {
+        refresh: async (itemId) => {
+          const row = core.library.get(itemId);
+          return row ? core.metadata.refresh(row) : null;
+        },
+        /** v0.23: offer these titles (all, without ids) to the providers again at the next scan — only kinds this plugin's providers list. */
+        offerAgain: (ids) => core.metadata.offerAgain(owner, ids),
       },
       HttpError,
     };
@@ -217,6 +290,11 @@ export class PluginManager {
     for (const [key, p] of this.subtitleSources) if (p.owner === owner) this.subtitleSources.delete(key);
     for (const [key, a] of this.actions) if (a.owner === owner) this.actions.delete(key);
     this.homeRows = this.homeRows.filter((r) => r.owner !== owner);
+    for (const [key, s] of this.liveSources) {
+      if (s.owner !== owner) continue;
+      this.liveSources.delete(key);
+      this.emitLive({ type: 'removed', key });
+    }
   }
 
   async unload(id) {
@@ -230,6 +308,7 @@ export class PluginManager {
     this.unregister(id);
     rec.loaded = false;
     rec.module = null;
+    rec.status = null;
   }
 
   async setEnabled(id, enabled) {
@@ -257,7 +336,9 @@ export class PluginManager {
       if (['text', 'textarea', 'password'].includes(field.type) || !field.type) v = String(v ?? '').slice(0, 10000);
       clean[field.key] = v;
     }
-    const merged = { ...parseJson(this.core.db.get('SELECT config FROM plugins WHERE id = ?', id)?.config, {}), ...clean };
+    const before = parseJson(this.core.db.get('SELECT config FROM plugins WHERE id = ?', id)?.config, {});
+    const merged = { ...before, ...clean };
+    const changed = Object.keys(clean).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(clean[k]));
     this.core.db.run('UPDATE plugins SET config = ? WHERE id = ?', JSON.stringify(merged), id);
     for (const fn of rec.configListeners || []) {
       try {
@@ -266,6 +347,8 @@ export class PluginManager {
         log.warn(`${id} config listener failed: ${err.message}`);
       }
     }
+    // After the plugin has seen its new settings: a live source refreshes with them.
+    for (const [key, s] of this.liveSources) if (s.pluginId === id) this.emitLive({ type: 'config', key, changed });
     return this.describe(rec);
   }
 
@@ -283,11 +366,13 @@ export class PluginManager {
       enabled: rec.enabled,
       loaded: rec.loaded,
       error: rec.error,
+      status: rec.loaded ? rec.status || null : null,
       settings: rec.manifest.settings || [],
       actions: (rec.manifest.actions || []).filter((a) => a?.id).map((a) => ({ id: a.id, label: a.label || a.id, available: this.actions.has(`${rec.manifest.id}/${a.id}`) })),
       config,
       provides: {
         sources: [...this.sources.values()].filter((s) => s.owner === owner).map((s) => s.name || s.id),
+        live: [...this.liveSources.values()].filter((s) => s.owner === owner).map((s) => ({ key: s.key, name: s.name || s.id })),
         subtitles: this.subtitleProviders().filter((p) => p.owner === owner).map((p) => p.name || p.id),
         homeRows: this.homeRows.filter((r) => r.owner === owner).map((r) => r.title),
         metadata: this.core.metadata.list().filter((p) => p.owner === owner).map((p) => p.name),

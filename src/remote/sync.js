@@ -45,6 +45,7 @@ export class RemoteSync {
     if (!ping.ok && ping.unreachable && (await this.refreshPlexAddress(server))) ping = await provider.ping(server);
     if (!ping.ok) {
       this.setStatus(server, ping.detail === 'unauthorized' ? 'unauthorized' : 'unreachable', ping.detail);
+      this.problems?.report('remote-server', server.id, `${server.name} isn't answering (${ping.detail || 'no answer'}).`);
       throw new Error(ping.detail === 'unauthorized' ? `${server.name} no longer accepts the sign-in` : `Couldn't reach ${server.name}: ${ping.detail}`);
     }
     // A library removed on the server: keep what we have and say so, until the admin unticks it.
@@ -53,6 +54,7 @@ export class RemoteSync {
     if (!far.some((l) => l.remoteId === lib.remote_id)) {
       if (!options.remoteGone) this.db.run('UPDATE libraries SET options = ? WHERE id = ?', JSON.stringify({ ...options, remoteGone: true }), lib.id);
       this.db.run('UPDATE servers SET status = ?, status_detail = NULL, last_sync = ? WHERE id = ?', 'ok', Date.now(), server.id);
+      this.problems?.clear('remote-server', server.id);
       log.warn(`"${lib.name}" is no longer on ${server.name}; keeping its titles`);
       return { files: 0, removed: 0 };
     }
@@ -157,10 +159,12 @@ export class RemoteSync {
     const had = this.db.get('SELECT COUNT(*) AS n FROM items WHERE library_id = ?', lib.id).n;
     if (count === 0 && had > 0) {
       this.db.run('UPDATE servers SET status = ?, status_detail = NULL, last_sync = ? WHERE id = ?', 'ok', Date.now(), server.id);
+      this.problems?.clear('remote-server', server.id);
       throw new Error(`${server.name} listed nothing in "${lib.name}"; keeping its ${had} titles`);
     }
     const removed = this.scanner.prune(lib, [remotePath(server.id, '')], scanId, [remotePath(server.id, '')]);
     this.db.run('UPDATE servers SET status = ?, status_detail = NULL, last_sync = ? WHERE id = ?', 'ok', Date.now(), server.id);
+    this.problems?.clear('remote-server', server.id);
     log.info(`Synced "${lib.name}" from ${server.name}: ${count} titles, ${removed} gone`);
     return { files: count, removed };
   }

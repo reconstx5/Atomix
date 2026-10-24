@@ -1,0 +1,1 @@
+{ "id": "bookinfo", "name": "Test book info", "version": "1.0.0", "main": "index.js", "enabledByDefault": true }

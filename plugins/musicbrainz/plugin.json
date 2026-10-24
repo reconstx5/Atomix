@@ -1,0 +1,13 @@
+{
+  "id": "musicbrainz",
+  "name": "MusicBrainz",
+  "version": "1.0.0",
+  "description": "Fills missing album covers (from the Cover Art Archive), release years and genres, and finds the MusicBrainz ids Fanart.tv uses. No key needed.",
+  "author": "Atomix",
+  "homepage": "https://musicbrainz.org",
+  "main": "index.js",
+  "enabledByDefault": false,
+  "settings": [
+    { "key": "contact", "label": "Contact email (optional)", "type": "text", "default": "", "help": "MusicBrainz asks apps to say how to reach them. Sent only to MusicBrainz, in the request's User-Agent." }
+  ]
+}

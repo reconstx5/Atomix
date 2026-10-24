@@ -9,7 +9,7 @@ if (major < 22 || (major === 22 && minor < 13)) {
   process.exit(1);
 }
 
-const { createApp } = await import('./src/app.js');
+const { createApp, STOP_GRACE_MS } = await import('./src/app.js');
 
 let app;
 try {
@@ -40,7 +40,7 @@ async function shutdown(signal) {
   if (stopping) process.exit(1);
   stopping = true;
   console.log(`\n${signal} received, shutting down…`);
-  const force = setTimeout(() => process.exit(0), 5000);
+  const force = setTimeout(() => process.exit(0), STOP_GRACE_MS); // joins under way get their 10 s
   force.unref();
   try {
     await app.stop();

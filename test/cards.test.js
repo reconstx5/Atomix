@@ -32,3 +32,12 @@ test('wide cards: episodes use the same caption after the label', () => {
   assert.equal(wideCaption({ ...ep, progress: { position: 2800, watched: true } }).left, 'S1 · E4, Watched');
   assert.equal(wideCaption({ ...ep, progress: null }).left, 'S1 · E4');
 });
+
+test('card labels say what a screen can see: watched, unwatched count, time left', async () => {
+  const { cardState } = await import('../public/js/components.js');
+  assert.equal(cardState({ kind: 'movie', progress: { watched: true } }), ', watched');
+  assert.equal(cardState({ kind: 'show', unwatched: 3 }), ', 3 unwatched');
+  assert.equal(cardState({ kind: 'episode', duration: 2880, progress: { position: 1500, duration: 2880, watched: false } }), ', 23 min left');
+  assert.equal(cardState({ kind: 'movie', progress: { position: 10, duration: 6000 } }), '', 'barely started: nothing to say');
+  assert.equal(cardState({ kind: 'movie' }), '');
+});

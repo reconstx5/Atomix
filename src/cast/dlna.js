@@ -191,7 +191,7 @@ export class DlnaDevice extends EventEmitter {
     this.update({ state: 'buffering', position: m.startTime || 0, duration: m.duration ?? null, idleReason: null });
     if (m.startTime > 0 && this.seekSupported) {
       try {
-        await this.seek(m.startTime);
+        await this.seek(m.startTime, { atStart: true });
       } catch (err) {
         if (err.code !== 'SEEK_UNSUPPORTED') throw err;
       }
@@ -211,12 +211,13 @@ export class DlnaDevice extends EventEmitter {
     await this.soap('avTransport', 'Pause', { InstanceID: 0 });
     this.update({ state: 'paused' });
   }
-  async seek(seconds) {
+  /** atStart: the seek right after a load — some TVs answer 701 or 602 there instead of 710 when they can't seek. */
+  async seek(seconds, { atStart = false } = {}) {
     if (!this.seekSupported) throw Object.assign(new Error('This TV cannot seek'), { code: 'SEEK_UNSUPPORTED' });
     try {
       await this.soap('avTransport', 'Seek', { InstanceID: 0, Unit: 'REL_TIME', Target: seekTime(seconds) });
     } catch (err) {
-      if (err.upnpCode === 710) {
+      if (err.upnpCode === 710 || (atStart && (err.upnpCode === 701 || err.upnpCode === 602))) {
         this.seekSupported = false;
         throw Object.assign(new Error('This TV cannot seek'), { code: 'SEEK_UNSUPPORTED' });
       }
@@ -237,6 +238,16 @@ export class DlnaDevice extends EventEmitter {
   /** One poll: position and transport state, and every fifth time (or `media`) the current URI and volume. */
   async refresh({ media = false } = {}) {
     if (this.closed) return this.status();
+    // A slow TV answers in its own time: the next tick waits rather than stacking another round of questions.
+    if (this.refreshing) return this.status();
+    this.refreshing = true;
+    try {
+      return await this.refreshNow({ media });
+    } finally {
+      this.refreshing = false;
+    }
+  }
+  async refreshNow({ media = false } = {}) {
     const generation = this.generation || 0;
     try {
       const pos = await this.soap('avTransport', 'GetPositionInfo', { InstanceID: 0 });

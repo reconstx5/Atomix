@@ -70,3 +70,29 @@ export function ambientColour(data) {
   for (let i = 0; i < 20 && luminance(c) > 0.62; i++) c = hslToHex(hue, sat, (l -= 0.015));
   return c;
 }
+
+/**
+ * A colour someone chose, made readable as text on Atomix's dark pages: the same hue and saturation, lightened until
+ * its luminance reaches 0.30 (the lower bound of the artwork tints). Light colours, and anything not #rrggbb, are
+ * returned as they are.
+ */
+export function readableAccent(c) {
+  if (!/^#[0-9a-f]{6}$/i.test(String(c))) return c;
+  if (luminance(c) >= 0.3) return c;
+  const [r, g, b] = rgbOf(c);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  let l = (max + min) / 2;
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  const hue = d === 0 ? 0 : ((max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4) * 60 + 360) % 360;
+  let out = c;
+  for (let i = 0; i < 80 && luminance(out) < 0.3; i++) out = hslToHex(hue, s, (l = Math.min(1, l + 0.01)));
+  return out;
+}
+
+/** The ink to write on a chosen accent: dark or white, whichever reads better on it (the lifted colour, if lifted). */
+export function accentInk(c) {
+  if (!/^#[0-9a-f]{6}$/i.test(String(c))) return '#ffffff';
+  return contrast(c, '#111111') >= contrast(c, '#ffffff') ? '#111111' : '#ffffff';
+}

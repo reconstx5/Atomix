@@ -1,0 +1,20 @@
+#EXTM3U url-tvg="http://guide.example/epg.xml.gz,http://guide.example/backup.xml" catchup="shift" catchup-days="3" tvg-shift="1"
+#EXTINF:-1 tvg-id="tvnz1.nz" tvg-name="TVNZ 1" tvg-logo="http://logos.example/tvnz1.png" tvg-chno="1" group-title="News;Local",TVNZ 1 HD
+http://provider.example/live/u/p/101.ts
+#EXTINF:-1 tvg-id='three.nz' tvg-logo='three.png' channel-number='3' group-title='Entertainment' catchup='xc' catchup-days='7',Three
+http://provider.example/live/u/p/103.ts
+#EXTINF:-1 tvg-id="rnz.nz" radio="true" group-title="Radio",RNZ National
+http://provider.example/radio/rnz.mp3
+#EXTGRP:Sport
+#EXTVLCOPT:http-user-agent=VLC/3.0
+#EXTVLCOPT:http-referrer=http://provider.example/
+#EXTINF:-1 tvg-id="sky.sport" tvg-shift="-2" catchup="default" catchup-source="http://provider.example/arch/{utc}-{duration}.ts" catchup-correction="0.5",Sky Sport
+http://provider.example/live/u/p/200.ts
+#KODIPROP:inputstream.adaptive.manifest_type=hls
+#KODIPROP:inputstream.adaptive.license_type=com.widevine.alpha
+#EXTINF:-1 tvg-name="Free Channel",
+http://free.example/hls/free.m3u8|User-Agent=Mozilla%2F5.0%20Test&Referer=http%3A%2F%2Ffree.example%2F&X-Custom=1
+#EXTINF:-1,Duplicate of Three
+http://provider.example/live/u/p/103.ts
+#EXTINF:-1,
+http://provider.example/live/u/p/300.ts

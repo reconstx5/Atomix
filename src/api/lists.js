@@ -1,6 +1,8 @@
 // Playlists, the Watchlist and collections.
+import { sendPicture } from '../library/thumbs.js';
 import { HttpError } from '../http/router.js';
 import { sendFile } from '../http/static.js';
+import { fieldsFor, SORTS } from '../library/smart.js';
 
 export function registerListRoutes(r, core) {
   const { lists, collections, library, images } = core;
@@ -15,22 +17,36 @@ export function registerListRoutes(r, core) {
     if (list.profile_id !== ctx.profile.id) throw new HttpError(403, 'Only the profile that made this playlist can change it.');
     return list;
   };
-  const shape = (list, ctx) => ({ id: list.id, kind: list.kind, name: list.name, shared: Boolean(list.shared), own: list.profile_id === ctx.profile.id, items: lists.items(list.id, ctx.viewer) });
+  const shape = (list, ctx) => ({
+    id: list.id,
+    kind: list.kind,
+    name: list.name,
+    shared: Boolean(list.shared),
+    own: list.profile_id === ctx.profile.id,
+    ...(list.kind === 'smart' ? { media: list.media, rules: JSON.parse(list.rules || '{}') } : {}),
+    items: lists.items(list.id, ctx.viewer),
+  });
 
   r.get('/api/lists', (ctx) => lists.forProfile(ctx.profile, ctx.viewer));
+  // The smart playlist builder's vocabulary: each media's fields (label, type, ops) and the sorts.
+  r.get('/api/smart/fields', () => ({ music: fieldsFor('music'), video: fieldsFor('video'), sorts: SORTS }));
   r.post('/api/lists', async (ctx) => {
     const b = await ctx.body();
-    return shape(lists.create(ctx.profile.id, { kind: b.kind, name: b.name }), ctx);
+    return shape(lists.create(ctx.profile.id, { kind: b.kind, name: b.name, media: b.media, rules: b.rules }), ctx);
   });
   r.get('/api/lists/:id', (ctx) => shape(visible(ctx, ctx.params.id), ctx));
   r.patch('/api/lists/:id', async (ctx) => {
     const list = own(ctx, ctx.params.id);
     const b = await ctx.body();
-    if (b.name !== undefined) lists.rename(list.id, b.name);
-    if (b.shared !== undefined) {
-      if (ctx.profile.kids) throw new HttpError(403, "Kids profiles can't share playlists.");
-      lists.setShared(list.id, Boolean(b.shared));
+    // Everything refused is refused before anything is saved.
+    if (b.shared !== undefined && b.shared && ctx.profile.kids) throw new HttpError(403, "Kids profiles can't share playlists.");
+    if (b.name !== undefined) {
+      lists.notWatchlist(list, 'renamed');
+      if (!String(b.name || '').trim()) throw new HttpError(400, 'Give the playlist a name.');
     }
+    if (b.rules !== undefined || b.media !== undefined) lists.setRules(list.id, { media: b.media, rules: b.rules });
+    if (b.name !== undefined) lists.rename(list.id, b.name);
+    if (b.shared !== undefined) lists.setShared(list.id, Boolean(b.shared));
     return shape(lists.get(list.id), ctx);
   });
   r.delete('/api/lists/:id', (ctx) => {
@@ -50,7 +66,7 @@ export function registerListRoutes(r, core) {
     if (!item || !library.canSee(ctx.viewer, item)) throw new HttpError(404, 'No such title');
     if (!lists.add(list.id, item.id)) {
       if (lists.contains(ctx.profile.id, item.id).lists.includes(list.id)) return; // already there: fine
-      throw new HttpError(400, list.kind === 'music' ? 'A song playlist takes songs.' : 'A video playlist takes films and episodes (add a season for a show).');
+      throw new HttpError(400, list.kind === 'music' ? 'A song playlist takes songs, podcast episodes and audiobooks.' : list.kind === 'reading' ? 'A reading list takes books and comics.' : 'A video playlist takes films and episodes (add a season for a show).');
     }
   });
   r.delete('/api/lists/:id/items/:itemId', (ctx) => {
@@ -76,16 +92,17 @@ export function registerListRoutes(r, core) {
   r.get('/api/collections', (ctx) => collections.list(ctx.viewer, { includeHidden: everything(ctx), everything: everything(ctx) }));
   r.get('/api/collections/:id', (ctx) => {
     const c = collections.get(ctx.params.id, ctx.viewer, { everything: everything(ctx) });
-    if (!c) throw new HttpError(404, 'No such collection');
+    if (!c) throw new HttpError(404, 'This collection no longer exists.');
     return c;
   });
   r.get('/api/collections/:id/image/:type', async (ctx) => {
+    if (!collections.get(ctx.params.id, ctx.viewer)) throw new HttpError(404, 'No such collection');
     const c = collections.row(ctx.params.id);
     const type = ctx.params.type === 'backdrop' ? 'backdrop' : 'poster';
     const resolved = images.resolve(c?.[type]);
     if (!resolved) throw new HttpError(404, 'No image');
     if (resolved.url) return ctx.redirect(resolved.url);
-    const ok = await sendFile(ctx.req, ctx.res, resolved.file, { cacheControl: 'private, max-age=604800' });
+    const ok = await sendPicture(core, ctx, resolved.file, { type, stable: String(c?.[type]).startsWith('cache:') });
     if (!ok) throw new HttpError(404, 'Image missing');
   });
   r.post('/api/collections', async (ctx) => collections.create(await ctx.body()), { auth: 'admin' });
