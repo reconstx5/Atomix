@@ -2,7 +2,8 @@
 // control in that direction, Enter activates, Backspace goes back.
 // Works with keyboards, TV remotes (which send arrow keys) and gamepads
 // mapped to arrows.
-import { reduceMotion } from './motion.js';
+import { motionLevel } from './motion.js';
+import { scrollBehavior } from './motion-rules.js';
 import { menuKey, menuStep, leftOnPage, FRAME_QUERY } from './orbit-rules.js';
 
 const FOCUSABLE = [
@@ -194,9 +195,17 @@ export function initNavigation({ onBack }) {
     }
   });
 
+  // While an arrow is held down nothing tweens (html.nav-held): the focus ring jumps from card to card and keeps up.
+  const held = (on) => document.documentElement.classList.toggle('nav-held', on);
+  window.addEventListener('keyup', (e) => {
+    if (e.key.startsWith('Arrow')) held(false);
+  });
+  window.addEventListener('blur', () => held(false));
+
   window.addEventListener('keydown', (e) => {
     if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
     const dir = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' }[e.key];
+    if (dir && e.repeat) held(true);
     if (isKeyboardModeKey(e.key)) enterKeyboardMode();
     // The player handles its own keys, except in a dialog over it (the cast picker).
     if (document.body.dataset.view === 'player' && !document.activeElement?.closest?.('dialog[open]')) return;
@@ -218,10 +227,10 @@ export function initNavigation({ onBack }) {
       if (next) {
         e.preventDefault();
         next.focus({ preventScroll: true });
-        const reduce = reduceMotion(); // the system setting or the profile's own
         // Orbit: moving along a row scrolls it so the selected card stays at the left.
         const inline = rowInline === 'start' && (dir === 'left' || dir === 'right') && next.closest('.row-scroller') ? 'start' : 'nearest';
-        next.scrollIntoView({ block: 'nearest', inline, behavior: reduce ? 'auto' : 'smooth' });
+        // One press glides; a held key jumps, so smooth scrolls never queue up behind the remote (v0.28).
+        next.scrollIntoView({ block: 'nearest', inline, behavior: scrollBehavior({ tier: motionLevel(), repeat: e.repeat }) });
       }
       return;
     }

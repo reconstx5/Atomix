@@ -22,4 +22,5 @@
 }
 body { font-size: 1.05rem; }
 .nav-link[aria-current="page"] { box-shadow: inset 4px 0 0 var(--accent); }
-.card:focus-visible, .card:hover { transform: scale(1.06); }
+.card:focus-visible { transform: scale(1.06); }
+@media (hover: hover) and (pointer: fine) { .card:hover { transform: scale(1.06); } } /* v0.28: no hover left stuck on touch screens */

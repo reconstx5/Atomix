@@ -17,6 +17,9 @@ import { canDownloadHere } from './offline/ui.js';
 import { sync, keepSnapshot, readSnapshot, forgetSnapshot } from './offline/sync.js';
 import { watchState, notifyState } from './state-events.js';
 import { mountView } from './screen.js';
+import { applyMotion } from './motion.js';
+import { historyStep } from './motion-rules.js';
+import { noteStep, beginPageChange, initCapture } from './transitions.js';
 
 export const state = watchState({
   status: null,
@@ -266,7 +269,7 @@ export function applyTheme() {
   if (accent) root.setProperty('--accent-text', accentInk(accent));
   else root.removeProperty('--accent-text');
   root.setProperty('--subtitle-scale', String(prefs.subtitleSize || 1));
-  document.documentElement.classList.toggle('reduce-motion', Boolean(prefs.reduceMotion));
+  applyMotion({ profileReduce: Boolean(prefs.reduceMotion) }); // v0.28: data-motion (and html.reduce-motion)
   document.documentElement.classList.toggle('reduce-effects', Boolean(prefs.reduceEffects));
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta && theme?.preview?.background) meta.setAttribute('content', theme.preview.background);
@@ -374,20 +377,21 @@ export function parseHash() {
 }
 
 // Remember where we've been inside the app so "Back" never leaves Atomix.
-const visited = [location.hash || '#/'];
+let visited = [location.hash || '#/'];
 
 export function navigate(hash, { replace = false } = {}) {
   if (replace) {
     history.replaceState(null, '', hash);
     visited[visited.length - 1] = hash;
+    noteStep('none'); // a redirect or a new filter: no screen change shown
     render();
   } else location.hash = hash;
 }
 
-window.addEventListener('hashchange', () => {
-  const now = location.hash || '#/';
-  if (visited.length > 1 && visited[visited.length - 2] === now) visited.pop();
-  else if (visited[visited.length - 1] !== now) visited.push(now);
+window.addEventListener('hashchange', (e) => {
+  const step = historyStep(visited, location.hash || '#/');
+  visited = step.visited;
+  noteStep(step.dir, e.oldURL ? new URL(e.oldURL).hash || '#/' : null); // which screen change plays (transitions.js)
 });
 
 export function goBack(fallback = '#/') {
@@ -425,6 +429,7 @@ let announcedPath = null;
 async function render() {
   document.documentElement.classList.remove('pill-hidden'); // every page starts with the pill shown
   const token = ++renderToken;
+  const change = beginPageChange(main); // before the old page's cleanup: it may empty the page
   // A dialog left open by the browser's Back button would cover the next page.
   for (const d of document.querySelectorAll('dialog[open]')) d.close('cancel');
   if (cleanup) {
@@ -459,8 +464,19 @@ async function render() {
   currentNav = typeof route.nav === 'function' ? route.nav(params) : route.nav || null;
   highlightNav();
 
-  clear(main);
-  main.append(spinner());
+  // A change with a transition keeps a still copy of the old page up while the next loads (a spinner only if that
+  // takes a while); otherwise the spinner shows at once, as before.
+  if (route.fullscreen || route.picker || !change.hold()) {
+    change.end();
+    clear(main);
+    main.append(spinner());
+  } else {
+    change.later(() => {
+      if (token !== renderToken) return;
+      clear(main);
+      main.append(spinner());
+    });
+  }
   routeStart();
   try {
     // v0.26: a Screen's data starts now, beside its modules; a failure is reported by mountView, not left unhandled.
@@ -475,8 +491,12 @@ async function render() {
       return;
     }
     cleanup = leave;
-    clear(main);
-    main.append(container);
+    // v0.28: with a screen change the swap happens a frame later; focus and scrolling below follow the new page.
+    await change.swap(() => {
+      clear(main);
+      main.append(container);
+    });
+    if (token !== renderToken) return;
     routeEnd();
     // A new page is news to a screen reader: its name, once per address (an in-page refresh says nothing — the
     // action that caused it speaks for itself; the full-screen player says its own things).
@@ -494,6 +514,7 @@ async function render() {
       if (isKeyboardMode()) focusFirst(main);
       else main.focus({ preventScroll: true });
     }
+    change.finish();
   } catch (err) {
     if (token !== renderToken) return;
     // Reloading or leaving the page cancels requests that are still loading ("Failed to fetch").
@@ -501,6 +522,7 @@ async function render() {
     if (err instanceof TypeError) await new Promise((resolve) => setTimeout(resolve, 400));
     if (token !== renderToken) return;
     console.error(err);
+    change.end();
     routeEnd();
     clear(main);
     main.append(
@@ -641,7 +663,9 @@ async function boot() {
   ensureLiveRegions();
   main = document.getElementById('main');
   navEl = document.getElementById('nav');
+  applyMotion();
   initNavigation({ onBack: onBackKey });
+  initCapture();
   document.body.prepend(environmentLayer, backdropLayer);
   // Themes can give the header a solid background once the page scrolls under it.
   window.addEventListener('scroll', () => document.documentElement.classList.toggle('scrolled', window.scrollY > 8), { passive: true });

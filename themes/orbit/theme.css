@@ -157,7 +157,7 @@ main:focus, main:focus-visible { outline: none; box-shadow: none; }
   box-shadow: inset 0 0 0 1px var(--glass-edge);
   -webkit-backdrop-filter: var(--blur-clear);
   backdrop-filter: var(--blur-clear);
-  transition: transform var(--select), background-color var(--select), color var(--select), box-shadow var(--select);
+  transition: transform var(--select), background-color var(--select), color var(--select);
 }
 .btn .icon { width: max(16px, calc(26 * var(--px))); height: max(16px, calc(26 * var(--px))); }
 .btn:hover { background: rgba(255, 255, 255, 0.24); }
@@ -285,10 +285,10 @@ input::placeholder, textarea::placeholder { color: rgba(255, 255, 255, 0.5); }
 .art, .card-art { border-radius: var(--radius); }
 .art { background: rgba(255, 255, 255, 0.06); }
 .card { gap: 0; }
-.card-art { box-shadow: 0 calc(14 * var(--px)) calc(30 * var(--px)) rgba(0, 0, 0, 0.45); transition: transform var(--select), box-shadow var(--select); }
-.card:hover .card-art { transform: scale(1.04); box-shadow: var(--lift); }
+.card-art { box-shadow: 0 calc(14 * var(--px)) calc(30 * var(--px)) rgba(0, 0, 0, 0.45); transition: transform var(--select); }
+@media (hover: hover) and (pointer: fine) { .card:hover .card-art { transform: scale(1.04); box-shadow: var(--lift); } }
 .card:focus-visible { box-shadow: none; }
-.card:focus-visible .card-art, html.kbd .card:focus-visible .card-art { transform: scale(var(--grow-card)); box-shadow: var(--ring), var(--lift); }
+.card:focus-visible .card-art, html.kbd .card:focus-visible .card-art { transform: scale(var(--grow-card)); box-shadow: var(--ring), var(--lift); transition: transform var(--dur-focus) var(--ease-settle); }
 .card-meta { gap: calc(4 * var(--px)); padding: calc(14 * var(--px)) 0 0; }
 .card-title { font-size: var(--t-card); font-weight: 600; }
 .card-sub { font-size: var(--t-caption); color: var(--text-tinted); }
@@ -299,7 +299,7 @@ input::placeholder, textarea::placeholder { color: rgba(255, 255, 255, 0.5); }
 .badge { background: var(--focus-bg); color: var(--focus-fg); }
 /* Nothing in a scrolling row is blurred: glass there would be redrawn on every scroll. */
 .badge-watched { background: rgba(255, 255, 255, 0.9); color: var(--focus-fg); -webkit-backdrop-filter: none; backdrop-filter: none; }
-.card-play { background: color-mix(in srgb, var(--bg) 55%, transparent); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.card-play { background: color-mix(in srgb, var(--bg) 55%, transparent); -webkit-backdrop-filter: none; backdrop-filter: none; --play-blur: none; }
 .card-tag { border-radius: var(--radius-sm); background: color-mix(in srgb, var(--bg) 70%, transparent); font-size: var(--t-caption); }
 
 /* ---------- Dialogs and the "…" menu: tinted glass ---------- */
@@ -406,7 +406,7 @@ input::placeholder, textarea::placeholder { color: rgba(255, 255, 255, 0.5); }
 .menu-action { color: var(--text); font-weight: 600; }
 .menu-sep { height: 1px; margin: calc(12 * var(--px)) calc(22 * var(--px)); background: rgba(255, 255, 255, 0.12); flex: none; }
 /* Skip intro (and the "Skipped intro · Watch it" notice): a white pill; the thin line shows how much intro is left. */
-.skip-intro { min-height: max(44px, calc(66 * var(--px))); padding: 0 calc(34 * var(--px)); background: var(--focus-bg); color: var(--focus-fg); font-size: var(--t-body); font-weight: 600; box-shadow: var(--lift); transition: transform var(--select), box-shadow var(--select); }
+.skip-intro { min-height: max(44px, calc(66 * var(--px))); padding: 0 calc(34 * var(--px)); background: var(--focus-bg); color: var(--focus-fg); font-size: var(--t-body); font-weight: 600; box-shadow: var(--lift); transition: transform var(--select); }
 .skip-intro:hover { background: var(--focus-bg); }
 .skip-intro:focus-visible { outline: none; transform: scale(var(--grow-btn)); box-shadow: var(--ring), var(--lift); }
 .skip-intro-bar { height: max(3px, calc(4 * var(--px))); background: var(--accent); }
@@ -473,18 +473,18 @@ input::placeholder, textarea::placeholder { color: rgba(255, 255, 255, 0.5); }
 .panel .panel { background: rgba(255, 255, 255, 0.05); }
 .panel > h2 { font-size: var(--t-section); margin-bottom: calc(22 * var(--px)); }
 .theme-grid { grid-template-columns: repeat(auto-fill, minmax(max(130px, calc(230 * var(--px))), 1fr)); gap: calc(18 * var(--px)); }
-.theme-card { position: relative; padding: calc(14 * var(--px)); gap: calc(6 * var(--px)); border: 0; border-radius: var(--radius-lg); background: rgba(255, 255, 255, 0.06); box-shadow: inset 0 0 0 1px var(--glass-panel-edge); transition: transform var(--select), box-shadow var(--select); }
+.theme-card { position: relative; padding: calc(14 * var(--px)); gap: calc(6 * var(--px)); border: 0; border-radius: var(--radius-lg); background: rgba(255, 255, 255, 0.06); box-shadow: inset 0 0 0 1px var(--glass-panel-edge); transition: transform var(--select); }
 /* The theme in use: a white edge and an accent dot (the accent never marks the selection itself). */
 .theme-card[aria-checked="true"] { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.7); }
 /* Connected servers: glass rows and pills like the rest of Orbit's settings. */
 .server-row { padding: calc(16 * var(--px)) calc(20 * var(--px)); border-radius: var(--radius-lg); background: rgba(255, 255, 255, 0.06); box-shadow: inset 0 0 0 1px var(--glass-panel-edge); }
 .server-info h3 { font-size: var(--t-body); font-weight: 600; }
 .server-state { font-size: var(--t-caption); }
-.kind-pills .pill { border: 0; min-height: max(44px, calc(56 * var(--px))); padding: 0 calc(26 * var(--px)); font-size: var(--t-body); background: var(--glass-clear); box-shadow: inset 0 0 0 1px var(--glass-edge); transition: transform var(--select), box-shadow var(--select); }
+.kind-pills .pill { border: 0; min-height: max(44px, calc(56 * var(--px))); padding: 0 calc(26 * var(--px)); font-size: var(--t-body); background: var(--glass-clear); box-shadow: inset 0 0 0 1px var(--glass-edge); transition: transform var(--select); }
 .kind-pills .pill[aria-checked="true"] { background: rgba(255, 255, 255, 0.14); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.7); }
 .kind-pills .pill:focus-visible { box-shadow: var(--ring); }
 .plex-code { font-size: max(2.6rem, calc(84 * var(--px))); }
-.plex-server { border: 0; min-height: max(52px, calc(72 * var(--px))); padding: 0 calc(22 * var(--px)); border-radius: var(--radius); background: var(--glass-clear); box-shadow: inset 0 0 0 1px var(--glass-edge); font-size: var(--t-body); transition: transform var(--select), box-shadow var(--select); }
+.plex-server { border: 0; min-height: max(52px, calc(72 * var(--px))); padding: 0 calc(22 * var(--px)); border-radius: var(--radius); background: var(--glass-clear); box-shadow: inset 0 0 0 1px var(--glass-edge); font-size: var(--t-body); transition: transform var(--select); }
 .plex-server[aria-checked="true"] { background: rgba(255, 255, 255, 0.14); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.7); }
 .plex-server:focus-visible { box-shadow: var(--ring); }
 .theme-card[aria-checked="true"]::after { content: ""; position: absolute; top: calc(22 * var(--px)); right: calc(22 * var(--px)); width: calc(12 * var(--px)); height: calc(12 * var(--px)); border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg) 60%, transparent); }
@@ -538,18 +538,18 @@ input::placeholder, textarea::placeholder { color: rgba(255, 255, 255, 0.5); }
 .search-recent-link:focus-visible { color: var(--focus-fg); background: var(--focus-bg); box-shadow: none; outline: none; }
 .search-recent-link:focus-visible .icon { color: inherit; }
 .search-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(max(140px, calc(240 * var(--px))), 1fr)); gap: calc(16 * var(--px)); }
-.search-tile { display: flex; align-items: center; gap: calc(14 * var(--px)); min-height: calc(96 * var(--px)); min-width: 0; padding: calc(18 * var(--px)) calc(22 * var(--px)); border-radius: var(--radius); background: var(--glass-clear); box-shadow: inset 0 0 0 1px var(--glass-edge); color: var(--text); text-decoration: none; font-size: var(--t-body); font-weight: 600; transition: transform var(--select), box-shadow var(--select); }
+.search-tile { display: flex; align-items: center; gap: calc(14 * var(--px)); min-height: calc(96 * var(--px)); min-width: 0; padding: calc(18 * var(--px)) calc(22 * var(--px)); border-radius: var(--radius); background: var(--glass-clear); box-shadow: inset 0 0 0 1px var(--glass-edge); color: var(--text); text-decoration: none; font-size: var(--t-body); font-weight: 600; transition: transform var(--select); }
 .search-tile span { min-width: 0; overflow-wrap: break-word; } /* a word breaks only when it can't fit at all */
 .search-tile .icon { flex: none; color: var(--accent); }
-.search-tile:hover { transform: scale(1.03); }
+@media (hover: hover) and (pointer: fine) { .search-tile:hover { transform: scale(1.03); } }
 .search-tile:focus-visible, html.kbd .search-tile:focus-visible { color: var(--focus-fg); background: var(--focus-bg); transform: scale(var(--grow-btn)); box-shadow: var(--lift); outline: none; }
 .search-tile:focus-visible .icon { color: inherit; }
 @media not all and (min-width: 1000px) and (orientation: landscape) {
   .search-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .search-tile { min-height: 72px; padding: 14px 16px; }
 }
-.addon-tile { padding: calc(26 * var(--px)); border: 0; border-radius: var(--radius-lg); background: var(--glass-panel); box-shadow: inset 0 0 0 1px var(--glass-panel-edge); transition: transform var(--select), box-shadow var(--select); }
-.addon-tile:hover { transform: scale(1.03); }
+.addon-tile { padding: calc(26 * var(--px)); border: 0; border-radius: var(--radius-lg); background: var(--glass-panel); box-shadow: inset 0 0 0 1px var(--glass-panel-edge); transition: transform var(--select); }
+@media (hover: hover) and (pointer: fine) { .addon-tile:hover { transform: scale(1.03); } }
 .addon-tile:focus-visible, html.kbd .addon-tile:focus-visible { transform: scale(var(--grow-btn)); box-shadow: var(--ring), var(--lift); }
 .addon-icon { width: calc(72 * var(--px)); height: calc(72 * var(--px)); border-radius: 50%; background: rgba(255, 255, 255, 0.1); color: var(--accent); }
 .load-more { padding: calc(36 * var(--px)); }
@@ -560,7 +560,7 @@ input::placeholder, textarea::placeholder { color: rgba(255, 255, 255, 0.5); }
 .picker-page h1 { font-size: calc(60 * var(--px)); letter-spacing: -0.04em; }
 .picker-grid { gap: calc(64 * var(--px)); }
 .picker-profile { gap: calc(22 * var(--px)); color: var(--text-soft); }
-.picker-profile .avatar { width: max(96px, calc(180 * var(--px))); height: max(96px, calc(180 * var(--px))); border-radius: 50%; font-size: max(40px, calc(76 * var(--px))); box-shadow: 0 calc(20 * var(--px)) calc(40 * var(--px)) rgba(0, 0, 0, 0.45); transition: transform var(--select), box-shadow var(--select); }
+.picker-profile .avatar { width: max(96px, calc(180 * var(--px))); height: max(96px, calc(180 * var(--px))); border-radius: 50%; font-size: max(40px, calc(76 * var(--px))); box-shadow: 0 calc(20 * var(--px)) calc(40 * var(--px)) rgba(0, 0, 0, 0.45); transition: transform var(--select); }
 .picker-profile:hover .avatar, .picker-profile:focus-visible .avatar { transform: scale(var(--grow-avatar)); box-shadow: 0 0 0 calc(6 * var(--px)) var(--bg), 0 0 0 calc(11 * var(--px)) var(--focus-bg), 0 calc(30 * var(--px)) calc(60 * var(--px)) rgba(0, 0, 0, 0.6); }
 .picker-profile:focus-visible { color: var(--text); box-shadow: none; }
 .picker-name { font-size: max(16px, calc(26 * var(--px))); font-weight: 600; }
@@ -655,7 +655,7 @@ body[data-layout="orbit"] .remote-sub, body[data-layout="orbit"] .remote-status 
 .guide-ruler span { color: var(--text-tinted, var(--text)); }
 
 /* ---------- Live TV's glass cards (v0.25.0) ---------- */
-.live-wall .live-card { background: var(--tint, var(--glass-clear)); color: #fff; box-shadow: inset 0 0 0 1px var(--glass-edge); transition: transform var(--select), box-shadow var(--select); }
+.live-wall .live-card { background: var(--tint, var(--glass-clear)); color: #fff; box-shadow: inset 0 0 0 1px var(--glass-edge); transition: transform var(--select); }
 .live-card-shade { background: linear-gradient(to top, rgba(0, 0, 0, 0.86) 0%, rgba(0, 0, 0, 0.62) 42%, rgba(0, 0, 0, 0) 72%); pointer-events: none; }
 .live-card-art.is-logo .live-logo { background: rgba(255, 255, 255, 0.12); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18); border-radius: calc(14 * var(--px)); }
 .live-card-art.is-logo .live-initials { font-size: calc(34 * var(--px)); }

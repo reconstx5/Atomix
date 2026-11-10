@@ -82,7 +82,7 @@ body[data-layout="top"] .nav-links .nav-link .icon { display: none; }
 .nav-clock-time { font-size: 1.31rem; font-weight: 600; }
 
 /* ---------- Buttons: pills; the main one carries the title's colour ---------- */
-.btn { border-radius: 999px; font-weight: 700; font-size: 1rem; --btn-bg: rgba(238, 241, 244, 0.12); transition: background-color 0.2s, color 0.2s, transform 0.15s var(--ease), box-shadow 0.2s; }
+.btn { border-radius: 999px; font-weight: 700; font-size: 1rem; --btn-bg: rgba(238, 241, 244, 0.12); transition: background-color 0.2s, color 0.2s, transform 0.15s var(--ease); }
 .btn:hover { background: rgba(238, 241, 244, 0.2); }
 .btn-primary { --btn-bg: var(--tint); --btn-fg: var(--accent-text); }
 .btn-primary:hover { background: color-mix(in srgb, var(--tint) 82%, white); }
@@ -119,12 +119,15 @@ body[data-layout="top"] .nav-links .nav-link .icon { display: none; }
 }
 .art, .card-art { border-radius: var(--radius); }
 .art::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); pointer-events: none; }
-.card-art { transition: transform 0.25s var(--ease), box-shadow 0.25s; }
-.card:hover .card-art, .card:focus-visible .card-art { transform: scale(1.05); box-shadow: 0 0 0 3px var(--focus), 0 0 34px 4px var(--halo), 0 14px 30px rgba(0, 0, 0, 0.55); }
+.card-art { transition: transform var(--dur-fast) var(--ease-out); } /* v0.28: the ring and glow appear at once; the growth settles in */
+.card:focus-visible .card-art { transform: scale(1.05); box-shadow: 0 0 0 3px var(--focus), 0 0 34px 4px var(--halo), 0 14px 30px rgba(0, 0, 0, 0.55); transition: transform var(--dur-focus) var(--ease-settle); }
+@media (hover: hover) and (pointer: fine) {
+  .card:hover .card-art { transform: scale(1.05); box-shadow: 0 0 0 3px var(--focus), 0 0 34px 4px var(--halo), 0 14px 30px rgba(0, 0, 0, 0.55); transition: transform var(--dur-focus) var(--ease-settle); }
+}
 html.kbd .card:focus-visible .card-art { transform: scale(1.07); }
 .card-title { font-weight: 700; font-size: 1rem; }
 .card-sub { font-size: 0.84rem; }
-.card-play { background: rgba(0, 0, 0, 0.55); backdrop-filter: none; }
+.card-play { background: rgba(0, 0, 0, 0.55); backdrop-filter: none; --play-blur: none; }
 .badge { border-radius: 4px; }
 .badge-watched { color: var(--tint); }
 .progress { left: 0; right: 0; bottom: 0; height: 4px; border-radius: 0 0 var(--radius) var(--radius); background: rgba(0, 0, 0, 0.55); }

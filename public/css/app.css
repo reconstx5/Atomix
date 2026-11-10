@@ -31,6 +31,11 @@
   /* v0.15.0: the scales the stylesheet is written against (new and edited rules use these; old values stand). */
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px; --space-7: 48px;
   --dur-fast: 0.15s; --dur: 0.22s; --dur-slow: 0.35s;
+  /* v0.28 "Capture": the motion every theme shares. --ease-settle is replaced by a spring (motion-rules.js) where the
+     browser has linear(); this curve, with a hint of overshoot, stands in elsewhere. Scale only: fades never overshoot. */
+  --ease-out: cubic-bezier(0.05, 0.7, 0.1, 1); --ease-in: cubic-bezier(0.3, 0, 1, 1); --ease-move: cubic-bezier(0.2, 0, 0, 1);
+  --ease-settle: cubic-bezier(0.2, 0.9, 0.3, 1.04);
+  --dur-focus: 280ms;
   --z-player: 60; --z-mini: 38; --z-pill: 39; --z-header: 40; --z-phone-nav: 41; --z-skip: 100; --z-toast: 200; --z-splash: 300;
   --focus-ring: 3px solid var(--accent);
   --pill: 999px;
@@ -160,8 +165,8 @@ body[data-layout="side"] { --header-h: 0px; }
 }
 
 main { min-height: 100vh; }
-.view { padding: 0 0 64px; animation: fade-in 0.25s var(--ease); }
-@keyframes fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.view { padding: 0 0 64px; animation: fade-in var(--dur-fast) var(--ease-out); }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } } /* v0.28: a flat fade; travel belongs to the screen change */
 
 /* ---------- Buttons & form controls ---------- */
 .btn {
@@ -171,7 +176,7 @@ main { min-height: 100vh; }
   min-height: 44px; padding: 10px 18px; border-radius: var(--radius);
   border: 1px solid transparent; background: var(--btn-bg); color: var(--btn-fg);
   font: inherit; font-weight: 650; font-size: 0.95rem; text-decoration: none; cursor: pointer; white-space: nowrap;
-  transition: background-color var(--dur-fast), transform 0.12s var(--ease), box-shadow var(--dur-fast);
+  transition: background-color var(--dur-fast), transform 0.12s var(--ease); /* v0.28: the focus ring (a shadow) appears at once */
 }
 .btn:hover { background: color-mix(in srgb, var(--btn-bg) 82%, var(--text)); }
 .btn:active { transform: scale(0.97); }
@@ -263,8 +268,12 @@ select:disabled, input:disabled { opacity: 0.6; }
 
 .card { display: flex; flex-direction: column; gap: 8px; text-decoration: none; color: inherit; border-radius: var(--radius); min-width: 0; }
 .card:focus-visible { outline: none; }
-.card-art { position: relative; border-radius: var(--radius); transition: transform var(--dur) var(--ease), box-shadow var(--dur); }
-.card:hover .card-art, .card:focus-visible .card-art { transform: translateY(-3px) scale(1.035); box-shadow: var(--shadow); }
+.card-art { position: relative; border-radius: var(--radius); transition: transform var(--dur-fast) var(--ease-out); }
+/* v0.28: the ring and shadow appear at once (the cue); only the growth tweens, settling in on the signature curve. */
+.card:focus-visible .card-art { transform: translateY(-3px) scale(1.035); box-shadow: var(--shadow); transition: transform var(--dur-focus) var(--ease-settle); }
+@media (hover: hover) and (pointer: fine) {
+  .card:hover .card-art { transform: translateY(-3px) scale(1.035); box-shadow: var(--shadow); transition: transform var(--dur-focus) var(--ease-settle); }
+}
 .card:focus-visible .card-art { box-shadow: 0 0 0 3px var(--accent), var(--shadow); }
 .card-meta { display: flex; flex-direction: column; min-width: 0; padding: 0 2px; }
 .card-title { font-weight: 650; font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -272,9 +281,13 @@ select:disabled, input:disabled { opacity: 0.6; }
 .card-play {
   position: absolute; inset: 0; margin: auto; width: 52px; height: 52px; border-radius: 50%;
   display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 55%, transparent); color: #fff;
-  backdrop-filter: blur(6px); opacity: 0; transform: scale(0.85); transition: opacity 0.2s, transform 0.2s var(--ease);
+  opacity: 0; transform: scale(0.85); transition: opacity 0.2s, transform 0.2s var(--ease-out); --play-blur: blur(6px);
 }
-.card:hover .card-play, .card:focus-visible .card-play, .episode-thumb:hover .card-play, .episode-thumb:focus-visible .card-play { opacity: 1; transform: none; }
+/* The blur only while it shows (v0.28: a hidden blur on every card still costs). */
+.card:focus-visible .card-play, .episode-thumb:focus-visible .card-play { opacity: 1; transform: none; backdrop-filter: var(--play-blur); }
+@media (hover: hover) and (pointer: fine) {
+  .card:hover .card-play, .episode-thumb:hover .card-play { opacity: 1; transform: none; backdrop-filter: var(--play-blur); }
+}
 .badge {
   position: absolute; top: 8px; right: 8px; min-width: 24px; height: 24px; padding: 0 7px; border-radius: var(--pill);
   display: inline-grid; place-items: center; font-size: 0.75rem; font-weight: 800;
@@ -288,7 +301,7 @@ select:disabled, input:disabled { opacity: 0.6; }
 .rows { display: flex; flex-direction: column; gap: 26px; padding-top: 18px; }
 .row-title { padding: 0 var(--gutter); margin-bottom: 4px; font-size: 1.15rem; }
 .row-title-link { text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
-.row-title-link .icon { opacity: 0; transform: translateX(-4px); transition: 0.2s; color: var(--accent); }
+.row-title-link .icon { opacity: 0; transform: translateX(-4px); transition: opacity 0.2s, transform 0.2s var(--ease-out); color: var(--accent); }
 .row-title-link:hover .icon, .row-title-link:focus-visible .icon { opacity: 1; transform: none; }
 .row-body { position: relative; }
 .row-scroller {
@@ -526,7 +539,7 @@ html[data-layout="orbit"] .row-actions-compact, body[data-layout="orbit"] .row-a
 .toast { pointer-events: auto; padding: 12px 18px; border-radius: var(--radius); background: var(--text); color: var(--bg); font-weight: 650; box-shadow: var(--shadow); animation: toast-in 0.25s var(--ease); }
 .toast-error { background: var(--danger); color: #2a0007; } /* dark ink: white on the danger red was 3:1 */
 .toast-success { background: var(--success); color: #04150d; }
-.toast.leaving { opacity: 0; transform: translateY(8px); transition: 0.3s; }
+.toast.leaving { opacity: 0; transform: translateY(8px); transition: opacity 0.2s var(--ease-in), transform 0.2s var(--ease-in); }
 @keyframes toast-in { from { opacity: 0; transform: translateY(10px); } }
 @media (max-width: 720px) { .toasts { bottom: 90px; } }
 
@@ -667,11 +680,23 @@ input[type="range"].range, .volume, .mini-seek-range, .mini-volume, .remote-volu
 html.kbd .card:focus-visible .card-art { transform: scale(1.07); }
 html.kbd .btn:focus-visible { box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px var(--accent); outline: none; }
 
-/* ---------- Reduced motion ---------- */
+/* ---------- How much moves (v0.28): html[data-motion] = full | reduce | none, set by motion.js ----------
+   reduce: fades and colour changes stay (they carry the feedback), nothing grows, slides or spins, nothing loops.
+   none (old TV browsers): nothing animates; the focus ring simply appears.
+   Before the script runs, the system setting alone still holds everything back. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+  html:not([data-motion]) *, html:not([data-motion]) *::before, html:not([data-motion]) *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }
-html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+html[data-motion="none"] *, html[data-motion="none"] *::before, html[data-motion="none"] *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+html[data-motion="reduce"] *, html[data-motion="reduce"] *::before, html[data-motion="reduce"] *::after {
+  transition-property: opacity, color, background-color, border-color, outline-color, fill, stroke !important;
+  animation-iteration-count: 1 !important; scroll-behavior: auto !important;
+}
+/* Entrances that travel become plain fades. */
+html[data-motion="reduce"] :is(.dialog[open], .toast, .spot-inner.spot-fade) { animation-name: fade-in !important; }
+html[data-motion="reduce"] .spinner { animation: none !important; }
+/* A held arrow key: nothing tweens, so the focus keeps up with the remote. */
+html.nav-held *, html.nav-held *::before, html.nav-held *::after { transition-duration: 0s !important; }
 
 /* ---------- Profiles ---------- */
 .avatar {
@@ -690,7 +715,7 @@ body[data-layout="top"] .nav-profile .nav-label { display: none; }
 .picker-page h1 { font-size: clamp(2rem, 1.4rem + 2.5vw, 3.2rem); margin: 0; }
 .picker-grid { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: clamp(16px, 3vw, 36px); max-width: 980px; }
 .picker-profile { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 10px; border: 0; border-radius: var(--radius-lg); background: transparent; color: var(--text-dim); font: inherit; cursor: pointer; transition: color var(--dur-fast); }
-.picker-profile .avatar { transition: transform 0.2s var(--ease), box-shadow 0.2s; }
+.picker-profile .avatar { transition: transform 0.2s var(--ease); } /* v0.28: the ring appears at once */
 .picker-profile:hover, .picker-profile:focus-visible { color: var(--text); outline: none; }
 .picker-profile:hover .avatar, .picker-profile:focus-visible .avatar { transform: scale(1.06); box-shadow: 0 0 0 4px var(--bg), 0 0 0 7px var(--text); }
 .picker-name { font-weight: 700; font-size: 1.1rem; }
@@ -945,8 +970,10 @@ html.has-mini .home-view:not(.no-spotlight) { margin-bottom: 0; }
 
 /* ---------- Ambient tint: the colour the current artwork casts (set by backdrop.js) ---------- */
 @property --tint { syntax: "<color>"; inherits: true; initial-value: #7cc7e8; }
-:root { --tint: var(--tint-default, #7cc7e8); transition: --tint 1.1s var(--ease); }
-html.reduce-motion:root { transition: none; }
+/* v0.28: the colour change restyles the whole page on every frame it runs, so it is short, and only at full motion
+   (it starts once the remote rests: backdrop.js waits for that). */
+:root { --tint: var(--tint-default, #7cc7e8); }
+html[data-motion="full"]:root { transition: --tint 400ms var(--ease-move); }
 
 /* ---------- Loading: the mark's two orbits, then its nucleus, light up in turn ---------- */
 .loader { display: inline-grid; color: var(--tint, var(--accent)); }
@@ -1600,3 +1627,39 @@ html.has-mini .cast-pill { bottom: calc(var(--mini-h) + 14px); }
 .comic-view[data-fit="width"] .comic-stage.two .comic-page { width: 50%; }
 .comic-view[data-fit="height"] .comic-page { height: 100%; max-width: none; width: auto; }
 .comic-view.is-zoomed .comic-holder { cursor: grab; }
+
+/* ---------- Capture (v0.28): the focus orbit and the press ring (transitions.js) ----------
+   Drawn once after the remote rests on a card, over the ring that is already there; full motion only. */
+.capture-arc { position: absolute; inset: -5px; width: calc(100% + 10px); height: calc(100% + 10px); overflow: visible; pointer-events: none; z-index: 3; }
+.capture-arc rect {
+  fill: none; stroke: var(--tint, var(--accent)); stroke-width: 2; stroke-linecap: round; rx: calc(var(--radius) + 5px);
+  stroke-dasharray: 1; stroke-dashoffset: 1;
+  animation: capture-draw 360ms var(--ease-out) forwards, capture-fade 240ms var(--ease-in) 460ms forwards;
+}
+@keyframes capture-draw { to { stroke-dashoffset: 0; } }
+@keyframes capture-fade { to { opacity: 0; } }
+.press-ring { position: absolute; inset: 0; border-radius: inherit; box-shadow: 0 0 0 2px var(--tint, var(--accent)); pointer-events: none; z-index: 3; animation: press-ring 320ms var(--ease-out) forwards; }
+@keyframes press-ring { from { opacity: 0.9; transform: scale(1); } to { opacity: 0; transform: scale(1.12); } }
+
+/* ---------- Screen changes (v0.28, transitions.js) ----------
+   open: the next page comes toward you and the poster travels; back: the reverse; section: a flat fade.
+   The page is its own layer so the header, the mini player and toasts stay put above it. */
+html.vt-hold .view, html.vt .view { animation: none !important; }
+html.vt main { view-transition-name: page; }
+html.vt .app-header { view-transition-name: chrome; }
+html.vt .mini { view-transition-name: mini; }
+html.vt .toasts { view-transition-name: toasts; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: 200ms; }
+html.vt-section::view-transition-old(page) { animation: vt-out 120ms var(--ease-in) both; }
+html.vt-section::view-transition-new(page) { animation: vt-in 180ms var(--ease-out) both; }
+html.vt-open::view-transition-old(page) { animation: vt-out 150ms var(--ease-in) both; }
+html.vt-open::view-transition-new(page) { animation: vt-come 280ms var(--ease-out) both; }
+html.vt-back::view-transition-old(page) { animation: vt-go 200ms var(--ease-in) both; }
+html.vt-back::view-transition-new(page) { animation: vt-return 260ms var(--ease-out) both; }
+::view-transition-group(poster) { animation-duration: 300ms; animation-timing-function: var(--ease-move); }
+::view-transition-old(poster), ::view-transition-new(poster) { height: 100%; object-fit: cover; }
+@keyframes vt-out { to { opacity: 0; } }
+@keyframes vt-in { from { opacity: 0; } }
+@keyframes vt-come { from { opacity: 0; transform: scale(0.96); } }
+@keyframes vt-go { to { opacity: 0; transform: scale(0.96); } }
+@keyframes vt-return { from { opacity: 0; transform: scale(1.03); } }

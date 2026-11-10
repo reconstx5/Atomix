@@ -205,7 +205,7 @@ async function profileTab(el) {
       'Appearance',
       themeGrid,
       h('div', { class: 'inline-fields' }, field('Accent colour', accent, isOrbit() ? 'Used when a title has no artwork to take its colour from.' : undefined), resetAccent),
-      toggle('Reduce motion', prefs.reduceMotion, (v) => save(() => updatePrefs({ reduceMotion: v })), { hint: 'Nothing grows or slides.' }),
+      toggle('Reduce motion', prefs.reduceMotion, (v) => save(() => updatePrefs({ reduceMotion: v })), { hint: 'Nothing grows, slides or zooms. Fades stay, so you can still see what changed.' }),
       toggle('Reduce effects', prefs.reduceEffects, (v) => save(() => updatePrefs({ reduceEffects: v })), { hint: 'Solid panels instead of glass and blur. Try this if your TV feels slow.' }),
     ),
     section(

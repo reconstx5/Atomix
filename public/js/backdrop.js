@@ -142,7 +142,8 @@ export function followFocus(root, lookup, onItem = (item) => setBackdrop(artFor(
       onItem(item);
     }, delay);
   };
-  root.addEventListener('focusin', (e) => pick(e.target.closest?.(selector), 120));
+  // v0.28: the picture (and the colour it casts) waits until the remote rests, so holding an arrow changes nothing.
+  root.addEventListener('focusin', (e) => pick(e.target.closest?.(selector), 200));
   // The mouse counts only when it moves: cards redrawn or scrolled under a resting pointer aren't a choice.
   root.addEventListener('pointermove', (e) => {
     if (e.pointerType === 'mouse' && (e.movementX || e.movementY)) pick(e.target.closest?.(selector), 260, true);

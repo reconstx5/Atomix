@@ -54,8 +54,7 @@ body[data-layout="orbit"] { --gutter: calc(96 * var(--px)); --header-h: 0px; }
   html.has-cast body[data-layout="orbit"] .sticky-actions { bottom: calc(150 * var(--px)); }
   html.has-mini.has-cast body[data-layout="orbit"] .sticky-actions { bottom: calc(262 * var(--px)); }
 }
-body[data-layout="orbit"][data-view="page"] .view { padding: calc(128 * var(--px)) 0 calc(64 * var(--px)); animation: orbit-in 240ms var(--ease); }
-@keyframes orbit-in { from { opacity: 0; transform: translateX(calc(24 * var(--px))); } to { opacity: 1; transform: none; } }
+body[data-layout="orbit"][data-view="page"] .view { padding: calc(128 * var(--px)) 0 calc(64 * var(--px)); animation: fade-in var(--dur-fast) var(--ease-out); } /* v0.28: travel belongs to the screen change */
 
 /* ---------- The environment: the artwork behind the sign-in and profile screens ---------- */
 html[data-layout="orbit"] .environment { display: block; position: fixed; inset: 0; z-index: -2; overflow: hidden; pointer-events: none; }
