@@ -21,14 +21,26 @@ const themesFor = (dflt) => (only.length ? only : dflt);
 const artSvg = (w, h, hue) => `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="hsl(${hue} 60% 40%)"/><circle cx="50%" cy="40%" r="${Math.min(w, h) / 4}" fill="hsl(${hue + 40} 70% 60%)"/></svg>`;
 const CLEAR = { oled: null, contrast: null, textScale: null, glass: null, reduceEffects: null, pinnedLibraries: null }; // PATCH prefs merges; null deletes
 
+/** The profile's theme and reduceMotion as they are now (null when unset), read before a check changes them. */
+async function savedPrefs() {
+  try {
+    const login = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'dallas', password: 'atomix-dev-1' }) });
+    const cookie = (login.headers.getSetCookie?.() || []).map((c) => c.split(';')[0]).join('; ');
+    const me = await (await fetch(`${BASE}/api/me`, { headers: { cookie } })).json();
+    const p = me.profile?.prefs || {};
+    return { theme: p.theme ?? null, reduceMotion: p.reduceMotion ?? null };
+  } catch { return {}; }
+}
+
 /** Opens a signed-in page for `theme` with clean appearance prefs and stubbed artwork (posters and backdrops for every title). */
 async function session(theme, { width = 1920, height = 1080 } = {}) {
+  const was = await savedPrefs(); // the profile's own theme and motion setting, put back when the check closes
   const s = await open({ width, height, theme, serviceWorkers: 'block' }) /* the app's service worker would answer past page.route */;
   await s.context.request.patch(`${BASE}/api/me`, { data: { prefs: { theme, reduceMotion: false, ...CLEAR } } });
   const page = s.page;
   const closeAll = s.browser.close.bind(s.browser);
   s.browser.close = async () => { // leave the profile's appearance prefs clean, as modes-check does
-    await s.context.request.patch(`${BASE}/api/me`, { data: { prefs: { ...CLEAR } } }).catch(() => {});
+    await s.context.request.patch(`${BASE}/api/me`, { data: { prefs: { ...CLEAR, ...was } } }).catch(() => {});
     await closeAll();
   };
   const notFound = [];
@@ -221,9 +233,8 @@ const CHECKS = {
         const edge = (o) => (o.textShadow && o.textShadow !== 'none') || (o.filter && o.filter !== 'none');
         check(`player-chrome ${theme}: the clock has a text-shadow or filter`, edge(info.clock), info.clock.textShadow);
         check(`player-chrome ${theme}: the top-bar icons have a text-shadow or filter`, info.icons.length > 0 && info.icons.every(edge), `${info.icons.length} icons`);
-        // Pixels: the text colour is the brightest pixel in the clock's box; the frame behind it is the median pixel of the same
-        // box as the viewer sees it, shadow halo included (the halo is what lifts the clock over a white frame). The text-free
-        // picture (b.png) is only kept with SHOTS, to show the bare frame.
+        // Pixels: the text colour is the brightest pixel in the clock's box (t.png); the frame behind it is the median pixel of the
+        // same box with the text and its shadow switched off (b.png): the white frame under the top gradient, no halo to flatter it.
         const clip = { x: Math.max(0, info.box.x - 4), y: Math.max(0, info.box.y - 4), width: info.box.width + 8, height: info.box.height + 8 };
         const withText = await page.screenshot({ clip });
         await page.addStyleTag({ content: '.player-clock { color: transparent !important; text-shadow: none !important; }' });
@@ -238,15 +249,15 @@ const CHECKS = {
           '    f = lambda v: (v/255/12.92) if v/255 <= 0.04045 else (((v/255)+0.055)/1.055)**2.4',
           '    return 0.2126*f(c[0]) + 0.7152*f(c[1]) + 0.0722*f(c[2])',
           "t = Image.open(sys.argv[1]).convert('RGB'); b = Image.open(sys.argv[2]).convert('RGB')",
-          'px = sorted(t.getdata(), key=lum); bg = px[len(px)//2]',
+          'px = sorted(b.getdata(), key=lum); bg = px[len(px)//2]',
           'ink = max(t.getdata(), key=lum)',
           'hi, lo = sorted([lum(ink), lum(bg)], reverse=True)',
           "print('%.2f #%02x%02x%02x #%02x%02x%02x' % (((hi+0.05)/(lo+0.05),) + tuple(ink) + tuple(bg)))"].join('\n');
         const [ratio, ink, bg] = execFileSync(process.env.PYTHON || 'python', ['-c', script, path.join(dir, 't.png'), path.join(dir, 'b.png')], { encoding: 'utf8' }).trim().split(' ');
         if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); fs.copyFileSync(path.join(dir, 't.png'), path.join(SHOTS, 'clock-text.png')); fs.copyFileSync(path.join(dir, 'b.png'), path.join(SHOTS, 'clock-frame.png')); }
         fs.rmSync(dir, { recursive: true, force: true });
-        check(`player-chrome ${theme}: the clock reads at 3:1 or more over a white frame`, Number(ratio) >= 3, `${ratio}:1, text ${ink} on ${bg}`);
-        check(`player-chrome ${theme}: no page errors`, errors.filter((e) => !/Failed to load resource|stream|media|play/i.test(e)).length === 0, errors.join(' | ').slice(0, 200));
+        check(`player-chrome ${theme}: the clock reads at 3.5:1 or more over the bare white frame`, Number(ratio) >= 3.5, `${ratio}:1, text ${ink} on ${bg}`);
+        check(`player-chrome ${theme}: no page errors`, errors.filter((e) => !/Failed to load resource|The stream stopped|NotSupportedError|NotAllowedError|AbortError/i.test(e)).length === 0, errors.join(' | ').slice(0, 200));
         await shot(page, `player-chrome-${theme}`);
       } finally { await browser.close(); }
     }

@@ -72,7 +72,6 @@
   ".card-play | background",
   ".card-tag | background",
   ".dialog::backdrop | background",
-  ".environment | background",
   ".environment::after | background",
   ".live-view.has-spot:not(.has-picture) .live-spot | background",
   ".theme-card[aria-checked=\"true\"]::after | box-shadow",

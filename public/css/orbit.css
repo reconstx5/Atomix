@@ -194,11 +194,11 @@ body[data-layout="orbit"] .orbit-profile .avatar { width: max(32px, calc(40 * va
 }
 
 /* ---------- Home and rows ---------- */
-body[data-layout="orbit"] { --poster-w: calc(256 * var(--px)); --card-w: var(--poster-w); --wide-w: calc(336 * var(--px)); --square-w: calc(220 * var(--px)); }
+body[data-layout="orbit"] { --poster-w: calc(256 * var(--px)); --grid-poster-w: calc(196 * var(--px)); --card-w: var(--poster-w); --wide-w: calc(336 * var(--px)); --square-w: calc(220 * var(--px)); }
 body[data-layout="orbit"] :is(.row-poster, .row-list) { grid-auto-columns: var(--poster-w); }
 body[data-layout="orbit"] .row-landscape { grid-auto-columns: var(--wide-w); }
 body[data-layout="orbit"] .row-square { grid-auto-columns: var(--square-w); }
-body[data-layout="orbit"] .grid-poster { grid-template-columns: repeat(auto-fill, minmax(var(--poster-w), 1fr)); }
+body[data-layout="orbit"] .grid-poster { grid-template-columns: repeat(auto-fill, minmax(var(--grid-poster-w), 1fr)); } /* library and search grids keep the narrower poster; only the rows widened (Task 7) */
 body[data-layout="orbit"] .grid-square { grid-template-columns: repeat(auto-fill, minmax(var(--square-w), 1fr)); }
 body[data-layout="orbit"] .grid-landscape { grid-template-columns: repeat(auto-fill, minmax(var(--wide-w), 1fr)); }
 @media (min-width: 1000px) and (orientation: landscape) {
@@ -232,7 +232,7 @@ body[data-layout="orbit"] .row-scroller { gap: calc(24 * var(--px)); padding-top
   body[data-layout="orbit"] .home-view:not(.no-spotlight) .spot-logo { max-height: calc(72 * var(--px)); }
 }
 @media not all and (min-width: 1000px) and (orientation: landscape) {
-  body[data-layout="orbit"] { --poster-w: 116px; --wide-w: 240px; --square-w: 132px; }
+  body[data-layout="orbit"] { --poster-w: 116px; --grid-poster-w: 116px; --wide-w: 240px; --square-w: 132px; }
   body[data-layout="orbit"] .home-view:not(.no-spotlight) { height: auto; display: block; overflow: visible; }
   body[data-layout="orbit"] .home-view:not(.no-spotlight) .home-rows { overflow: visible; -webkit-mask-image: none; mask-image: none; }
 }
