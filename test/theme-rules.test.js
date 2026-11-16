@@ -140,6 +140,15 @@ export const RULES = {
   ],
 };
 
+// Plan C task 6: every theme but Arctic and Arctic Side keeps today's button corners (--button-radius is its own --radius).
+for (const t of THEMES.filter((x) => !['arctic', 'arctic-side'].includes(x))) {
+  (RULES[t] ||= []).push({ name: '--button-radius is the same as --radius (buttons keep their corners)', token: '--n-1', check: (lch, map) => {
+    const v = map.get('--button-radius') || '';
+    const resolved = v.replace(/var\((--[\w-]+)\)/, (m, n) => map.get(n) ?? m);
+    assert.equal(resolved, map.get('--radius'), `--button-radius is ${v}`);
+  } });
+}
+
 test('THEMES is the 7 built-in theme folders', () => {
   assert.deepEqual(THEMES, ['arctic', 'arctic-side', 'daylight', 'harbour', 'midnight', 'obsidian', 'orbit']);
   const folders = fs.readdirSync(path.join(ROOT, 'themes'), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort();
