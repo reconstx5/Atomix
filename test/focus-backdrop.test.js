@@ -20,3 +20,9 @@ test('an episode uses its show backdrop', () => {
   assert.equal(followUrl({ showBackdrop: '/s.jpg' }), '/s.jpg');
   assert.equal(shouldFollow({ flag: true, held: false, motion: 'full', item: { showBackdrop: '/s.jpg' } }), true);
 });
+
+import { focusSetsBackdrop } from '../public/js/focus-backdrop-rules.js';
+test('the older focus paths set the backdrop only when the theme has not asked for the new one', () => {
+  assert.equal(focusSetsBackdrop(false), true);
+  assert.equal(focusSetsBackdrop(true), false);
+});

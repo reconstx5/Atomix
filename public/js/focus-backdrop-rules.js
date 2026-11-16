@@ -13,3 +13,10 @@ export function shouldFollow({ flag, held, motion, item }) {
   if (!flag || held || motion === 'none') return false;
   return Boolean(followUrl(item));
 }
+
+/**
+ * Whether a focused or hovered card may set the backdrop through the older paths (the Spotlight's follow, the library
+ * and search grids). A theme that sets html[data-follow-focus] (Arctic) leaves that to focus-backdrop.js alone, which
+ * waits for the remote to rest and never works under a held arrow or motion none.
+ */
+export const focusSetsBackdrop = (flagPresent) => !flagPresent;

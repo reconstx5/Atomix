@@ -5,6 +5,7 @@ import { html, useState, useRef, useLayoutEffect } from '../ui.js';
 import { canAdmin } from '../app.js';
 import { cardItems } from '../components.js';
 import { setBackdrop, artFor, followFocus } from '../backdrop.js';
+import { followFocus as followBackdrop } from '../focus-backdrop.js';
 import { Shelf } from './library-shelf.js';
 import { rippleOnArrival } from '../transitions.js';
 import { VIEWS, sortsFor, useLibrary, useTypedText, Results, countText, newEpisodes, NewEpisodes, Tools, subscribeDialog, collectionsFor, CollectionsResults, collectionsCount } from './library-parts.js';
@@ -49,6 +50,7 @@ function Classic({ data, view, admin }) {
   // The artwork behind the page follows the focused (or hovered) title, and starts on the first with a backdrop.
   useLayoutEffect(() => {
     followFocus(results.current, (card) => cardItems.get(card));
+    return followBackdrop(results.current, { itemOf: (card) => cardItems.get(card) }); // Arctic: the artwork follows a resting card
   }, []);
   useLayoutEffect(() => {
     if (colsOpen || opts.view === 'tracks' || !items.length) return;

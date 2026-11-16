@@ -209,10 +209,9 @@ html.kbd .card:focus-visible .card-art { transform: scale(1.07); }
 .page-head h1 { font-size: clamp(2.8rem, 2rem + 2vw, 4rem); }
 .detail-info .detail-title { font-size: clamp(3rem, 2rem + 3.6vw, 6rem); margin-bottom: 12px; }
 .detail-info h1:not(.detail-title) { font-weight: 700; }
-/* A clear logo wins over the League Gothic title on the title page: the typed title stays for screen readers only
-   (the logo box itself is public/css/app.css, "Shared polish pieces"). */
+/* A clear logo wins over the League Gothic title on the title page (item.js hides the typed title once the logo has
+   loaded; the box is public/css/app.css, "Shared polish pieces"). The detail-info margin must not push it. */
 .logo-box > .detail-title { margin: 0; }
-.logo-box.has-logo > .detail-title { position: absolute !important; clip-path: inset(50%); width: 1px; height: 1px; overflow: hidden; }
 .panel { background: var(--surface-1); border: 1px solid var(--border); }
 .panel .panel { background: var(--surface-2); }
 .dialog { background: rgba(28, 31, 35, 0.97); border: 1px solid rgba(238, 241, 244, 0.1); }

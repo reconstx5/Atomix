@@ -6,6 +6,7 @@ import { sizedAttrs } from './sized.js';
 import { h } from './dom.js';
 import { ambientColour } from './tint.js';
 import { coverRect } from './orbit-rules.js';
+import { focusSetsBackdrop } from './focus-backdrop-rules.js';
 
 const layer = h('div', { class: 'backdrop', 'aria-hidden': 'true' });
 const imgs = [h('img', { alt: '', decoding: 'async' }), h('img', { alt: '', decoding: 'async' })];
@@ -145,7 +146,7 @@ export const artFor = (item) => item?.backdrop || item?.showBackdrop || item?.po
  * Update something (the backdrop, a spotlight…) when a card inside `root` gets focus or the mouse.
  * `lookup(card)` returns the item for a card element; `selector` names the cards (Live TV's are `.live-card`).
  */
-export function followFocus(root, lookup, onItem = (item) => setBackdrop(artFor(item)), { selector = '.card' } = {}) {
+export function followFocus(root, lookup, onItem = (item) => focusSetsBackdrop(document.documentElement.hasAttribute('data-follow-focus')) && setBackdrop(artFor(item)), { selector = '.card' } = {}) {
   let timer = null;
   let last = null;
   let pending; // the item waiting to be shown (undefined: none)

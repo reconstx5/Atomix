@@ -9,6 +9,7 @@ import { api } from '../api.js';
 import { openSheet, cardItems } from '../components.js';
 import { setBackdrop, artFor, followFocus } from '../backdrop.js';
 import { followFocus as followBackdrop } from '../focus-backdrop.js';
+import { focusSetsBackdrop } from '../focus-backdrop-rules.js';
 import { spotStartItem, playFor, countLine, inProgress, railShown } from '../library-rules.js';
 import { NOUN, sortsFor, useLibrary, useTypedText, Results, scan, collectionsFor, CollectionsResults, collectionsCount } from './library-parts.js';
 
@@ -38,6 +39,7 @@ export function Shelf({ data, query, view, admin }) {
   const [extra, setExtra] = useState(null);
   const shownId = useRef(spotItem?.id);
   shownId.current = spotItem?.id;
+  const focusPick = useRef(null); // id of the title the spotlight last took from a focused card (Arctic: focus-backdrop.js sets the artwork)
   const cache = useRef(new Map());
   const details = (item) => {
     if (!cache.current.has(item.id)) {
@@ -81,7 +83,7 @@ export function Shelf({ data, query, view, admin }) {
 
   // The spotlight (and the artwork behind it) follows the focused or hovered poster; past the first row it gets compact.
   useLayoutEffect(() => {
-    followFocus(results.current, (card) => cardItems.get(card), (item) => setSpotItem(item));
+    followFocus(results.current, (card) => cardItems.get(card), (item) => { focusPick.current = item.id; setSpotItem(item); });
     const onFocus = (e) => {
       if (e.target.closest?.('.az-rail')) return; // the rail keeps the spotlight's size: a press must not move it under the pointer
       const card = e.target.closest?.('.library-results .card');
@@ -164,7 +166,7 @@ export function Shelf({ data, query, view, admin }) {
   const clearAction = filtered ? html`<${Button} label="Clear filters" icon="close" variant="secondary" onClick=${clearFilters} />` : null;
   // The A–Z rail: sorted A–Z, 20 or more titles and nothing typed; a new list gets a new rail.
   const rail = !colsOpen && !busy && items.length && railShown({ sort: opts.sort, q: opts.q, count: items.length });
-  return html`<${Spotlight} item=${spotShown} quiet=${Boolean(extra && extra.for === spotItem)} hidden=${hideSpot} onShow=${(item) => setBackdrop(artFor(item))} />
+  return html`<${Spotlight} item=${spotShown} quiet=${Boolean(extra && extra.for === spotItem)} hidden=${hideSpot} onShow=${(item) => { const byFocus = focusPick.current === item.id; focusPick.current = null; if (!byFocus || focusSetsBackdrop(document.documentElement.hasAttribute('data-follow-focus'))) setBackdrop(artFor(item)); }} />
     <div class="library-scroll">
       <header class="page-head library-head"><div><h1>${lib.name}</h1><span class="muted count">${count}</span></div><search class="library-bar-wrap">${bar}</search></header>
       <div ref=${results} class="library-results">${colsOpen ? html`<${CollectionsResults} data=${collections} />` : html`<${Results} items=${items} busy=${busy} opts=${opts} lib=${lib} isMusic=${false} filtered=${filtered} clearAction=${clearAction} />`}</div>

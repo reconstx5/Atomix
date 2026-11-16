@@ -2,9 +2,9 @@
 import { createRequire } from 'node:module';
 const { chromium } = createRequire(import.meta.url)('playwright');
 export const BASE = process.env.BASE || 'http://localhost:8787';
-export async function open({ width = 1917, height = 992, reducedMotion = 'no-preference', hasTouch = false, isMobile = false, theme = 'orbit' } = {}) {
+export async function open({ width = 1917, height = 992, reducedMotion = 'no-preference', hasTouch = false, isMobile = false, theme = 'orbit', serviceWorkers = 'allow' } = {}) {
   const browser = await chromium.launch();
-  const context = await browser.newContext({ viewport: { width, height }, reducedMotion, hasTouch, isMobile });
+  const context = await browser.newContext({ viewport: { width, height }, reducedMotion, hasTouch, isMobile, serviceWorkers });
   const r = await context.request.post(`${BASE}/api/auth/login`, { data: { username: 'dallas', password: 'atomix-dev-1' } });
   if (!r.ok()) throw new Error(`login ${r.status()}`);
   await context.request.patch(`${BASE}/api/me`, { data: { prefs: { theme, reduceMotion: false } } });

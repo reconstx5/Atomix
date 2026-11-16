@@ -13,6 +13,7 @@ export function followFocus(rowsEl, { itemOf, delay = 350 } = {}) {
   const root = document.documentElement;
   let timer = null;
   let wanted = null; // the title of the card focus is resting on
+  let wasHeld = false; // an arrow was held since the last keyup
   const fire = () => {
     timer = null;
     const flag = root.hasAttribute('data-follow-focus');
@@ -29,13 +30,29 @@ export function followFocus(rowsEl, { itemOf, delay = 350 } = {}) {
     restart();
   };
   // nav.js clears nav-held on this same keyup (its listener was added first): once it has, the remote is resting.
+  const onKeyDown = () => {
+    if (root.classList.contains('nav-held')) wasHeld = true;
+  };
   const onKeyUp = (e) => {
-    if (e.key.startsWith('Arrow') && wanted && !root.classList.contains('nav-held')) restart();
+    if (!e.key.startsWith('Arrow') || !wasHeld || root.classList.contains('nav-held')) return;
+    wasHeld = false;
+    if (wanted) restart();
+  };
+  // Focus leaving the rows altogether: nothing waits any more.
+  const onFocusOut = (e) => {
+    if (rowsEl.contains(e.relatedTarget)) return;
+    wanted = null;
+    clearTimeout(timer);
+    timer = null;
   };
   rowsEl.addEventListener('focusin', onFocusIn);
+  rowsEl.addEventListener('focusout', onFocusOut);
+  window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
   return () => {
     rowsEl.removeEventListener('focusin', onFocusIn);
+    rowsEl.removeEventListener('focusout', onFocusOut);
+    window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
     clearTimeout(timer);
     timer = null;

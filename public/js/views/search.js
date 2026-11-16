@@ -10,6 +10,7 @@ import { orbitLibraryIcon } from '../orbit-rules.js';
 import { search as liveSearch, onTvHere, clockTime, playChannel, channelLabel } from '../live.js';
 import { trackList } from '../music.js';
 import { followFocus } from '../backdrop.js';
+import { followFocus as followBackdrop } from '../focus-backdrop.js';
 
 export async function load() {
   setTitle('Search');
@@ -213,12 +214,14 @@ export function Screen({ query }) {
 
   useLayoutEffect(() => {
     followFocus(results.current, (card) => cardItems.get(card));
+    const stopBackdrop = followBackdrop(results.current, { itemOf: (card) => cardItems.get(card) }); // Arctic: the artwork follows a resting card
     run();
     if (orbit && current.current.trim()) suggestNow();
     // Focus the box even for mouse users — that's what they came here for.
     const frame = requestAnimationFrame(() => input.current?.focus());
     return () => {
       left.current = true;
+      stopBackdrop();
       cancelAnimationFrame(frame);
       for (const t of Object.values(timers.current)) clearTimeout(t);
       suggestAbort.current?.abort();

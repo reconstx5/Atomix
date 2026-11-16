@@ -11,6 +11,7 @@ import { cardItems, eagerCards } from '../components.js';
 import { setTitle, canAdmin, isKidsProfile, isOrbit } from '../app.js';
 import { setBackdrop, artFor, followFocus } from '../backdrop.js';
 import { followFocus as followBackdrop } from '../focus-backdrop.js';
+import { focusSetsBackdrop } from '../focus-backdrop-rules.js';
 import { listable, hiddenCount, deviceNow, whenDeviceKnown } from '../dash/playable.js';
 import { rippleOnArrival } from '../transitions.js';
 
@@ -36,6 +37,7 @@ function Home({ data, view }) {
   const featured = data.hero || data.rows.find((r) => r.id !== 'live-now')?.items[0] || null;
   const [spotItem, setSpotItem] = useState(featured);
   const rows = useRef(null);
+  const focusPick = useRef(null); // the title the spotlight last took from a focused card (its artwork is focus-backdrop.js's job in Arctic)
   // v0.28: On now leaves out the channels this device can't play (an iPhone at once, elsewhere once the probe answers).
   const [device, setDevice] = useState(deviceNow);
   const onNow = data.rows.find((r) => r.id === 'live-now');
@@ -52,7 +54,7 @@ function Home({ data, view }) {
     const onFocus = (e) => view.classList.toggle('is-compact', rowEls.indexOf(e.target.closest?.('.row')) > 0);
     view.addEventListener('focusin', onFocus);
     // The spotlight (and the artwork behind it) follows whatever card has focus.
-    if (featured) followFocus(rows.current, (card) => cardItems.get(card), (item) => setSpotItem(item));
+    if (featured) followFocus(rows.current, (card) => cardItems.get(card), (item) => { focusPick.current = item; setSpotItem(item); });
     // Themes that ask for it (Arctic): the artwork follows a card the remote rests on, after 350 ms.
     const stopBackdrop = followBackdrop(rows.current, { itemOf: (card) => cardItems.get(card) });
     return () => {
@@ -74,7 +76,7 @@ function Home({ data, view }) {
       ? html`<${EmptyState} title="Nothing to watch here yet" text="This Kids profile only shows titles with a suitable age rating. A grown-up can change that in Settings → Profiles." />`
       : html`<${EmptyState} title="Nothing here yet" text="Your libraries are still being scanned. This page fills in as media is found." />`
     : null;
-  return html`${featured ? html`<${Spotlight} item=${spotItem} onShow=${(item) => setBackdrop(artFor(item))} />` : null}<div class="home-rows"><div ref=${rows} class="rows">${rowEls}${after}${none}${isOrbit() ? html`<div class="home-arrange"><${Button} label="Arrange home" icon="edit" variant="ghost" href="#/arrange-home" /></div>` : null}</div></div>`;
+  return html`${featured ? html`<${Spotlight} item=${spotItem} onShow=${(item) => { const byFocus = focusPick.current === item; focusPick.current = null; if (!byFocus || focusSetsBackdrop(document.documentElement.hasAttribute('data-follow-focus'))) setBackdrop(artFor(item)); }} />` : null}<div class="home-rows"><div ref=${rows} class="rows">${rowEls}${after}${none}${isOrbit() ? html`<div class="home-arrange"><${Button} label="Arrange home" icon="edit" variant="ghost" href="#/arrange-home" /></div>` : null}</div></div>`;
 }
 
 /** Renders nothing: by the time it is drawn the rows' cards have taken the eager pictures, so the rest load lazily. */
