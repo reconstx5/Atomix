@@ -68,6 +68,7 @@
   --row-gap: 26px;
   --glass-alpha: 0.58;
   --glass-blur: 34px;
+  --surface-edge: 0 0 0 0 transparent; /* a no-op shadow, so it can sit in a comma list; Midnight sets a 1 px top highlight */
 
   /* Scrim for text on artwork (A5). The eased curve is written once, in --scrim-stops: Andreas Larsen's "easing
      gradients" (ease-in-out; at 0 8.1 15.5 ... 100 % of the run the alpha is 1 .987 .951 ... 0), after a flat part

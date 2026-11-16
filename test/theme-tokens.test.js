@@ -25,6 +25,8 @@ const RETUNED = {
   '--text-dim': ['arctic', 'arctic-side', 'daylight', 'harbour', 'midnight', 'obsidian', 'orbit'],
   '--accent': ['midnight', 'obsidian', 'harbour'],
   '--accent-text': ['arctic', 'arctic-side', 'daylight', 'harbour', 'midnight', 'obsidian', 'orbit'],
+  // Plan C task 3: Midnight's new surface steps (n-1..n-4) and its solid menu.
+  '--bg': ['midnight'], '--bg-2': ['midnight'], '--surface': ['midnight'], '--surface-2': ['midnight'], '--nav-bg': ['midnight'],
 };
 const OLD_SURFACES = ['--bg', '--bg-2', '--surface', '--surface-2'];
 

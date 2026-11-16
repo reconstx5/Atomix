@@ -9,7 +9,9 @@
   --radius: 10px;
   --radius-lg: 16px;
   --poster-w: 164px;
-  --nav-bg: rgba(12, 14, 19, 0.78);
+  --nav-bg: var(--n-2); /* solid: Midnight is the no-blur, low-power theme */
+  --glass-blur: 0px;
+  --surface-edge: inset 0 1px 0 rgba(255, 255, 255, 0.06); /* a 1 px top highlight on raised surfaces */
   --shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-display: var(--font);
@@ -17,28 +19,30 @@
   --accent-solid: var(--a-10);
   --accent-hover: var(--a-11);
 }
+/* No blur anywhere on the shared chrome, whatever the app's own rules say. */
+.app-header, .panel, .dialog, .details-panel, .player-menu { -webkit-backdrop-filter: none; backdrop-filter: none; }
 /* Ramps (devtools/ramp.mjs): --n-* neutrals, --a-* accent. Hex for every browser; the same colours in oklch() where
    it is understood. --bg, --bg-2, --surface, --surface-2, --text and --accent come from these (public/css/tokens.css). */
 :root {
-  --n-1: #0c0e13;
-  --n-2: #12151c;
-  --n-3: #191d27;
-  --n-4: #232937;
-  --n-5: #363c4a;
-  --n-6: #4a515e;
-  --n-7: #5f6673;
-  --n-8: #757c89;
-  --n-9: #8c939f;
-  --n-10: #a3aab6;
-  --n-11: #bbc2cd;
+  --n-1: #101219;
+  --n-2: #151923;
+  --n-3: #1b1f2c;
+  --n-4: #212636;
+  --n-5: #272d3f;
+  --n-6: #2f364c;
+  --n-7: #474e63;
+  --n-8: #60687b;
+  --n-9: #7b8394;
+  --n-10: #979fae;
+  --n-11: #b4bbc8;
   --n-12: #eef1f6;
-  --a-1: #20100b;
-  --a-2: #331911;
-  --a-3: #472216;
-  --a-4: #5d2b1c;
-  --a-5: #733421;
-  --a-6: #8a3e27;
-  --a-7: #a2482c;
+  --a-1: #25140f;
+  --a-2: #371d15;
+  --a-3: #4b251a;
+  --a-4: #602e1f;
+  --a-5: #763623;
+  --a-6: #8c3f28;
+  --a-7: #a3482d;
   --a-8: #ba5232;
   --a-9: #ff6b3d;
   --a-10: #ff906e;
@@ -47,25 +51,25 @@
 }
 @supports (color: oklch(0% 0 0)) {
   :root {
-    --n-1: oklch(16.40% 0.0111 268.01);
-    --n-2: oklch(19.59% 0.0149 266.81);
-    --n-3: oklch(23.13% 0.0203 267.78);
-    --n-4: oklch(28.15% 0.0273 266.60);
-    --n-5: oklch(35.63% 0.0257 266.85);
-    --n-6: oklch(43.36% 0.0233 262.87);
-    --n-7: oklch(50.89% 0.0224 262.92);
-    --n-8: oklch(58.49% 0.0216 262.95);
-    --n-9: oklch(66.14% 0.0196 261.32);
-    --n-10: oklch(73.62% 0.0190 261.33);
-    --n-11: oklch(81.19% 0.0173 259.42);
+    --n-1: oklch(18.34% 0.0147 272.42);
+    --n-2: oklch(21.41% 0.0207 267.68);
+    --n-3: oklch(24.14% 0.0257 271.14);
+    --n-4: oklch(27.12% 0.0307 270.85);
+    --n-5: oklch(29.97% 0.0339 270.03);
+    --n-6: oklch(33.63% 0.0401 270.53);
+    --n-7: oklch(42.61% 0.0361 270.43);
+    --n-8: oklch(51.74% 0.0316 267.25);
+    --n-9: oklch(60.92% 0.0275 265.47);
+    --n-10: oklch(70.09% 0.0238 263.15);
+    --n-11: oklch(79.06% 0.0200 262.99);
     --n-12: oklch(95.73% 0.0074 260.73);
-    --a-1: oklch(19.44% 0.0290 38.11);
-    --a-2: oklch(24.78% 0.0443 37.88);
-    --a-3: oklch(30.02% 0.0604 38.63);
-    --a-4: oklch(35.40% 0.0775 37.46);
-    --a-5: oklch(40.59% 0.0942 37.48);
-    --a-6: oklch(45.97% 0.1100 37.48);
-    --a-7: oklch(51.34% 0.1267 37.77);
+    --a-1: oklch(21.32% 0.0299 37.13);
+    --a-2: oklch(26.38% 0.0437 37.88);
+    --a-3: oklch(31.33% 0.0608 36.99);
+    --a-4: oklch(36.48% 0.0771 37.48);
+    --a-5: oklch(41.44% 0.0952 37.28);
+    --a-6: oklch(46.45% 0.1111 37.32);
+    --a-7: oklch(51.50% 0.1275 37.18);
     --a-8: oklch(56.59% 0.1425 37.58);
     --a-9: oklch(70.52% 0.1907 37.47);
     --a-10: oklch(76.55% 0.1427 37.81);

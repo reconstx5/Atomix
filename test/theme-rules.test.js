@@ -14,6 +14,30 @@ const hexOf = (map, name) => {
 
 // { [theme]: [{ name, token, media?, attrs?, check(lch, map) }] }
 export const RULES = {
+  midnight: [
+    ...Object.entries({ 1: '#101219', 2: '#151923', 3: '#1b1f2c', 4: '#212636', 5: '#272d3f', 6: '#2f364c' }).map(([n, hex]) => ({
+      name: `n-${n} is ${hex} (within 1 per channel)`, token: `--n-${n}`,
+      check: (lch, map) => {
+        const got = colourOf(map, `--n-${n}`), want = colourOf(new Map([['--app-bg', '#000000'], ['--x', hex]]), '--x');
+        for (const k of ['r', 'g', 'b']) assert.ok(Math.abs(got[k] - want[k]) <= 1, `${k} is ${got[k]}, wanted ${want[k]} +-1`);
+      },
+    })),
+    ...[1, 2, 3, 4, 5, 6].map((n) => ({
+      name: `n-${n} is a slight hue (C 0.01-0.04, allowing 0.004 of 8-bit rounding) and lighter than n-${n - 1 || 'none'}`, token: `--n-${n}`,
+      check: (lch, map) => {
+        assert.ok(lch.C >= 0.006 && lch.C <= 0.044, `chroma ${lch.C.toFixed(3)} is outside 0.01-0.04`);
+        if (n > 1) assert.ok(lch.L > lchOf(map, `--n-${n - 1}`).L, 'is not lighter than the step before');
+      },
+    })),
+    { name: '--text-high is n-12', token: '--text-high', check: (lch, map) => assert.equal(hexOf(map, '--text-high'), hexOf(map, '--n-12')) },
+    { name: '--text-low is n-11', token: '--text-low', check: (lch, map) => assert.equal(hexOf(map, '--text-low'), hexOf(map, '--n-11')) },
+    { name: 'no blur on glass', token: '--n-1', check: (lch, map) => assert.equal(map.get('--glass-blur'), '0px') },
+    { name: 'the menu is solid (nav-bg alpha 1)', token: '--nav-bg', check: (lch, map) => assert.equal(colourOf(map, '--nav-bg').a, 1) },
+    { name: 'raised surfaces have a top edge (--surface-edge is set, not the default no-op)', token: '--n-1', check: (lch, map) => {
+      const v = map.get('--surface-edge');
+      assert.ok(v && v !== 'none' && !/^0 0 0 0 transparent$/.test(v), `--surface-edge is ${v}`);
+    } },
+  ],
   orbit: [
     { name: 'the focus ring is white', token: '--focus-ring', check: (lch, map) => assert.equal(hexOf(map, '--focus-ring'), '#ffffff') },
   ],
