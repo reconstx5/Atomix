@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { apcaContrast, wcagRatio } from '../src/themes/apca.js';
 import { THEMES, MODES, ROOT, TV_MEDIA, tokensOf, colourOf, lchOf, baseCss } from './helpers/theme-resolve.js';
 
 const hexOf = (map, name) => {
@@ -69,6 +70,32 @@ export const RULES = {
       assert.match(theme.replace(/\s+/g, ' '), /:is\(\.row-scroller, \.grid\) > :is\(\.poster-card, \.landscape-card:not\(\.live-card\)\)::before \{[^}]*display: none/, 'the glow ::before is not display: none');
       assert.doesNotMatch(theme, /--card-lift/, 'the theme changes --card-lift');
     } },
+  ],
+  daylight: [
+    { name: '--app-bg is an off-white (L 0.96-0.97)', token: '--app-bg', check: (lch) => assert.ok(lch.L >= 0.96 && lch.L <= 0.974, `L ${lch.L.toFixed(3)} is outside 0.96-0.97`) },
+    { name: 'on a TV the canvas dims to about 90% lightness', token: '--app-bg', media: TV_MEDIA, check: (lch) => assert.ok(lch.L >= 0.886 && lch.L <= 0.914, `L ${lch.L.toFixed(3)} is outside 0.89-0.91`) },
+    { name: 'on a TV the page colour --bg dims with it', token: '--bg', media: TV_MEDIA, check: (lch) => assert.ok(lch.L >= 0.886 && lch.L <= 0.914, `L ${lch.L.toFixed(3)} is outside 0.89-0.91`) },
+    { name: 'on a TV --surface-1 is no lighter than 95%', token: '--surface-1', media: TV_MEDIA, check: (lch) => assert.ok(lch.L <= 0.954, `L ${lch.L.toFixed(3)} is above 0.95`) },
+    { name: '--accent-solid is a darker step (L 0.45-0.55)', token: '--accent-solid', check: (lch) => assert.ok(lch.L >= 0.45 && lch.L <= 0.554, `L ${lch.L.toFixed(3)} is outside 0.45-0.55`) },
+    { name: '--on-accent reads on --accent-solid (APCA Lc >= 60)', token: '--on-accent', check: (lch, map) => {
+      const lc = Math.abs(apcaContrast(colourOf(map, '--on-accent'), colourOf(map, '--accent-solid')));
+      assert.ok(lc >= 60, `Lc ${lc.toFixed(1)}`);
+    } },
+    { name: 'raised surfaces get their elevation from --shadow, not an edge line', token: '--surface-1', check: (lch, map) => {
+      assert.ok(map.get('--shadow') && map.get('--shadow') !== 'none', `--shadow is ${map.get('--shadow')}`);
+      assert.match(map.get('--surface-edge'), /^0 0 0 0 transparent$/, `--surface-edge is ${map.get('--surface-edge')}`);
+    } },
+    { name: 'the focus halo is light (white at 90%), so the ring separates from video black', token: '--focus-ring', check: (lch, map) => {
+      assert.equal(map.get('--focus-halo').replace(/\s+/g, ''), 'rgba(255,255,255,0.9)');
+    } },
+    { name: 'the halo reaches 2px past the ring (1px wider than the default)', token: '--focus-ring', check: (lch, map) => {
+      assert.match(map.get('--focus-halo-ring'), /\+ 2px\)/, `--focus-halo-ring is ${map.get('--focus-halo-ring')}`);
+      assert.match(map.get('--focus-halo-inset'), /\+ 2px\)/, `--focus-halo-inset is ${map.get('--focus-halo-inset')}`);
+    } },
+    ...[undefined, TV_MEDIA].map((media) => ({ name: `the focus ring is at least 3:1 on the canvas${media ? ' (TV)' : ''}`, token: '--focus-ring', media, check: (lch, map) => {
+      const r = wcagRatio(colourOf(map, '--focus-ring'), colourOf(map, '--app-bg'));
+      assert.ok(r >= 3, `ratio ${r.toFixed(2)}`);
+    } })),
   ],
   orbit: [
     { name: 'the focus ring is white', token: '--focus-ring', check: (lch, map) => assert.equal(hexOf(map, '--focus-ring'), '#ffffff') },

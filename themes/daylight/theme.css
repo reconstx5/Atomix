@@ -1,6 +1,10 @@
 /* Daylight — light theme. */
 :root {
-  --focus-halo: rgba(255, 255, 255, 0.8); /* A4: the ring is n-12 (near-black, tokens.css); a light halo outside it */
+  /* The ring is n-12 (near-black, tokens.css). A light halo, 2 px outside it (1 px wider than the dark themes'), so the
+     ring still separates from the player's black video (Plan C). */
+  --focus-halo: rgba(255, 255, 255, 0.9);
+  --focus-halo-ring: 0 0 0 calc(var(--focus-offset) + var(--focus-width) + 2px) var(--focus-halo);
+  --focus-halo-inset: inset 0 0 0 calc(var(--focus-width) + 2px) var(--focus-halo);
   color-scheme: light;
   --border: rgba(15, 23, 42, 0.12);
   --accent-text: #ffffff; /* black or white, whichever reads on the accent (APCA Lc >= 60) */
@@ -68,6 +72,22 @@
     --a-10: oklch(46.98% 0.2235 264.52);
     --a-11: oklch(43.85% 0.2005 264.59);
     --a-12: oklch(28.01% 0.1122 264.76);
+  }
+}
+/* On a TV, an off-white canvas at 97% glares across a room: the canvas dims to about 90% and the white cards to about
+   95%, so they still stand off it. Hex first, the same colours in oklch() where it is understood. */
+@media (min-width: 1600px) and (orientation: landscape) {
+  :root {
+    --n-1: #dddee1;
+    --n-2: #dddee1;
+    --n-3: #ecedf0;
+  }
+  @supports (color: oklch(0% 0 0)) {
+    :root {
+      --n-1: oklch(90.07% 0.0042 271.37);
+      --n-2: oklch(90.07% 0.0042 271.37);
+      --n-3: oklch(94.62% 0.0042 271.37);
+    }
   }
 }
 /* Keep artwork a little softer so dark text stays readable over it. */

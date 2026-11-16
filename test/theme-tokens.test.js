@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readThemeTokens, composite } from '../src/themes/tokens.js';
 import { apcaContrast, wcagRatio, parseColor } from '../src/themes/apca.js';
-import { THEMES, MODES, chainOf, layoutOf, resolve, themeFile, tokensOf } from './helpers/theme-resolve.js';
+import { THEMES, MODES, TV_MEDIA, chainOf, layoutOf, resolve, themeFile, tokensOf } from './helpers/theme-resolve.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
@@ -71,8 +71,8 @@ for (const t of THEMES) for (const supports of MODES) {
     }
   });
 
-  test(`${t} (${supports}): APCA and focus contrast`, () => {
-    const m = tokensOf(t, supports);
+  for (const media of [undefined, TV_MEDIA]) test(`${t} (${supports}${media ? ', TV size' : ''}): APCA and focus contrast`, () => {
+    const m = tokensOf(t, supports, { media });
     const bg = colour(m, '--app-bg');
     for (const s of SURFACES) {
       const under = opaque(colour(m, s), bg);
@@ -86,8 +86,8 @@ for (const t of THEMES) for (const supports of MODES) {
   });
 
   // The names the stylesheets actually paint with (--text-dim has ~70 uses; buttons are --accent-text on --accent).
-  test(`${t} (${supports}): APCA on the painted old names`, () => {
-    const m = tokensOf(t, supports);
+  for (const media of [undefined, TV_MEDIA]) test(`${t} (${supports}${media ? ', TV size' : ''}): APCA on the painted old names`, () => {
+    const m = tokensOf(t, supports, { media });
     const bg = colour(m, '--bg');
     for (const s of OLD_SURFACES) {
       const under = opaque(colour(m, s), bg);
@@ -181,7 +181,14 @@ for (const t of THEMES) for (const supports of MODES) {
 
 test('every ramp step has a hex value and the same colour in oklch() inside @supports', () => {
   for (const t of THEMES) {
-    const css = read(`themes/${t}/theme.css`).replace(/\/\*[\s\S]*?\*\//g, '');
+    // The ramps are the top-level blocks; a theme's @media blocks (Daylight's TV canvas) have their own pair, tested in
+    // theme-rules.test.js, so they are cut out here (brace-matched: they hold an @supports block of their own).
+    let css = read(`themes/${t}/theme.css`).replace(/\/\*[\s\S]*?\*\//g, '');
+    for (let at = css.indexOf('@media'); at >= 0; at = css.indexOf('@media')) {
+      let depth = 0, end = css.indexOf('{', at);
+      for (let i = end; i < css.length; i++) { if (css[i] === '{') depth++; else if (css[i] === '}' && --depth === 0) { end = i + 1; break; } }
+      css = css.slice(0, at) + css.slice(end);
+    }
     const sup = /@supports\s*\(color:\s*oklch\(0% 0 0\)\)\s*\{([\s\S]*?\}\s*)\}/.exec(css);
     assert.ok(sup, `${t}: an @supports (color: oklch(0% 0 0)) block`);
     const outside = css.replace(sup[0], '');
