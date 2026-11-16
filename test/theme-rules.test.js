@@ -135,6 +135,20 @@ export const RULES = {
   ],
   arctic: arcticRules('arctic'),
   'arctic-side': arcticRules('arctic-side'),
+  harbour: [
+    // Task 8: the grown card is the --focus-grow the rows keep room for, on focus and on hover alike (no literal scale).
+    { name: '--focus-grow is between 1.04 and 1.08', token: '--n-1', check: (lch, map) => {
+      const v = Number(map.get('--focus-grow'));
+      assert.ok(v >= 1.04 && v <= 1.08, `--focus-grow is ${map.get('--focus-grow')}`);
+    } },
+    { name: 'the .card:hover scale in theme.css uses var(--focus-grow), not a literal', token: '--n-1', check: () => {
+      const css = fs.readFileSync(path.join(ROOT, 'themes/harbour/theme.css'), 'utf8').replace(/\s+/g, ' ');
+      const hover = /\.card:hover \{([^}]*)\}/.exec(css);
+      assert.ok(hover, 'theme.css has no .card:hover rule');
+      assert.match(hover[1], /transform: scale\(var\(--focus-grow\)\)/, `.card:hover is { ${hover[1].trim()} }`);
+      assert.doesNotMatch(css, /scale\(1\.\d+\)/, 'a literal scale is left in theme.css');
+    } },
+  ],
   orbit: [
     { name: 'the focus ring is white', token: '--focus-ring', check: (lch, map) => assert.equal(hexOf(map, '--focus-ring'), '#ffffff') },
     // Task 7: body text is a soft off-white (L about 94 %, nearly neutral) so the white focus ring is the brightest thing on screen.

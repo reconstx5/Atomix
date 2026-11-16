@@ -173,9 +173,9 @@ const CHECKS = {
   },
 
   // Orbit: the first poster row shows 6.0-6.6 posters, so the 7th peeks (the visible fraction of every card in the
-  // row's box, added up). Harbour is measured and reported too (Task 8 will enforce at least 5 there).
+  // row's box, added up). Harbour must show at least 5.0 fully visible posters at 1920x1080.
   async rows() {
-    const ENFORCED = { orbit: [6.0, 6.6] };
+    const ENFORCED = { orbit: [6.0, 6.6], harbour: [5.0, Infinity] };
     for (const theme of themesFor(['orbit', 'harbour'])) {
       for (const [width, height] of theme === 'orbit' ? [[1920, 1080], [1366, 768]] : [[1920, 1080]]) {
         const { browser, page, errors } = await session(theme, { width, height });
@@ -198,12 +198,77 @@ const CHECKS = {
           if (!n) { check(`${label}: has a poster row`, false); continue; }
           const band = ENFORCED[theme];
           const detail = `${n.sum} posters (card ${n.first}px wide, row box ${n.box.join('-')})`;
-          if (band) check(`${label}: first row shows ${band[0]}-${band[1]} posters`, n.sum >= band[0] && n.sum <= band[1], detail);
+          if (band) check(`${label}: first row shows ${band[0]}${Number.isFinite(band[1]) ? `-${band[1]}` : ' or more'} posters`, n.sum >= band[0] && n.sum <= band[1], detail);
           else check(`${label}: poster count recorded (not enforced yet)`, true, detail);
           check(`${label}: no page errors`, errors.length === 0, errors.join(' | ').slice(0, 200));
           await shot(page, `rows-${theme}-${width}`);
         } finally { await browser.close(); }
       }
+    }
+  },
+
+  // Harbour's grown card (--focus-grow): one ArrowRight in a row, then in the first frame after it the focused card shows
+  // its ring (outline on .card-art) together with the scale; once it settles the scale is --focus-grow. The grown card's
+  // box overlaps no neighbour in the row, and its badge and progress track stay inside it (a badge and a progress track are
+  // added to the card's art when the dev media has none).
+  async grown() {
+    for (const theme of themesFor(['harbour'])) {
+      const { browser, page, errors } = await session(theme);
+      try {
+        await home(page);
+        await focusCard(page, 1);
+        await page.waitForTimeout(300);
+        await page.evaluate(() => {
+          const art = document.activeElement?.querySelector('.card-art');
+          if (!art) return;
+          if (!art.querySelector(':scope > .badge:not(.badge-watched)')) { const b = document.createElement('span'); b.className = 'badge'; b.textContent = '4K'; art.append(b); }
+          if (!art.querySelector(':scope > .progress')) { const p = document.createElement('div'); p.className = 'progress'; p.innerHTML = '<span style="width:60%"></span>'; art.append(p); }
+        });
+        await page.keyboard.press('ArrowLeft'); // back to the card before, whose neighbours both exist
+        await page.keyboard.press('ArrowRight'); // the single keydown under test
+        const read = () => {
+          const c = document.activeElement;
+          if (!c || !c.classList.contains('card')) return null;
+          const art = c.querySelector('.card-art');
+          const as = getComputedStyle(art), cs = getComputedStyle(c);
+          const m = /matrix\(([^)]+)\)/.exec(cs.transform);
+          const scale = m ? Number(m[1].split(',')[0]) : 1;
+          const ring = { width: parseFloat(as.outlineWidth) || 0, style: as.outlineStyle, colour: as.outlineColor };
+          const box = c.getBoundingClientRect();
+          const grow = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--focus-grow')) || 0;
+          return { scale, ring, grow, id: Number(/\/item\/(\d+)/.exec(c.getAttribute('href') || '')?.[1]) || null, w: box.width };
+        };
+        const first = await page.evaluate(`new Promise((res) => requestAnimationFrame(() => res((${read.toString()})())))`);
+        await page.waitForTimeout(700);
+        const geo = await page.evaluate(() => {
+          const c = document.activeElement;
+          if (!c || !c.classList.contains('card')) return null;
+          const box = c.getBoundingClientRect(), art = c.querySelector('.card-art');
+          const ring = getComputedStyle(art);
+          const reach = (parseFloat(ring.outlineOffset) || 0) + (parseFloat(ring.outlineWidth) || 0);
+          const scroller = c.parentElement;
+          const others = [...scroller.querySelectorAll(':scope > a.card')].filter((x) => x !== c).map((x) => x.getBoundingClientRect());
+          const artBox = art.getBoundingClientRect();
+          const overlap = others.filter((o) => Math.min(o.right, box.right) - Math.max(o.left, box.left) > 0.5 && Math.min(o.bottom, box.bottom) - Math.max(o.top, box.top) > 0.5).length;
+          const ringBox = { l: artBox.left - reach, r: artBox.right + reach };
+          const ringHits = others.filter((o) => o.width && Math.min(o.right, ringBox.r) - Math.max(o.left, ringBox.l) > 0.5).length;
+          const inside = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.left >= box.left - 0.5 && r.right <= box.right + 0.5 && r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5; };
+          const parts = [...art.querySelectorAll(':scope > .badge, :scope > .progress')];
+          return { overlap, ringHits, parts: parts.length, outside: parts.filter((p) => !inside(p)).length, neighbours: others.length };
+        });
+        const label = `grown ${theme}`;
+        check(`${label}: a card is focused after one ArrowRight`, Boolean(first && geo), 'no focused .card');
+        if (first && geo) {
+          check(`${label}: the ring (an outline of 3px or more) is on the card in the same frame as its scale`, first.ring.style !== 'none' && first.ring.width >= 3 && first.scale > 1.0001, `ring ${first.ring.width}px ${first.ring.style}, scale ${first.scale.toFixed(3)} in the first frame`);
+          const settled = await page.evaluate(`(${read.toString()})()`);
+          check(`${label}: once settled the card is --focus-grow (${first.grow}) times its size`, Math.abs(settled.scale - first.grow) < 0.002, `scale ${settled.scale.toFixed(3)}`);
+          check(`${label}: no row neighbour overlaps the grown card`, geo.overlap === 0, `${geo.overlap} neighbours overlap (of ${geo.neighbours})`);
+          check(`${label}: the ring does not touch a neighbour's box`, geo.ringHits === 0, `${geo.ringHits} neighbours reached`);
+          check(`${label}: the badge and the progress track stay inside the card`, geo.parts >= 2 && geo.outside === 0, `${geo.parts} parts, ${geo.outside} outside`);
+        }
+        check(`${label}: no page errors`, errors.length === 0, errors.join(' | ').slice(0, 200));
+        await shot(page, `grown-${theme}`);
+      } finally { await browser.close(); }
     }
   },
 

@@ -77,6 +77,6 @@ body { font-size: 1.05rem; }
 .nav-link[aria-current="page"] { box-shadow: inset 4px 0 0 var(--accent); }
 .nav-link[aria-current="page"]:focus-visible { box-shadow: var(--focus-halo-ring), inset 4px 0 0 var(--accent); }
 .card:focus-visible { transform: scale(var(--focus-grow)); } /* A4: the growth the rows keep room for (app.css) */
-@media (hover: hover) and (pointer: fine) { .card:hover { transform: scale(1.06); } } /* v0.28: no hover left stuck on touch screens */
+@media (hover: hover) and (pointer: fine) { .card:hover { transform: scale(var(--focus-grow)); } } /* v0.28: no hover left stuck on touch screens */
 /* Card motion v2: the whole card already grows 1.06 here, so its art only lifts (no growth on top of growth). */
 :root { --focus-scale-poster: 1; --focus-scale-wide: 1; --hover-scale-poster: 1; --hover-scale-wide: 1; }
