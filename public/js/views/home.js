@@ -54,7 +54,7 @@ function Home({ data, view }) {
     const onFocus = (e) => view.classList.toggle('is-compact', rowEls.indexOf(e.target.closest?.('.row')) > 0);
     view.addEventListener('focusin', onFocus);
     // The spotlight (and the artwork behind it) follows whatever card has focus.
-    if (featured) followFocus(rows.current, (card) => cardItems.get(card), (item) => { focusPick.current = item; setSpotItem(item); });
+    if (featured) followFocus(rows.current, (card) => cardItems.get(card), (item, o) => { focusPick.current = o && o.mouse ? null : item; setSpotItem(item); });
     // Themes that ask for it (Arctic): the artwork follows a card the remote rests on, after 350 ms.
     const stopBackdrop = followBackdrop(rows.current, { itemOf: (card) => cardItems.get(card) });
     return () => {

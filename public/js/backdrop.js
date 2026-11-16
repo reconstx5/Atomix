@@ -149,7 +149,7 @@ export const artFor = (item) => item?.backdrop || item?.showBackdrop || item?.po
  * Update something (the backdrop, a spotlight…) when a card inside `root` gets focus or the mouse.
  * `lookup(card)` returns the item for a card element; `selector` names the cards (Live TV's are `.live-card`).
  */
-export function followFocus(root, lookup, onItem = (item) => focusSetsBackdrop(document.documentElement.hasAttribute('data-follow-focus')) && setBackdrop(artFor(item)), { selector = '.card' } = {}) {
+export function followFocus(root, lookup, onItem = (item, { mouse } = {}) => (mouse || focusSetsBackdrop(document.documentElement.hasAttribute('data-follow-focus'))) && setBackdrop(artFor(item)), { selector = '.card' } = {}) {
   let timer = null;
   let last = null;
   let pending; // the item waiting to be shown (undefined: none)
@@ -162,10 +162,11 @@ export function followFocus(root, lookup, onItem = (item) => focusSetsBackdrop(d
     pending = item;
     byMouse = mouse;
     if (!item || item === last) return;
+    const fromMouse = mouse;
     timer = setTimeout(() => {
       last = item;
       pending = undefined;
-      onItem(item);
+      onItem(item, { mouse: fromMouse });
     }, delay);
   };
   // v0.28: the picture (and the colour it casts) waits until the remote rests, so holding an arrow changes nothing.

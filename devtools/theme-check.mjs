@@ -1,6 +1,6 @@
 // Plan C theme checks. `node devtools/theme-check.mjs [check ...]`  (no names: every check)
 //   THEMES=arctic,midnight narrows the themes a check visits (each check has its own default)
-//   BASE=http://localhost:8797   the dev Atomix (default http://localhost:8787, like the other devtools)
+//   BASE=http://localhost:8797   the dev Atomix (required: it refuses to run with BASE unset or pointing at :8787)
 //   SHOTS=<dir>                  keep a screenshot per check and theme
 // Needs a dev Atomix (devtools/make-dev.sh) with user dallas / atomix-dev-1, and Playwright outside the repo.
 // Artwork is stubbed the way fixed-compare.mjs does with ART=1 (small SVGs through page.route), so the dev media's
@@ -125,6 +125,34 @@ const CHECKS = {
         if (followsFocus(theme)) {
           check(`follow-focus ${theme}: the theme flag is on`, flag);
           check(`follow-focus ${theme}: card 3 focused, then after 500 ms the backdrop is its art`, id && src.includes(`backdrop-${id}.svg`), `card id ${id}, backdrop ${src}`);
+          // Mouse hover (I1): the backdrop and the spotlight both follow a card the pointer moves onto.
+          {
+            await page.evaluate(() => { document.activeElement?.blur?.(); });
+            const spotBefore = await page.evaluate(() => document.querySelector('.spot-title')?.textContent || '');
+            const bdBefore = await backdropSrc(page);
+            let hover = null;
+            for (let i = 4; i < 12 && !hover; i++) {
+              const got = await page.evaluate((i) => {
+                const c = document.querySelectorAll('.rows .row:not([data-row="live-now"]) .row-scroller > a.card')[i];
+                if (!c) return null;
+                const r = c.getBoundingClientRect();
+                const id = Number(/\/item\/(\d+)/.exec(c.getAttribute('href') || '')?.[1]) || null;
+                const title = (c.querySelector('.card-title')?.textContent || '').trim();
+                return r.width && r.top >= 0 && r.bottom <= innerHeight ? { id, title, x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+              }, i);
+              if (got && got.id && !bdBefore.includes(`backdrop-${got.id}.svg`) && !spotBefore.includes(got.title)) hover = got;
+            }
+            if (hover) {
+              await page.mouse.move(hover.x - 40, hover.y - 20);
+              await page.mouse.move(hover.x, hover.y, { steps: 6 });
+              await page.mouse.move(hover.x + 6, hover.y + 4, { steps: 3 });
+              await page.waitForTimeout(700);
+            }
+            const bdHover = await backdropSrc(page);
+            const spotHover = await page.evaluate(() => document.querySelector('.spot-title')?.textContent || '');
+            check(`follow-focus ${theme}: hovering a card by mouse sets the backdrop to its art`, Boolean(hover) && bdHover.includes(`backdrop-${hover.id}.svg`), `card ${hover && hover.id}, backdrop ${bdHover}`);
+            check(`follow-focus ${theme}: hovering a card by mouse puts its title in the spotlight`, Boolean(hover) && spotHover.includes(hover.title), `card "${hover && hover.title}", spotlight "${spotHover}"`);
+          }
           // Hold ArrowRight for 1.2 s: key repeats (e.repeat) set html.nav-held; the backdrop may change at most once (on release).
           // Start at the row's first card and repeat every 200 ms (6 steps): the row has only 8 cards, and a hold that
           // runs off its end would leave the row for the menu.

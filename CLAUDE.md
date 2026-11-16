@@ -195,7 +195,7 @@ Plan `docs/superpowers/plans/2026-11-17-atomix-visual-refresh-c.md`; each theme 
 - Rules that matter:
   - Midnight is the no-blur low-power reference. Obsidian: ring = accent, no halo, 1 px edges, `data-oled` default on. Daylight: TV canvas dimmed, wider halo.
   - Arctic and Arctic Side use no Arctic Horizon assets (CC BY-NC-SA); only OFL fonts in `public/fonts/`.
-  - `--button-radius` reaches `.btn` only (season tabs and kind pills keep `--pill`).
+  - `--button-radius` reaches `.btn` in shared CSS (kind pills keep `--pill`; Arctic's own theme.css also uses it for `.season-tab`).
   - R8: with `html[data-follow-focus]` (theme.json `backdropFollowsFocus`) only `focus-backdrop.js` sets the backdrop on focus (gated: not
     `nav-held`, not motion none, no poster fallback); other themes keep the old spotlight/library/search paths.
   - Orbit rows 256 px (6.2 posters at 1080p), grids keep 196. Harbour hover uses `--focus-grow`.

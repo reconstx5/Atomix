@@ -31,7 +31,7 @@ themes/
   or `"side"` (Kodi-style side menu). Phones get a bottom tab bar in the top and side layouts.
 - `colorScheme`: `"dark"` or `"light"` — sets native form controls and scrollbars.
 - `oled` (optional, `true`): True black is on for this theme unless the profile turns it off in Settings → Appearance. Dark themes only.
-- `artworkTint` (optional, `true`): the accent glow and fills follow the title's artwork (`html[data-artwork-tint]` is present when on, absent when off); Settings then says the chosen accent is used when a title has no artwork.
+- `artworkTint` (optional, `true`): declares that the theme's CSS paints with `--tint` (the title's artwork colour). It sets `html[data-artwork-tint]` (present when on, absent when off) for theme CSS to key on, and changes the Settings accent hint to say the chosen accent is used when a title has no artwork. It does not recolour anything by itself.
 - `backdropFollowsFocus` (optional, `true`): the page backdrop follows the focused card (`html[data-follow-focus]` is present when on, absent when off).
   Only real `true` values count; anything else is off.
 - `preview`: colours for the little preview card in the theme picker.
@@ -130,7 +130,7 @@ every theme with More contrast and, for dark themes, OLED).
 
 - **Midnight** is the low-power reference. Its surfaces are a little lighter (`--n-1` is #101219), the menu is opaque, and nothing
   on the page blurs (`--glass-blur: 0px` plus a rule that turns `backdrop-filter` off), so it reads well on a weak TV. Panels and
-  dialogs get a faint top edge from `--surface-edge` instead of leaning on shadows.
+  dialogs get a faint top edge from `--surface-edge` on top of their shadows.
 - **Orbit** keeps the glass and the full-screen artwork but is easier on the eyes: text is a 94 % off-white (`--n-12`), row posters
   are 256 px wide so the seventh peeks in, the player's top bar has a chrome shadow, and the environment behind the page is a dark
   wash of the artwork's colour (`--env-tint`). The floating progress track stays.
@@ -148,8 +148,8 @@ every theme with More contrast and, for dark themes, OLED).
 
 - `--surface-edge`: a `box-shadow` list item drawn on `.panel`, `.dialog`, `.player-menu` and `.details-panel`. The default is a
   no-op (`0 0 0 0 transparent`), so it is safe in a comma list. Midnight sets an inset 1 px top highlight.
-- `--button-radius`: the corner radius of `.btn`, default `var(--radius)`. It reaches `.btn` only; season tabs and kind pills
-  keep `--pill`.
+- `--button-radius`: the corner radius of `.btn`, default `var(--radius)`. Shared CSS applies it to `.btn` only; kind pills keep
+  `--pill`, and Arctic's own theme.css also uses it for `.season-tab`.
 - `--env-tint`: Orbit's environment colour. `backdrop.js` sets it from the artwork's tint (`envTint()` in `tint.js`: dark,
   low-chroma, hue kept) and removes it when there is none; Orbit paints `var(--env-tint, var(--bg))`.
 - `--chrome-shadow`: the shadow behind player chrome (text and icons over video) so it reads on a bright frame.

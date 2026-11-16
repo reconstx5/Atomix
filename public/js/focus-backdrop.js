@@ -34,7 +34,7 @@ export function followFocus(rowsEl, { itemOf, delay = 350 } = {}) {
     if (root.classList.contains('nav-held')) wasHeld = true;
   };
   const onKeyUp = (e) => {
-    if (!e.key.startsWith('Arrow') || !wasHeld || root.classList.contains('nav-held')) return;
+    if (!String(e.key || '').startsWith('Arrow') || !wasHeld || root.classList.contains('nav-held')) return;
     wasHeld = false;
     if (wanted) restart();
   };

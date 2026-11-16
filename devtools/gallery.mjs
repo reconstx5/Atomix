@@ -20,7 +20,7 @@ const pngs = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.
 
 const THEME_ORDER = ['midnight', 'orbit', 'obsidian', 'daylight', 'arctic', 'arctic-side', 'harbour'];
 const THEMES = {
-  midnight: { name: 'Midnight', note: 'The low-power reference: surfaces a little lighter, an opaque menu, no blur anywhere, and a faint top edge on panels and dialogs so they read without shadows.' },
+  midnight: { name: 'Midnight', note: 'The low-power reference: surfaces a little lighter, an opaque menu, no blur anywhere, and a faint top edge on panels and dialogs, on top of their shadows.' },
   orbit: { name: 'Orbit', note: 'Text is a 94% off-white instead of pure white, posters are 256 px so the seventh peeks in a row, the player top bar gets a chrome shadow, and the environment behind the page is a dark wash of the artwork colour.' },
   obsidian: { name: 'Obsidian', note: 'True black on OLED with 1 px edges instead of glows. The focus ring is the accent (4 px, 5 px on TV), and text is an off-white that does not bloom on black.' },
   daylight: { name: 'Daylight', note: 'On a TV the light canvas is dimmed so it is not glaring, the focus halo is wider so the ring still shows, and the amber rating is darker to stay readable.' },

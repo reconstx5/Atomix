@@ -83,7 +83,7 @@ export function Shelf({ data, query, view, admin }) {
 
   // The spotlight (and the artwork behind it) follows the focused or hovered poster; past the first row it gets compact.
   useLayoutEffect(() => {
-    followFocus(results.current, (card) => cardItems.get(card), (item) => { focusPick.current = item.id; setSpotItem(item); });
+    followFocus(results.current, (card) => cardItems.get(card), (item, o) => { focusPick.current = o && o.mouse ? null : item.id; setSpotItem(item); });
     const onFocus = (e) => {
       if (e.target.closest?.('.az-rail')) return; // the rail keeps the spotlight's size: a press must not move it under the pointer
       const card = e.target.closest?.('.library-results .card');
