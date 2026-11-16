@@ -210,3 +210,21 @@ export const ACCENT_SWATCHES = [
   { name: 'Violet', hex: '#8e4ec6' },
   { name: 'Pink', hex: '#d6409f' },
 ];
+
+// ---- Orbit's environment (visual refresh C7) ----
+// The sign-in and profile screens sit on a very dark wash of the artwork's colour: same hue, never lighter than
+// L 20 % or more colourful than C 0.04, so white text and the focus ring stay the brightest things on screen.
+const ENV_L = 0.20, ENV_C = 0.04;
+const envCache = new Map();
+
+/** The artwork colour (#rrggbb or #rgb) as a very dark, nearly grey wash with its hue kept; null for no colour. */
+export function envTint(colour) {
+  const src = normHex(colour);
+  if (!src) return null;
+  if (envCache.has(src)) return envCache.get(src);
+  const { L, C, H } = toOklch(src);
+  const out = oklchToHex(Math.min(ENV_L, L), Math.min(ENV_C, C), H);
+  envCache.set(src, out);
+  if (envCache.size > 200) envCache.delete(envCache.keys().next().value);
+  return out;
+}

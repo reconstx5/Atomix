@@ -4,7 +4,7 @@
 // against src/themes/apca.js (devtools/ramp.mjs now imports tint.js's OKLCH), so the server-side checks and the page agree.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { clampAccent, accentRamp, onAccent, toOklch, oklchToHex, apcaLc, ACCENT_SWATCHES } from '../public/js/tint.js';
+import { envTint, clampAccent, accentRamp, onAccent, toOklch, oklchToHex, apcaLc, ACCENT_SWATCHES } from '../public/js/tint.js';
 import { apcaContrast, wcagRatio, parseColor } from '../src/themes/apca.js';
 
 const HEX = /^#[0-9a-f]{6}$/;
@@ -134,4 +134,22 @@ test('ten curated swatches, named, with hues spread around the wheel', () => {
     const gap = (hues[(i + 1) % hues.length] - hues[i] + 360) % 360;
     assert.ok(gap >= 18 && gap <= 70, `gap after ${hues[i].toFixed(0)}: ${gap.toFixed(0)} (${hues.map((h) => h.toFixed(0))})`);
   }
+});
+
+test('envTint keeps the hue of artwork colour but makes it a very dark, nearly grey wash (Orbit environment)', () => {
+  const red = toOklch('#ff0000');
+  const { L, C, H } = toOklch(envTint('#ff0000'));
+  assert.ok(L <= 0.2 + 0.004, `L ${L}`);
+  assert.ok(C <= 0.04 + 0.004, `C ${C}`);
+  const d = Math.abs(((H - red.H + 540) % 360) - 180);
+  assert.ok(d <= 5, `hue ${H} vs ${red.H}`);
+});
+test('envTint of white is a dark grey with no chroma', () => {
+  const { L, C } = toOklch(envTint('#ffffff'));
+  assert.ok(L <= 0.2 + 0.004 && C < 0.005, `L ${L} C ${C}`);
+});
+test('envTint of null or junk is null', () => {
+  assert.equal(envTint(null), null);
+  assert.equal(envTint('not a colour'), null);
+  assert.equal(envTint(undefined), null);
 });

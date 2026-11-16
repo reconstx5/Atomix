@@ -17,8 +17,9 @@ const THEMES = {
   arctic: { n: { 1: '#17191c', 2: '#1c1f23', 3: '#22262b', 4: '#2c3137', 11: '#a3aab3', 12: '#eef1f4' }, accent: '#7cc7e8' },
   'arctic-side': { accent: '#e8e8e8' }, // its neutrals come from Arctic (@import)
   // Orbit: n-3 is its glass colour as an opaque swatch (theme.json's preview surface), n-4 its 14% white glass on
-  // the page, n-11 its 66% white text on the page; the old names keep their glass/alpha values in theme.css.
-  orbit: { n: { 1: '#05050c', 2: '#0b0b16', 3: '#1c1c2a', 4: '#28282e', 11: '#aaaaac', 12: '#ffffff' }, accent: '#8fe9ff' },
+  // the page, n-11 its 66% white text on the page, n-12 oklch(94% 0.005 285): a soft off-white, so the pure-white focus ring
+  // is the brightest thing on screen; the old names keep their glass/alpha values in theme.css.
+  orbit: { n: { 1: '#05050c', 2: '#0b0b16', 3: '#1c1c2a', 4: '#28282e', 11: '#aaaaac', 12: '#ebebee' }, accent: '#8fe9ff' },
   daylight: { n: { 1: '#f4f5f8', 2: '#eceef3', 3: '#ffffff', 4: '#e6e9f0', 11: '#4d5669', 12: '#121826' }, accent: '#2457e6', light: true },
 };
 

@@ -137,6 +137,15 @@ export const RULES = {
   'arctic-side': arcticRules('arctic-side'),
   orbit: [
     { name: 'the focus ring is white', token: '--focus-ring', check: (lch, map) => assert.equal(hexOf(map, '--focus-ring'), '#ffffff') },
+    // Task 7: body text is a soft off-white (L about 94 %, nearly neutral) so the white focus ring is the brightest thing on screen.
+    // lchOf goes through 8-bit hex, so the band allows for +-0.004.
+    ...['--text-high', '--text'].map((token) => ({ name: `${token} is an off-white (L 0.935-0.945, C up to 0.01), not pure white`, token, check: (lch) => {
+      assert.ok(lch.L >= 0.931 && lch.L <= 0.949, `L ${lch.L.toFixed(3)} is outside 0.935-0.945`);
+      assert.ok(lch.C <= 0.01, `C ${lch.C.toFixed(4)} is above 0.01`);
+    } })),
+    { name: 'the focus ring is the brightest token (brighter than --text-high)', token: '--text-high', check: (lch, map) => {
+      assert.ok(lchOf(map, '--focus-ring').L > lch.L, 'the ring is not brighter than the text');
+    } },
   ],
 };
 

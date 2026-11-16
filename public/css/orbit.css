@@ -194,7 +194,7 @@ body[data-layout="orbit"] .orbit-profile .avatar { width: max(32px, calc(40 * va
 }
 
 /* ---------- Home and rows ---------- */
-body[data-layout="orbit"] { --poster-w: calc(196 * var(--px)); --card-w: var(--poster-w); --wide-w: calc(336 * var(--px)); --square-w: calc(220 * var(--px)); }
+body[data-layout="orbit"] { --poster-w: calc(256 * var(--px)); --card-w: var(--poster-w); --wide-w: calc(336 * var(--px)); --square-w: calc(220 * var(--px)); }
 body[data-layout="orbit"] :is(.row-poster, .row-list) { grid-auto-columns: var(--poster-w); }
 body[data-layout="orbit"] .row-landscape { grid-auto-columns: var(--wide-w); }
 body[data-layout="orbit"] .row-square { grid-auto-columns: var(--square-w); }

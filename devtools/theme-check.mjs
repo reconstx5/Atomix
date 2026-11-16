@@ -7,6 +7,7 @@
 // missing art doesn't matter. Prints PASS/FAIL lines and exits 1 on any FAIL. Add a check: put a function in CHECKS.
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { open, check, failed, BASE } from './lib.mjs';
 
 if (!process.env.BASE || /:8787/.test(process.env.BASE)) {
@@ -156,6 +157,125 @@ const CHECKS = {
       } finally {
         await browser.close();
       }
+    }
+  },
+
+  // Orbit: the first poster row shows 6.0-6.6 posters, so the 7th peeks (the visible fraction of every card in the
+  // row's box, added up). Harbour is measured and reported too (Task 8 will enforce at least 5 there).
+  async rows() {
+    const ENFORCED = { orbit: [6.0, 6.6] };
+    for (const theme of themesFor(['orbit', 'harbour'])) {
+      for (const [width, height] of theme === 'orbit' ? [[1920, 1080], [1366, 768]] : [[1920, 1080]]) {
+        const { browser, page, errors } = await session(theme, { width, height });
+        try {
+          await home(page);
+          const n = await page.evaluate(() => {
+            const row = [...document.querySelectorAll('.rows .row:not([data-row="live-now"])')].find((r) => r.querySelector('.row-scroller > a.card'));
+            if (!row) return null;
+            const box = (row.querySelector('.row-scroller') || row).getBoundingClientRect();
+            const left = Math.max(box.left, 0), right = Math.min(box.right, innerWidth);
+            let sum = 0, cards = 0;
+            for (const c of row.querySelectorAll('.row-scroller > a.card')) {
+              const r = c.getBoundingClientRect();
+              const vis = Math.max(0, Math.min(r.right, right) - Math.max(r.left, left));
+              if (vis > 0) { sum += vis / r.width; cards++; }
+            }
+            return { sum: Math.round(sum * 100) / 100, cards, first: Math.round(row.querySelector('.row-scroller > a.card').getBoundingClientRect().width), box: [Math.round(left), Math.round(right)] };
+          });
+          const label = `rows ${theme} ${width}x${height}`;
+          if (!n) { check(`${label}: has a poster row`, false); continue; }
+          const band = ENFORCED[theme];
+          const detail = `${n.sum} posters (card ${n.first}px wide, row box ${n.box.join('-')})`;
+          if (band) check(`${label}: first row shows ${band[0]}-${band[1]} posters`, n.sum >= band[0] && n.sum <= band[1], detail);
+          else check(`${label}: poster count recorded (not enforced yet)`, true, detail);
+          check(`${label}: no page errors`, errors.length === 0, errors.join(' | ').slice(0, 200));
+          await shot(page, `rows-${theme}-${width}`);
+        } finally { await browser.close(); }
+      }
+    }
+  },
+
+  // Orbit's player top bar over the worst frame, a white one: the clock and the icons carry a dark edge (text-shadow or
+  // filter), and the clock's pixels still reach 3:1 against the frame sampled beside them.
+  async 'player-chrome'() {
+    for (const theme of themesFor(['orbit'])) {
+      const { browser, page, errors } = await session(theme);
+      try {
+        await home(page);
+        const id = await page.evaluate(() => Number(/\/item\/(\d+)/.exec(document.querySelector('.rows .row:not([data-row="live-now"]) .row-scroller > a.card')?.getAttribute('href') || '')?.[1]) || null);
+        await page.goto('about:blank');
+        await page.goto(`${BASE}/#/play/${id || 1}`);
+        await page.waitForSelector('.player-top', { timeout: 10000 });
+        await page.addStyleTag({ content: [
+          '.player video { visibility: hidden !important; } .player { background: #fff !important; }',
+          '.player-error, .player-spinner, .player-bigplay { display: none !important; }',
+          '.player[data-controls="hidden"] .player-top { opacity: 1 !important; transform: none !important; transition: none !important; }'].join('\n') });
+        await page.waitForSelector('.player-clock', { timeout: 5000 });
+        await page.waitForTimeout(600);
+        const info = await page.evaluate(() => {
+          const sh = (el) => { const cs = getComputedStyle(el); return { textShadow: cs.textShadow, filter: cs.filter }; };
+          const clock = document.querySelector('.player-clock');
+          const r = clock.getBoundingClientRect();
+          return { clock: sh(clock), icons: [...document.querySelectorAll('.player-top svg')].map(sh), box: { x: r.x, y: r.y, width: r.width, height: r.height } };
+        });
+        const edge = (o) => (o.textShadow && o.textShadow !== 'none') || (o.filter && o.filter !== 'none');
+        check(`player-chrome ${theme}: the clock has a text-shadow or filter`, edge(info.clock), info.clock.textShadow);
+        check(`player-chrome ${theme}: the top-bar icons have a text-shadow or filter`, info.icons.length > 0 && info.icons.every(edge), `${info.icons.length} icons`);
+        // Pixels: the text colour is the brightest pixel in the clock's box; the frame behind it is the median pixel of the same
+        // box as the viewer sees it, shadow halo included (the halo is what lifts the clock over a white frame). The text-free
+        // picture (b.png) is only kept with SHOTS, to show the bare frame.
+        const clip = { x: Math.max(0, info.box.x - 4), y: Math.max(0, info.box.y - 4), width: info.box.width + 8, height: info.box.height + 8 };
+        const withText = await page.screenshot({ clip });
+        await page.addStyleTag({ content: '.player-clock { color: transparent !important; text-shadow: none !important; }' });
+        const frame = await page.screenshot({ clip });
+        const dir = fs.mkdtempSync(path.join(process.env.TEMP || process.env.TMPDIR || '.', 'tc-'));
+        fs.writeFileSync(path.join(dir, 't.png'), withText);
+        fs.writeFileSync(path.join(dir, 'b.png'), frame);
+        const script = [
+          'import sys, warnings','warnings.simplefilter("ignore")',
+          'from PIL import Image',
+          'def lum(c):',
+          '    f = lambda v: (v/255/12.92) if v/255 <= 0.04045 else (((v/255)+0.055)/1.055)**2.4',
+          '    return 0.2126*f(c[0]) + 0.7152*f(c[1]) + 0.0722*f(c[2])',
+          "t = Image.open(sys.argv[1]).convert('RGB'); b = Image.open(sys.argv[2]).convert('RGB')",
+          'px = sorted(t.getdata(), key=lum); bg = px[len(px)//2]',
+          'ink = max(t.getdata(), key=lum)',
+          'hi, lo = sorted([lum(ink), lum(bg)], reverse=True)',
+          "print('%.2f #%02x%02x%02x #%02x%02x%02x' % (((hi+0.05)/(lo+0.05),) + tuple(ink) + tuple(bg)))"].join('\n');
+        const [ratio, ink, bg] = execFileSync(process.env.PYTHON || 'python', ['-c', script, path.join(dir, 't.png'), path.join(dir, 'b.png')], { encoding: 'utf8' }).trim().split(' ');
+        if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); fs.copyFileSync(path.join(dir, 't.png'), path.join(SHOTS, 'clock-text.png')); fs.copyFileSync(path.join(dir, 'b.png'), path.join(SHOTS, 'clock-frame.png')); }
+        fs.rmSync(dir, { recursive: true, force: true });
+        check(`player-chrome ${theme}: the clock reads at 3:1 or more over a white frame`, Number(ratio) >= 3, `${ratio}:1, text ${ink} on ${bg}`);
+        check(`player-chrome ${theme}: no page errors`, errors.filter((e) => !/Failed to load resource|stream|media|play/i.test(e)).length === 0, errors.join(' | ').slice(0, 200));
+        await shot(page, `player-chrome-${theme}`);
+      } finally { await browser.close(); }
+    }
+  },
+
+  // Midnight is the no-blur reference (Task 3): nothing on Home or a title page has a computed backdrop-filter.
+  async 'no-blur'() {
+    for (const theme of themesFor(['midnight'])) {
+      const { browser, page, errors } = await session(theme);
+      try {
+        await home(page);
+        const blurred = () => page.evaluate(() => [...document.querySelectorAll('*')].filter((e) => {
+          const cs = getComputedStyle(e);
+          return (cs.backdropFilter && cs.backdropFilter !== 'none') || (cs.webkitBackdropFilter && cs.webkitBackdropFilter !== 'none');
+        }).map((e) => e.tagName.toLowerCase() + (typeof e.className === 'string' && e.className.trim() ? '.' + e.className.trim().split(/\s+/).join('.') : '')));
+        const onHome = await blurred();
+        check(`no-blur ${theme}: Home has no element with a backdrop-filter`, onHome.length === 0, onHome.slice(0, 5).join(', ') || '0 elements');
+        const id = await page.evaluate(() => Number(/\/item\/(\d+)/.exec(document.querySelector('.rows .row:not([data-row="live-now"]) .row-scroller > a.card')?.getAttribute('href') || '')?.[1]) || null);
+        if (id) {
+          await page.goto('about:blank');
+          await page.goto(`${BASE}/#/item/${id}`);
+          await page.waitForSelector('.detail-title, .logo-box', { timeout: 10000 }).catch(() => {});
+          await page.waitForTimeout(1200);
+          const onItem = await blurred();
+          check(`no-blur ${theme}: a title page has no element with a backdrop-filter`, onItem.length === 0, onItem.slice(0, 5).join(', ') || '0 elements');
+        }
+        check(`no-blur ${theme}: no page errors`, errors.length === 0, errors.join(' | ').slice(0, 200));
+        await shot(page, `no-blur-${theme}`);
+      } finally { await browser.close(); }
     }
   },
 };

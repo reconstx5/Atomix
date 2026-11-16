@@ -91,13 +91,13 @@
   --n-3: #1c1c2a;
   --n-4: #28282e;
   --n-5: #3c3c42;
-  --n-6: #525257;
+  --n-6: #515157;
   --n-7: #68686d;
   --n-8: #7f7f83;
-  --n-9: #97979b;
-  --n-10: #b0b0b3;
-  --n-11: #cbc9ca;
-  --n-12: #ffffff;
+  --n-9: #97979a;
+  --n-10: #b0b0b2;
+  --n-11: #c9c9cb;
+  --n-12: #ebebee;
   --a-1: #050d0f;
   --a-2: #122124;
   --a-3: #21373c;
@@ -118,13 +118,13 @@
     --n-3: oklch(23.33% 0.0268 284.13);
     --n-4: oklch(27.93% 0.0109 285.67);
     --n-5: oklch(35.84% 0.0103 285.87);
-    --n-6: oklch(44.04% 0.0081 286.06);
+    --n-6: oklch(43.71% 0.0098 285.99);
     --n-7: oklch(51.90% 0.0078 286.13);
     --n-8: oklch(59.78% 0.0060 286.22);
-    --n-9: oklch(67.76% 0.0058 286.24);
-    --n-10: oklch(75.81% 0.0042 286.30);
-    --n-11: oklch(83.78% 0.0026 345.23);
-    --n-12: oklch(100.00% 0.0000 0);
+    --n-9: oklch(67.73% 0.0044 286.28);
+    --n-10: oklch(75.78% 0.0028 286.33);
+    --n-11: oklch(83.65% 0.0028 286.34);
+    --n-12: oklch(94.09% 0.0040 286.32);
     --a-1: oklch(15.11% 0.0143 213.25);
     --a-2: oklch(23.57% 0.0212 211.57);
     --a-3: oklch(32.06% 0.0291 213.59);
@@ -295,7 +295,7 @@ input::placeholder, textarea::placeholder { color: rgba(255, 255, 255, 0.5); }
     linear-gradient(0deg, color-mix(in srgb, var(--bg) 96%, transparent) 0%, color-mix(in srgb, var(--bg) 70%, transparent) 28%, rgba(4, 4, 14, 0) 54%);
   box-shadow: none; /* no frame line either */
 }
-.environment { background: radial-gradient(60% 55% at 50% 45%, color-mix(in srgb, var(--tint) 20%, transparent), transparent 75%), var(--bg); }
+.environment { background: var(--env-tint, var(--bg)); } /* a very dark wash of the artwork's colour (envTint in tint.js: L <= 20 %, C <= 0.04) */
 .environment::after { background: radial-gradient(120% 90% at 50% 40%, rgba(5, 5, 12, 0) 40%, color-mix(in srgb, var(--bg) 75%, transparent) 100%), color-mix(in srgb, var(--bg) 50%, transparent); }
 @media not all and (min-width: 1000px) and (orientation: landscape) {
   .backdrop { box-shadow: none; }
@@ -448,6 +448,10 @@ input::placeholder, textarea::placeholder { color: rgba(255, 255, 255, 0.5); }
 .player-title h1 { font-size: calc(30 * var(--px)); font-weight: 700; letter-spacing: -0.02em; }
 .player-title p { font-size: var(--t-meta); font-weight: 500; color: var(--text-soft); }
 .player-clock { font-size: var(--t-meta); font-weight: 500; color: var(--text); font-variant-numeric: tabular-nums; }
+/* The top bar's text and icons over any frame, even a white one: a dark edge and a soft halo (Task 7). */
+:root { --chrome-shadow: 0 1px 2px rgba(0, 0, 0, 0.7), 0 0 12px rgba(0, 0, 0, 0.45); }
+.player-top :is(h1, p, .player-clock) { text-shadow: var(--chrome-shadow); }
+.player-top :is(.icon, svg) { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7)) drop-shadow(0 0 6px rgba(0, 0, 0, 0.45)); }
 .player-controls::before {
   background: var(--glass-tinted); -webkit-backdrop-filter: var(--blur-tinted); backdrop-filter: var(--blur-tinted);
   box-shadow: inset 0 0 0 1px var(--glass-tinted-edge), inset 0 1px 0 var(--glass-highlight), 0 calc(30 * var(--px)) calc(80 * var(--px)) rgba(0, 0, 0, 0.5);

@@ -4,7 +4,7 @@
 // which themes use for glows, progress bars and highlights.
 import { sizedAttrs } from './sized.js';
 import { h } from './dom.js';
-import { ambientColour } from './tint.js';
+import { ambientColour, envTint } from './tint.js';
 import { coverRect } from './orbit-rules.js';
 import { focusSetsBackdrop } from './focus-backdrop-rules.js';
 
@@ -88,6 +88,9 @@ function setTint(colour) {
   const root = document.documentElement.style;
   if (colour) root.setProperty('--tint', colour);
   else root.removeProperty('--tint');
+  const env = envTint(colour);
+  if (env) root.setProperty('--env-tint', env);
+  else root.removeProperty('--env-tint');
 }
 
 /** Show `url` behind the page (null → plain background). Cross-fades between images. */
