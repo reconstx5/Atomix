@@ -1,5 +1,5 @@
 // How long until a player has something to show: direct, converted (fMP4 stream) and converted for Safari (HLS).
-const B = 'http://localhost:8787';
+const B = process.env.BASE || 'http://localhost:8787';
 const login = await fetch(`${B}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'dallas', password: 'atomix-dev-1' }) });
 const cookie = login.headers.get('set-cookie').split(';')[0];
 const H = { cookie, 'content-type': 'application/json' };

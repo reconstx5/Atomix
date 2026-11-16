@@ -3,9 +3,9 @@
 // under "More libraries"; a pinned id that doesn't exist is ignored; no pins = every library in the server's order and no
 // More entry; Settings → Menu "Move up" reorders the rail at once; a library entry's menu (right click / long press /
 // menu key) can Unpin it.
-import { open, go, check, failed } from './lib.mjs';
+import { open, go, check, failed, BASE } from './lib.mjs';
 
-const API = 'http://localhost:8787/api/me';
+const API = `${BASE}/api/me`;
 const libsIn = (page, sel) => page.evaluate((sel) => [...document.querySelectorAll(sel)].filter((a) => a.offsetParent || getComputedStyle(a).display !== 'none').map((a) => a.dataset.nav).filter((n) => /^lib-/.test(n)), sel);
 const hasMore = (page) => page.evaluate(() => Boolean(document.querySelector('#nav [data-nav="more-libs"]')));
 async function at(theme, size, pinned, fn) {

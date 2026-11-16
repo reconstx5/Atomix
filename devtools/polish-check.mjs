@@ -7,7 +7,7 @@
 //  4. Watched mark: top-right, an opaque disc, no blur; count badges top-left.
 //  5. Skeletons: a page answering in 600 ms shows neither skeleton nor spinner; one taking 2.5 s shows a skeleton after
 //     about 1 s and never the spinner; no shimmer under reduced motion or at TV size.
-import { open, go, check, failed } from './lib.mjs';
+import { open, go, check, failed, BASE } from './lib.mjs';
 import { parseColor } from '../src/themes/apca.js';
 
 const THEMES = (process.env.THEMES || 'midnight,daylight,arctic,orbit').split(',');
@@ -86,7 +86,7 @@ for (const theme of THEMES) {
   // More contrast and OLED edges never cover the progress track (final review I3).
   for (const prefs of [{ contrast: 'more' }, ...(theme === 'daylight' ? [] : [{ oled: true }])]) {
     const t = await open({ width: 1366, height: 768, theme });
-    await t.context.request.patch('http://localhost:8787/api/me', { data: { prefs } });
+    await t.context.request.patch(`${BASE}/api/me`, { data: { prefs } });
     await go(t.page, '#/');
     await t.page.waitForTimeout(1500); // the splash fades
     // Paint order can't be hit-tested (the edge is a pointer-events: none ::after): compare the pixels at the middle of the track's
@@ -111,7 +111,7 @@ for (const theme of THEMES) {
       top = px.every((v, i) => Math.abs(v - want[i]) <= 24) ? 'track' : `pixel ${px} vs fill ${want}`;
     }
     check(`${theme} ${Object.keys(prefs)[0]}: the progress track is on top of the card edge`, top === 'track', top);
-    await t.context.request.patch('http://localhost:8787/api/me', { data: { prefs: { contrast: null, oled: null } } });
+    await t.context.request.patch(`${BASE}/api/me`, { data: { prefs: { contrast: null, oled: null } } });
     await t.browser.close();
   }
 
@@ -171,7 +171,7 @@ for (const [opts, label] of [[{ reducedMotion: 'reduce' }, 'reduced motion'], [{
     return getComputedStyle(sk.querySelector('.sk'), '::after').animationName;
   });
   check(`no shimmer under ${label}`, anim === 'none' || !anim, anim);
-  await s.context.request.patch('http://localhost:8787/api/me', { data: { prefs: { reduceMotion: false } } });
+  await s.context.request.patch(`${BASE}/api/me`, { data: { prefs: { reduceMotion: false } } });
   await s.browser.close();
 }
 console.log(failed() ? `${failed()} FAIL` : 'ALL PASS');

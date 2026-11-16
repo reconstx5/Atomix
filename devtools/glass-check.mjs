@@ -3,7 +3,7 @@
 // Tinted .5–.7 + blur, Solid ≥ .9 + no blur); the Details panel never goes below .66; at 1920×1080 with no choice the
 // page is Solid; a profile saved with reduceEffects: true shows "Solid" chosen in Settings; nothing inside a row or grid
 // has a backdrop-filter at rest; every theme sets html[data-glass] and offers the three choices in Settings.
-import { open, go, check, failed } from './lib.mjs';
+import { open, go, check, failed, BASE } from './lib.mjs';
 
 const THEMES = ['arctic', 'arctic-side', 'daylight', 'harbour', 'midnight', 'obsidian', 'orbit'];
 const probe = (page, sel) => page.evaluate((sel) => {
@@ -14,7 +14,7 @@ const probe = (page, sel) => page.evaluate((sel) => {
   const parts = m ? m[1].split(/[ ,/]+/).filter(Boolean).map(Number) : [];
   return { alpha: parts.length > 3 ? parts[3] : parts.length ? 1 : 0, blur: cs.backdropFilter || cs.webkitBackdropFilter || 'none', glass: document.documentElement.dataset.glass };
 }, sel);
-const setPrefs = (ctx, prefs) => ctx.request.patch('http://localhost:8787/api/me', { data: { prefs } });
+const setPrefs = (ctx, prefs) => ctx.request.patch(`${BASE}/api/me`, { data: { prefs } });
 
 const { browser, context, page } = await open({ width: 1366, height: 768, theme: 'orbit' });
 const want = { clear: [0, 0.3, true], tinted: [0.5, 0.7, true], solid: [0.9, 1, false] };

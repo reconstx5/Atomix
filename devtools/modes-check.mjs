@@ -2,9 +2,9 @@
 // True black: body background #000 (Midnight, Orbit); More contrast: a button and a card's art have a 2 px edge, the
 // glass is Solid; Large text 1.3: .card-title 1.3× normal (±1 px) in Midnight and Orbit; with Largest text at 390×844 and
 // 1920×1080 no page scrolls sideways (Home, a library, a title page, Settings); forced colours hide the backdrop/scrim.
-import { open, go, check, failed } from './lib.mjs';
+import { open, go, check, failed, BASE } from './lib.mjs';
 
-const API = 'http://localhost:8787/api/me';
+const API = `${BASE}/api/me`;
 const reset = { oled: null, contrast: null, textScale: null, glass: null };
 async function at(theme, size, prefs, fn, extra = {}) {
   const [width, height] = size;
