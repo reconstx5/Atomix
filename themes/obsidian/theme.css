@@ -1,6 +1,10 @@
 /* Obsidian — pure black background for OLED screens. */
 :root {
-  --focus-ring: #ffffff; /* A4: a white ring with a dark halo (tokens.css) on every dark theme */
+  /* The ring is the violet accent at full strength, flat: no halo, no glow (Plan C). 4px, 5px on a TV. */
+  --focus-ring: var(--accent-solid);
+  --focus-halo: transparent;
+  --focus-width: 4px;
+  --border-subtle: var(--border); /* a hairline: white at 9% */
   color-scheme: dark;
   --border: rgba(255, 255, 255, 0.09);
   --accent-text: #000000; /* black or white, whichever reads on the accent (APCA Lc >= 60) */
@@ -17,6 +21,11 @@
   --accent-solid: var(--a-10);
   --accent-hover: var(--a-11);
 }
+/* OLED: no coloured glow behind a focused card (the lift still moves); the flat violet ring is the cue. */
+:is(.row-scroller, .grid) > :is(.poster-card, .landscape-card:not(.live-card))::before { display: none; }
+@media (min-width: 1600px) and (orientation: landscape) {
+  :root { --focus-width: 5px; }
+}
 /* Ramps (devtools/ramp.mjs): --n-* neutrals, --a-* accent. Hex for every browser; the same colours in oklch() where
    it is understood. --bg, --bg-2, --surface, --surface-2, --text and --accent come from these (public/css/tokens.css). */
 :root {
@@ -31,7 +40,7 @@
   --n-9: #888891;
   --n-10: #a1a1aa;
   --n-11: #babac3;
-  --n-12: #f4f4f6;
+  --n-12: #dedde2;
   --a-1: #000001;
   --a-2: #05020f;
   --a-3: #140d27;
@@ -58,7 +67,7 @@
     --n-9: oklch(62.97% 0.0133 286.01);
     --n-10: oklch(71.18% 0.0129 286.07);
     --n-11: oklch(79.17% 0.0126 286.11);
-    --n-12: oklch(96.77% 0.0027 286.35);
+    --n-12: oklch(89.98% 0.0068 295.44);
     --a-1: oklch(3.04% 0.0210 264.05);
     --a-2: oklch(10.72% 0.0371 295.13);
     --a-3: oklch(18.48% 0.0514 293.11);

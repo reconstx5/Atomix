@@ -12,7 +12,7 @@ import { pathToFileURL } from 'node:url';
 const THEMES = {
   // n: {step: hex} anchors; the rest interpolated. accent: a-9. light: Daylight's ramp runs dark-on-light.
   midnight: { n: { 1: '#101219', 2: '#151923', 3: '#1b1f2c', 4: '#212636', 5: '#272d3f', 6: '#2f364c', 11: '#a3abba', 12: '#eef1f6' }, accent: '#ff6b3d' },
-  obsidian: { n: { 1: '#000000', 2: '#070708', 3: '#111114', 4: '#1c1c22', 11: '#a1a1ad', 12: '#f4f4f6' }, accent: '#a78bfa' },
+  obsidian: { n: { 1: '#000000', 2: '#070708', 3: '#111114', 4: '#1c1c22', 11: '#a1a1ad', 12: '#dedde2' }, accent: '#a78bfa' },
   harbour: { n: { 1: '#0a1624', 2: '#0e1c2e', 3: '#132338', 4: '#1b3150', 11: '#9fb4cc', 12: '#eaf3ff' }, accent: '#2fb8f0' },
   arctic: { n: { 1: '#17191c', 2: '#1c1f23', 3: '#22262b', 4: '#2c3137', 11: '#a3aab3', 12: '#eef1f4' }, accent: '#7cc7e8' },
   'arctic-side': { accent: '#e8e8e8' }, // its neutrals come from Arctic (@import)
