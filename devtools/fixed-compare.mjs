@@ -61,7 +61,7 @@ function dress(v) {
 }
 const browser = await chromium.launch();
 for (const theme of THEMES) for (const [size, [w, h]] of Object.entries(SIZES)) {
-  if (size === 'phone' && !['orbit', 'arctic', 'midnight'].includes(theme)) continue;
+  if (size === 'phone' && !process.env.SIZES && !['orbit', 'arctic', 'midnight'].includes(theme)) continue;
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, reducedMotion: 'reduce', isMobile: size === 'phone', hasTouch: size === 'phone', serviceWorkers: 'block' }); // the app's service worker would answer past page.route
   await ctx.request.post(`${BASE}/api/auth/login`, { data: { username: 'dallas', password: 'atomix-dev-1' } });
   await ctx.request.patch(`${BASE}/api/me`, { data: { prefs: { theme, reduceMotion: true } } });
