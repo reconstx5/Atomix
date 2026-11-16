@@ -31,8 +31,8 @@ themes/
   or `"side"` (Kodi-style side menu). Phones get a bottom tab bar in the top and side layouts.
 - `colorScheme`: `"dark"` or `"light"` — sets native form controls and scrollbars.
 - `oled` (optional, `true`): True black is on for this theme unless the profile turns it off in Settings → Appearance. Dark themes only.
-- `artworkTint` (optional, `true`): the accent glow and fills follow the title's artwork; Settings then says the chosen accent is used when a title has no artwork.
-- `backdropFollowsFocus` (optional, `true`): the page backdrop follows the focused card (`html[data-follow-focus]`).
+- `artworkTint` (optional, `true`): the accent glow and fills follow the title's artwork (`html[data-artwork-tint]` is present when on, absent when off); Settings then says the chosen accent is used when a title has no artwork.
+- `backdropFollowsFocus` (optional, `true`): the page backdrop follows the focused card (`html[data-follow-focus]` is present when on, absent when off).
   Only real `true` values count; anything else is off.
 - `preview`: colours for the little preview card in the theme picker.
 - `stylesheet` (optional): CSS file name if it isn't `theme.css`.

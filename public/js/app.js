@@ -311,8 +311,11 @@ export function applyTheme() {
   root.setProperty('--subtitle-scale', String(prefs.subtitleSize || 1));
   applyMotion({ profileReduce: Boolean(prefs.reduceMotion) }); // v0.28: data-motion (and html.reduce-motion)
   currentTheme = theme;
-  document.documentElement.dataset.artworkTint = String(theme?.artworkTint === true);
-  document.documentElement.dataset.followFocus = String(theme?.backdropFollowsFocus === true);
+  // Present-or-absent, like data-oled.
+  for (const [key, on] of [['artworkTint', theme?.artworkTint === true], ['followFocus', theme?.backdropFollowsFocus === true]]) {
+    if (on) document.documentElement.dataset[key] = '';
+    else delete document.documentElement.dataset[key];
+  }
   applyAppearance(prefs, theme);
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta && theme?.preview?.background) meta.setAttribute('content', theme.preview.background);
