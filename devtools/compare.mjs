@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 const { chromium } = createRequire(import.meta.url)('playwright');
-const BASE = 'http://localhost:8787';
+const BASE = process.env.BASE || 'http://localhost:8787';
 const [mode, a, b] = process.argv.slice(2);
 const PAGES = (process.env.PAGES || '#/,#/item/1,#/item/9,#/item/10,#/lists,#/lists/1,#/lists/2').split(',');
 const THEMES = (process.env.THEMES || 'orbit,arctic,arctic-side,midnight,daylight,harbour,obsidian').split(',');

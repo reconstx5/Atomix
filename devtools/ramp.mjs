@@ -6,6 +6,8 @@
 // Anchors per theme: which step is which old token. Plan C retunes by editing these.
 import { parseColor, apcaContrast } from '../src/themes/apca.js';
 import { composite } from '../src/themes/tokens.js';
+import { toOklch, oklchToHex } from '../public/js/tint.js';
+import { pathToFileURL } from 'node:url';
 
 const THEMES = {
   // n: {step: hex} anchors; the rest interpolated. accent: a-9. light: Daylight's ramp runs dark-on-light.
@@ -20,36 +22,8 @@ const THEMES = {
   daylight: { n: { 1: '#f4f5f8', 2: '#eceef3', 3: '#ffffff', 4: '#e6e9f0', 11: '#4d5669', 12: '#121826' }, accent: '#2457e6', light: true },
 };
 
-// --- OKLCH maths (sRGB <-> OKLab, Björn Ottosson) ---
-const lin = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
-export function toOklch(hex) {
-  const { r, g, b } = parseColor(hex);
-  const [R, G, B] = [r, g, b].map((v) => lin(v / 255));
-  const l = Math.cbrt(0.4122214708 * R + 0.5363325363 * G + 0.0514459929 * B);
-  const m = Math.cbrt(0.2119034982 * R + 0.6806995451 * G + 0.1073969566 * B);
-  const s = Math.cbrt(0.0883024619 * R + 0.2817188376 * G + 0.6299787005 * B);
-  const L = 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
-  const a = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
-  const bb = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
-  const C = Math.hypot(a, bb);
-  const H = C < 1e-4 ? 0 : ((Math.atan2(bb, a) * 180) / Math.PI + 360) % 360;
-  return { L, C, H };
-}
-function rawRgb(L, C, H) { // unclipped linear-free sRGB 0..1, to test the gamut
-  const h = (H * Math.PI) / 180, a = C * Math.cos(h), b = C * Math.sin(h);
-  const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
-  const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
-  const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
-  return [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
-    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s];
-}
-const inGamut = (L, C, H) => rawRgb(L, C, H).every((v) => v >= -1e-4 && v <= 1 + 1e-4);
-function toHex(L, C, H) {
-  let lo = 0, hi = C; // gamut map by lowering chroma (hue and lightness kept)
-  if (!inGamut(L, C, H)) { for (let i = 0; i < 30; i++) { const mid = (lo + hi) / 2; if (inGamut(L, mid, H)) lo = mid; else hi = mid; } C = lo; }
-  const enc = (v) => { v = Math.min(1, Math.max(0, v)); return Math.round(255 * (v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055)); };
-  return '#' + rawRgb(L, C, H).map((v) => enc(v).toString(16).padStart(2, '0')).join('');
-}
+// The OKLCH maths (sRGB <-> OKLab) is public/js/tint.js's, the one copy; toHex keeps this file's old name.
+const toHex = oklchToHex;
 const mixHue = (h1, c1, h2, c2, t) => {
   if (c1 < 0.005) return h2;
   if (c2 < 0.005) return h1;
@@ -135,7 +109,7 @@ function css(name) {
   return `:root {\n${hex}\n}\n@supports (color: oklch(0% 0 0)) {\n  :root {\n${ok}\n  }\n}`;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const arg = process.argv[2];
   if (arg === '--table') {
     for (const name of themeNames) {

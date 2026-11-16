@@ -9,11 +9,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readThemeTokens, composite } from '../src/themes/tokens.js';
 import { apcaContrast, wcagRatio, parseColor } from '../src/themes/apca.js';
+import { THEMES, MODES, chainOf, layoutOf, resolve, themeFile, tokensOf } from './helpers/theme-resolve.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
-const THEMES = ['arctic', 'arctic-side', 'daylight', 'harbour', 'midnight', 'obsidian', 'orbit'];
-const MODES = ['modern', 'legacy']; // legacy = a browser without oklch() (old TVs): @supports blocks don't apply
 const SEMANTIC = ['--app-bg', '--surface-1', '--surface-2', '--surface-3', '--border-subtle', '--border-strong', '--text-high',
   '--text-low', '--accent-solid', '--accent-hover', '--on-accent', '--focus-ring', '--danger', '--success'];
 const OLD_COLOURS = ['--bg', '--bg-2', '--surface', '--surface-2', '--border', '--text', '--text-dim', '--accent', '--accent-text', '--danger', '--success'];
@@ -27,23 +26,6 @@ const RETUNED = {
   '--accent-text': ['arctic', 'arctic-side', 'daylight', 'harbour', 'midnight', 'obsidian', 'orbit'],
 };
 const OLD_SURFACES = ['--bg', '--bg-2', '--surface', '--surface-2'];
-
-// The stylesheets in the order index.html loads them, then the theme (and what it @imports, first).
-const baseCss = () => ['public/css/tokens.css', 'public/css/app.css', 'public/css/orbit.css'].map(read).join('\n');
-const layoutOf = (t) => JSON.parse(read(`themes/${t}/theme.json`)).layout;
-function chainOf(file) {
-  const css = fs.readFileSync(file, 'utf8');
-  const imp = /@import\s+url\(["']?([^"')]+)["']?\)/.exec(css);
-  return imp ? [...chainOf(path.resolve(path.dirname(file), imp[1])), file] : [file];
-}
-function resolve(themeFile, { supports = 'modern', layout = 'top', base = baseCss(), attrs = {}, classes = [] } = {}) {
-  const context = { attrs: { 'data-layout': layout, ...attrs }, classes, supports };
-  let m = base;
-  for (const f of chainOf(themeFile)) m = readThemeTokens(fs.readFileSync(f, 'utf8'), { base: m, context });
-  return m;
-}
-const themeFile = (t) => path.join(ROOT, 'themes', t, 'theme.css');
-const tokensOf = (t, supports, extra = {}) => resolve(themeFile(t), { supports, layout: layoutOf(t), ...extra });
 
 const colour = (m, name) => {
   const c = parseColor(m.get(name) ?? '');

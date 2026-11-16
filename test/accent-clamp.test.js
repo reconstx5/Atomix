@@ -1,12 +1,11 @@
 // Visual refresh Plan A, task 6: a chosen accent works in every theme. public/js/tint.js clamps it in OKLCH (dark
 // themes L 70–80 %, C 0.10–0.15; Daylight L 45–55 %; hue kept; a grey stays grey), builds the --a-1..12 ramp from it
 // and picks the ink on it (black or white) by APCA, which must reach Lc 60. The client's colour maths is checked here
-// against src/themes/apca.js and devtools/ramp.mjs, so the server-side checks and the page agree.
+// against src/themes/apca.js (devtools/ramp.mjs now imports tint.js's OKLCH), so the server-side checks and the page agree.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { clampAccent, accentRamp, onAccent, toOklch, oklchToHex, apcaLc, ACCENT_SWATCHES } from '../public/js/tint.js';
 import { apcaContrast, wcagRatio, parseColor } from '../src/themes/apca.js';
-import { toOklch as rampOklch } from '../devtools/ramp.mjs';
 
 const HEX = /^#[0-9a-f]{6}$/;
 const lc = (text, bg) => apcaContrast(parseColor(text), parseColor(bg));
@@ -112,11 +111,9 @@ test('bad input: anything not #rrggbb (or #rgb) gives null', () => {
   assert.equal(accentRamp('red', 'dark'), null);
 });
 
-test('the client OKLCH maths agrees with devtools/ramp.mjs and src/themes/apca.js', () => {
+test('the client OKLCH maths agrees with src/themes/apca.js', () => {
   for (const c of SWEEP.filter((_, i) => i % 13 === 0)) {
-    const a = toOklch(c), b = rampOklch(c);
-    assert.ok(Math.abs(a.L - b.L) < 1e-6 && Math.abs(a.C - b.C) < 1e-6, c);
-    if (a.C > 1e-3) assert.ok(hueDist(a.H, b.H) < 1e-3, c);
+    const a = toOklch(c);
     // Back to hex through tint.js, and through apca.js's oklch() parser: the same colour.
     const back = oklchToHex(a.L, a.C, a.H);
     assert.equal(back, c, 'round trip');

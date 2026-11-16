@@ -28,7 +28,7 @@ if (mode === 'diff') {
       'a = Image.open(sys.argv[1]).convert("RGB"); b = Image.open(sys.argv[2]).convert("RGB")',
       'print("size" if a.size != b.size else (ImageChops.difference(a, b).getbbox() or ""))',
     ].join('\n');
-    const d = execFileSync('python3', ['-c', py, path.join(dir, png), path.join(other, png)]).toString().trim();
+    const d = execFileSync(process.env.PYTHON || 'python3', ['-c', py, path.join(dir, png), path.join(other, png)]).toString().trim();
     if (d) (bad++, console.log(`PICTURE DIFFERS ${png} ${d}`));
   }
   console.log(bad ? `${bad} differences` : 'identical');
@@ -38,7 +38,12 @@ const fixDir = mode === 'record' ? dir : other;
 const T = Date.parse('2026-11-11T19:10:00+13:00');
 const PAGES = (process.env.PAGES || '#/live,#/live/guide,#/').split(',');
 const THEMES = (process.env.THEMES || 'arctic,arctic-side,midnight,daylight,harbour,obsidian,orbit').split(',');
-const SIZES = { desk: [1917, 992], phone: [390, 844] };
+// SIZES=desk,tv,phone picks sizes (default desk,phone, as before). desk here is 1440x900: at 1920x1080 landscape Atomix
+// is already in TV mode, so desk and tv must differ. The old default keeps the old 1917x992.
+const SIZE_PIXELS = { desk: [1440, 900], tv: [1920, 1080], phone: [390, 844] };
+const SIZES = process.env.SIZES
+  ? Object.fromEntries(process.env.SIZES.split(',').map((n) => [n, SIZE_PIXELS[n] || (() => { throw new Error(`SIZES: unknown size "${n}" (use desk, tv or phone)`); })()]))
+  : { desk: [1917, 992], phone: [390, 844] };
 fs.mkdirSync(dir, { recursive: true });
 const fixFile = path.join(fixDir, 'fixtures.json');
 const fixtures = mode === 'replay' ? JSON.parse(fs.readFileSync(fixFile, 'utf8')) : {};
