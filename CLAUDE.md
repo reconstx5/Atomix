@@ -44,8 +44,9 @@ Atomix is a self-hosted media hub in the spirit of Kodi: films, TV, music and Li
   file for file on 17 Nov. Dallas decides when to commit; suggest committing before large new work.
 - Work moved to Claude Code on this PC on 17 Nov. The handoff (what was done, decisions, deferred minors, what's next)
   is `docs/HANDOFF-2026-11.md`. The design research is `Claude outputs/Media app UI design 2026.md`.
-- Next: visual refresh **Plan C** (spec `docs/superpowers/specs/2026-11-12-atomix-visual-refresh-design.md`, section C:
-  each theme's own changes + a before/after gallery). Plans A and B are done (`docs/superpowers/plans/…-a.md`, `…-b.md`).
+- Visual refresh **Plan C is done on branch `visual-refresh-c`** (from main 7030c00, the v0.28+v0.29 commit), waiting for Dallas's
+  gallery review and merge decision (nothing pushed). Next: the title page (`views/item.js`) on Preact, then the Jellyfin API.
+  Plans A, B and C: `docs/superpowers/plans/`.
 - Still to verify on real hardware: iPhone FairPlay and films on iPhone, Chromecast with encrypted channels, PlayReady
   on Edge/Xbox, TV timings for motion, Safari view transitions.
 
@@ -185,3 +186,25 @@ Plan `docs/superpowers/plans/2026-11-12-atomix-visual-refresh-b.md`.
 - Checks: `node --test test/appearance-rules.test.js test/appearance-prefs.test.js test/serialize-media.test.js
   test/theme-tokens.test.js`; devtools `glass-check`, `modes-check`, `pinned-check`, `polish-check` (run devtools checks
   one at a time: they share the dev profile's prefs).
+
+## Visual refresh C (v0.29 work, on branch visual-refresh-c)
+Plan `docs/superpowers/plans/2026-11-17-atomix-visual-refresh-c.md`; each theme made itself (see `docs/THEMES.md`, "What each built-in theme is after Plan C").
+- Files: `themes/*/theme.css` + `theme.json`, `public/css/tokens.css` (`--surface-edge`, `--button-radius`), `app.css`, `orbit.css`
+  (`--poster-w` 256, `--grid-poster-w` 196), `public/js/tint.js` (`envTint`), `backdrop.js` (`--env-tint`, `focusSetsBackdrop`),
+  `focus-backdrop.js` + `focus-backdrop-rules.js`, `devtools/theme-check.mjs`, `devtools/gallery.mjs` + `gallery-rules.mjs`.
+- Rules that matter:
+  - Midnight is the no-blur low-power reference. Obsidian: ring = accent, no halo, 1 px edges, `data-oled` default on. Daylight: TV canvas dimmed, wider halo.
+  - Arctic and Arctic Side use no Arctic Horizon assets (CC BY-NC-SA); only OFL fonts in `public/fonts/`.
+  - `--button-radius` reaches `.btn` only (season tabs and kind pills keep `--pill`).
+  - R8: with `html[data-follow-focus]` (theme.json `backdropFollowsFocus`) only `focus-backdrop.js` sets the backdrop on focus (gated: not
+    `nav-held`, not motion none, no poster fallback); other themes keep the old spotlight/library/search paths.
+  - Orbit rows 256 px (6.2 posters at 1080p), grids keep 196. Harbour hover uses `--focus-grow`.
+  - theme.json is read when the server starts: restart the dev server after changing one.
+- Checks: `node --test test/theme-rules.test.js test/theme-tokens.test.js test/gallery.test.js`. Browser (dev server, PowerShell on Windows):
+  `BASE=http://localhost:8797 node devtools/theme-check.mjs [follow-focus|rows|player-chrome|no-blur|grown]`, `THEMES=arctic,midnight` narrows,
+  `SHOTS=<dir>` keeps pictures. It refuses to run without BASE or against :8787 (the live server). Needs Playwright outside the repo.
+  Gallery: `ART=1 SIZES=desk,tv,phone PAGES='#/,#/library/1,#/item/1,#/live,#/settings' node devtools/fixed-compare.mjs record <dir>`, then
+  `node devtools/gallery.mjs <before> <after> <out>` (Pillow; `PYTHON` overrides `python`) writes `index.html` sliders and `visual-evidence.json`.
+- Still needs real devices: TV timings and the focus ring on a TV, Safari/iPhone, old TV browsers (no `oklch`/`color-mix`), Daylight dimming on a real TV.
+- Parked minors: `modes-check` fails 10 checks on midnight/orbit identically before Plan C (likely the check or leftover prefs); `card-select` ignores
+  `THEMES`; `sized.js` guesses 196 px for row posters; laptop widths 1000-1366 show about 5.8 Orbit posters, unchecked.
