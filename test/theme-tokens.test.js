@@ -185,8 +185,16 @@ test('every ramp step has a hex value and the same colour in oklch() inside @sup
     // theme-rules.test.js, so they are cut out here (brace-matched: they hold an @supports block of their own).
     let css = read(`themes/${t}/theme.css`).replace(/\/\*[\s\S]*?\*\//g, '');
     for (let at = css.indexOf('@media'); at >= 0; at = css.indexOf('@media')) {
-      let depth = 0, end = css.indexOf('{', at);
-      for (let i = end; i < css.length; i++) { if (css[i] === '{') depth++; else if (css[i] === '}' && --depth === 0) { end = i + 1; break; } }
+      const open = css.indexOf('{', at);
+      assert.ok(open > 0, `${t}: an @media without a block`);
+      let depth = 0, end = -1;
+      for (let i = open; i < css.length && end < 0; i++) { if (css[i] === '{') depth++; else if (css[i] === '}' && --depth === 0) end = i + 1; }
+      assert.ok(end > 0, `${t}: unbalanced braces in an @media block`);
+      const block = css.slice(open, end);
+      const steps = (x) => [...x.matchAll(/(--[na]-\d+)\s*:/g)].map((m) => m[1]).sort().join();
+      const inner = /@supports\s*\(color:\s*oklch\(0% 0 0\)\)\s*\{([\s\S]*)\}/.exec(block);
+      const outer = inner ? block.replace(inner[0], '') : block;
+      if (steps(outer)) assert.ok(inner && steps(inner[1]) === steps(outer), `${t}: an @media block sets ramp steps (${steps(outer)}) without the same steps in a nested @supports oklch() block`);
       css = css.slice(0, at) + css.slice(end);
     }
     const sup = /@supports\s*\(color:\s*oklch\(0% 0 0\)\)\s*\{([\s\S]*?\}\s*)\}/.exec(css);

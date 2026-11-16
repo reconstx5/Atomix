@@ -98,3 +98,6 @@
 /* Text on artwork (visual refresh A5): the scrim behind the hero and title page is the canvas colour, eased like the
    dark themes' black one, so the dark words stay; card captions and Live TV cards keep their dark scrims. */
 :root { --scrim-colour: var(--app-bg); --rating: #8a5a00; } /* the rating's star and number: amber dark enough for the canvas */
+@media (min-width: 1600px) and (orientation: landscape) {
+  :root { --rating: #7a4f00; } /* the same amber, darker, to read on the dimmed TV canvas (4.5:1) */
+}

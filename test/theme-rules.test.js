@@ -92,6 +92,11 @@ export const RULES = {
       assert.match(map.get('--focus-halo-ring'), /\+ 2px\)/, `--focus-halo-ring is ${map.get('--focus-halo-ring')}`);
       assert.match(map.get('--focus-halo-inset'), /\+ 2px\)/, `--focus-halo-inset is ${map.get('--focus-halo-inset')}`);
     } },
+    ...[undefined, TV_MEDIA].map((media) => ({ name: `--rating (amber) reads at 4.5:1 on a canvas 3% darker than --app-bg${media ? ' (TV)' : ''}`, token: '--rating', media, check: (lch, map) => {
+      const bg = colourOf(map, '--app-bg'), dark = { r: bg.r * 0.97, g: bg.g * 0.97, b: bg.b * 0.97, a: 1 };
+      const r = wcagRatio(colourOf(map, '--rating'), dark);
+      assert.ok(r >= 4.5, `ratio ${r.toFixed(2)}`);
+    } })),
     ...[undefined, TV_MEDIA].map((media) => ({ name: `the focus ring is at least 3:1 on the canvas${media ? ' (TV)' : ''}`, token: '--focus-ring', media, check: (lch, map) => {
       const r = wcagRatio(colourOf(map, '--focus-ring'), colourOf(map, '--app-bg'));
       assert.ok(r >= 3, `ratio ${r.toFixed(2)}`);
