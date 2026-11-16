@@ -35,8 +35,7 @@ Atomix is a self-hosted media hub in the spirit of Kodi: films, TV, music and Li
 - Bigger features: brainstorm -> spec -> plan -> execute, then one fresh review and one fix pass.
 - Messages shown to users are plain-English sentences that say what happened and what to do.
 - Git: Dallas decides when to commit and push. Remote: https://github.com/reconstx5/Atomix.git
-  Commit trailer used so far:
-  `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
+  Commits are authored as reconstx5 (the repo's git config) with **no co-author line** (Dallas, 17 Nov 2026).
 
 ## Current state (17 Nov 2026) — start here
 - The git history on this PC is `main` at 3cee3a0 (Motion). Everything after it (v0.28: iPhone playback fixes,
