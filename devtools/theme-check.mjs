@@ -257,7 +257,7 @@ const CHECKS = {
           return { overlap, ringHits, parts: parts.length, outside: parts.filter((p) => !inside(p)).length, neighbours: others.length };
         });
         const label = `grown ${theme}`;
-        check(`${label}: a card is focused after one ArrowRight`, Boolean(first && geo), 'no focused .card');
+        check(`${label}: a card is focused after one ArrowRight`, Boolean(first && geo), first && geo ? '' : 'no focused .card');
         if (first && geo) {
           check(`${label}: the ring (an outline of 3px or more) is on the card in the same frame as its scale`, first.ring.style !== 'none' && first.ring.width >= 3 && first.scale > 1.0001, `ring ${first.ring.width}px ${first.ring.style}, scale ${first.scale.toFixed(3)} in the first frame`);
           const settled = await page.evaluate(`(${read.toString()})()`);
