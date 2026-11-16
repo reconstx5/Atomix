@@ -5,6 +5,7 @@
 // `--plain` leaves out the Widevine-only channel (for compare.mjs runs in headless Chromium, which has no Widevine).
 import http from 'node:http';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 
 export const PORT = 9921;
 const BASE = process.env.BASE || 'http://localhost:8787';
@@ -98,7 +99,7 @@ export async function useMockSource(opts = {}) {
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}` && process.argv[2] === 'serve') {
+if (import.meta.url === pathToFileURL(process.argv[1]).href && process.argv[2] === 'serve') {
   const src = await useMockSource({ plain: process.argv.includes('--plain') });
   console.log(`mock IPTV on :${PORT}: ${src.channels.map((c) => `${c.number} ${c.name} ${JSON.stringify(c.drm)}`).join(', ')}`);
   const stop = async () => {
