@@ -11,8 +11,10 @@
 
    Palette  Graphite #17191c · Slate #22262b · Frost #eef1f4 · Mist #a3aab3
             Glacier #7cc7e8 (the light when a title has no colour) · Signal #f2b84b (ratings only)
-   Type     League Gothic for titles (when there's no clear logo), Roboto Condensed for everything else.
-            Scale from 1.05rem in steps of 1.25: 0.84 / 1.05 / 1.31 / 1.64 / 2.05rem, titles 3.6–7.2rem. */
+   Type     League Gothic for titles only (when there's no clear logo); everything else in the system's regular-width
+            face (weight 400-500 for reading, 600+ for buttons and menus).
+            Scale from 1.05rem in steps of 1.25: 0.84 / 1.05 / 1.31 / 1.64 / 2.05rem, titles 3.6–7.2rem.
+   Surfaces Flat and opaque: panels, the search box and add-on tiles paint --surface-1, with no blur. */
 :root {
   --focus-ring: #ffffff; /* A4: a white ring with a dark halo (tokens.css) on every dark theme */
   color-scheme: dark;
@@ -28,8 +30,9 @@
   --poster-w: 156px;
   --nav-bg: transparent;
   --shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
-  --font: "Roboto Condensed", "Arial Narrow", "Segoe UI", system-ui, sans-serif;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-title: "League Gothic", "Arial Narrow", Impact, sans-serif;
+  --button-radius: 999px; /* pill buttons (a user theme sets var(--r-sm) for square ones) */
   --font-display: var(--font);
   --header-h: 76px;
   --panel: rgba(23, 25, 28, 0.84);
@@ -134,7 +137,7 @@ body[data-layout="top"] .nav-links .nav-link .icon { display: none; }
 .nav-clock-time { font-size: 1.31rem; font-weight: 600; }
 
 /* ---------- Buttons: pills; the main one carries the title's colour ---------- */
-.btn { border-radius: 999px; font-weight: 700; font-size: 1rem; --btn-bg: rgba(238, 241, 244, 0.12); transition: background-color 0.2s, color 0.2s, transform 0.15s var(--ease); }
+.btn { border-radius: var(--button-radius); font-weight: 600; font-size: 1rem; --btn-bg: rgba(238, 241, 244, 0.12); transition: background-color 0.2s, color 0.2s, transform 0.15s var(--ease); }
 .btn:hover { background: rgba(238, 241, 244, 0.2); }
 .btn-primary { --btn-bg: var(--tint); --btn-fg: var(--accent-text); }
 .btn-primary:hover { background: color-mix(in srgb, var(--tint) 82%, white); }
@@ -146,10 +149,10 @@ body[data-layout="top"] .nav-links .nav-link .icon { display: none; }
 .btn-danger:focus-visible { background: var(--danger); color: #fff; }
 
 /* ---------- Text details ---------- */
-.eyebrow { text-transform: none; letter-spacing: 0; font-size: 1.05rem; font-weight: 600; color: var(--text-dim); margin-bottom: 0.3em; }
+.eyebrow { text-transform: none; letter-spacing: 0; font-size: 1.05rem; font-weight: 500; color: var(--text-dim); margin-bottom: 0.3em; }
 .eyebrow a { color: var(--text); text-decoration: none; }
 .eyebrow a:hover { text-decoration: underline; }
-.meta-line { gap: 6px 20px; font-weight: 600; font-size: 1.05rem; color: var(--text); }
+.meta-line { gap: 6px 20px; font-weight: 500; font-size: 1.05rem; color: var(--text); }
 .meta-line .rating { color: var(--signal); }
 .chip, .meta-line .chip {
   background: transparent; border: 1px solid rgba(238, 241, 244, 0.4); border-radius: 4px;
@@ -160,7 +163,7 @@ body[data-layout="top"] .nav-links .nav-link .icon { display: none; }
 .media-flags li { border-color: rgba(238, 241, 244, 0.3); font-size: 0.84rem; }
 
 /* ---------- Rows ("widgets") and cards ---------- */
-.row-title { font-size: 1.2rem; font-weight: 600; color: var(--text-dim); transition: color 0.2s; }
+.row-title { font-size: 1.2rem; font-weight: 500; color: var(--text-dim); transition: color 0.2s; }
 .row-title-link { color: inherit; }
 .row-title-link:hover, .row-title-link:focus-visible { color: var(--text); }
 /* The row you're in lights up, so you always know where you are with a remote. */
@@ -178,8 +181,8 @@ body[data-layout="top"] .nav-links .nav-link .icon { display: none; }
   .card:hover .card-art { transform: scale(1.05); box-shadow: 0 0 0 3px var(--focus), 0 0 34px 4px var(--halo), 0 14px 30px rgba(0, 0, 0, 0.55); transition: transform var(--dur-focus) var(--ease-settle); }
 }
 html.kbd .card:focus-visible .card-art { transform: scale(1.07); }
-.card-title { font-weight: 700; font-size: 1rem; }
-.card-sub { font-size: 0.84rem; }
+.card-title { font-weight: 500; font-size: 1rem; }
+.card-sub { font-size: 0.84rem; font-weight: 500; }
 .card-play { background: rgba(0, 0, 0, 0.55); backdrop-filter: none; --play-blur: none; }
 .badge { border-radius: 4px; }
 .badge-watched { color: var(--tint); }
@@ -206,25 +209,29 @@ html.kbd .card:focus-visible .card-art { transform: scale(1.07); }
 .page-head h1 { font-size: clamp(2.8rem, 2rem + 2vw, 4rem); }
 .detail-info .detail-title { font-size: clamp(3rem, 2rem + 3.6vw, 6rem); margin-bottom: 12px; }
 .detail-info h1:not(.detail-title) { font-weight: 700; }
-.panel { background: var(--panel); border: 1px solid var(--border); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
-.panel .panel { background: rgba(238, 241, 244, 0.04); }
+/* A clear logo wins over the League Gothic title on the title page: the typed title stays for screen readers only
+   (the logo box itself is public/css/app.css, "Shared polish pieces"). */
+.logo-box > .detail-title { margin: 0; }
+.logo-box.has-logo > .detail-title { position: absolute !important; clip-path: inset(50%); width: 1px; height: 1px; overflow: hidden; }
+.panel { background: var(--surface-1); border: 1px solid var(--border); }
+.panel .panel { background: var(--surface-2); }
 .dialog { background: rgba(28, 31, 35, 0.97); border: 1px solid rgba(238, 241, 244, 0.1); }
 .dialog::backdrop { background: rgba(0, 0, 0, 0.62); }
 .settings-tab { border-radius: 999px; padding: 10px 16px; }
 .settings-tab[aria-current="page"] { background: rgba(238, 241, 244, 0.1); box-shadow: none; }
 .settings-tab[aria-current="page"] .icon { color: var(--tint); }
 .settings-tab:focus-visible { background: var(--focus); color: var(--focus-text); box-shadow: var(--focus-halo-ring), 0 0 0 calc(var(--focus-offset) + var(--focus-width) + 5px) var(--halo); }
-.season-tab { border-radius: 999px; border-color: rgba(238, 241, 244, 0.2); }
+.season-tab { border-radius: var(--button-radius); border-color: rgba(238, 241, 244, 0.2); }
 .season-tab:focus-visible { background: var(--focus); color: var(--focus-text); box-shadow: var(--focus-halo-ring), 0 0 0 calc(var(--focus-offset) + var(--focus-width) + 5px) var(--halo); }
 .episode:hover, .episode:focus-within { background: rgba(238, 241, 244, 0.06); }
-.search-box { background: var(--panel); border-color: rgba(238, 241, 244, 0.14); backdrop-filter: blur(14px); }
+.search-box { background: var(--surface-1); border-color: rgba(238, 241, 244, 0.14); }
 .search-box:focus-within { box-shadow: var(--focus-halo-ring), 0 0 0 calc(var(--focus-offset) + var(--focus-width) + 5px) var(--halo); }
 .search-section h2, .detail-section > h2 { font-size: 1.2rem; font-weight: 600; color: var(--text-dim); }
 .search-section h2 .muted { opacity: 0.7; }
 .toast { border-radius: 999px; padding: 12px 22px; }
 input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="color"])), select, textarea { background: rgba(0, 0, 0, 0.35); }
 .detail-poster .art { box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55); }
-.addon-tile { background: var(--panel); backdrop-filter: blur(14px); }
+.addon-tile { background: var(--surface-1); }
 .theme-card[aria-checked="true"] { border-color: var(--tint); }
 
 /* ---------- Who's watching / sign-in: lit by the default glacier light ---------- */

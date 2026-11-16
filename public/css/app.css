@@ -176,7 +176,7 @@ main { min-height: 100vh; }
   --btn-bg: var(--surface-2);
   --btn-fg: var(--text);
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  min-height: 44px; padding: 10px 18px; border-radius: var(--radius);
+  min-height: 44px; padding: 10px 18px; border-radius: var(--button-radius);
   border: 1px solid transparent; background: var(--btn-bg); color: var(--btn-fg);
   font: inherit; font-weight: 650; font-size: 0.95rem; text-decoration: none; cursor: pointer; white-space: nowrap;
   transition: background-color var(--dur-fast), transform 0.12s var(--ease); /* v0.28: the focus ring (a shadow) appears at once */

@@ -8,6 +8,7 @@ import { AzRail } from '../ui/az-rail.js';
 import { api } from '../api.js';
 import { openSheet, cardItems } from '../components.js';
 import { setBackdrop, artFor, followFocus } from '../backdrop.js';
+import { followFocus as followBackdrop } from '../focus-backdrop.js';
 import { spotStartItem, playFor, countLine, inProgress, railShown } from '../library-rules.js';
 import { NOUN, sortsFor, useLibrary, useTypedText, Results, scan, collectionsFor, CollectionsResults, collectionsCount } from './library-parts.js';
 
@@ -91,7 +92,11 @@ export function Shelf({ data, query, view, admin }) {
       if (card && !past) requestAnimationFrame(() => view?.querySelector('.library-scroll')?.scrollTo({ top: 0 }));
     };
     view?.addEventListener('focusin', onFocus);
-    return () => view?.removeEventListener('focusin', onFocus);
+    const stopBackdrop = followBackdrop(results.current, { itemOf: (card) => cardItems.get(card) }); // Arctic: the artwork follows a resting card
+    return () => {
+      view?.removeEventListener('focusin', onFocus);
+      stopBackdrop();
+    };
   }, []);
 
   useLayoutEffect(() => {

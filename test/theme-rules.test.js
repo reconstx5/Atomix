@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { apcaContrast, wcagRatio } from '../src/themes/apca.js';
-import { THEMES, MODES, ROOT, TV_MEDIA, tokensOf, colourOf, lchOf, baseCss } from './helpers/theme-resolve.js';
+import { THEMES, MODES, ROOT, TV_MEDIA, tokensOf, colourOf, lchOf, baseCss, chainOf, themeFile } from './helpers/theme-resolve.js';
 
 const hexOf = (map, name) => {
   const { r, g, b } = colourOf(map, name);
@@ -14,6 +14,37 @@ const hexOf = (map, name) => {
 };
 
 const parseAlpha = (v) => { const m = /rgba?\(([^)]+)\)/.exec(v || ''); const p = m ? m[1].split(/[,/\s]+/).filter(Boolean) : []; return p.length > 3 ? Number(p[3]) : 1; };
+
+
+// Arctic and Arctic Side (Task 6): flat opaque surfaces, a regular-width body font, League Gothic for titles only, pill buttons.
+function arcticRules(theme) {
+  const chain = () => chainOf(themeFile(theme)).map((f) => fs.readFileSync(f, 'utf8')).join('\n');
+  return [
+    ...['--surface-1', '--surface-2'].map((tok) => ({ name: `${tok} is opaque (flat)`, token: tok, check: (lch, map) => assert.equal(parseAlpha(map.get(tok)), 1) })),
+    { name: '.panel, .search-box and .addon-tile have no backdrop-filter', token: '--n-1', check: () => {
+      const bad = [];
+      for (const m of chain().matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        if (/(^|[\s,])(\.panel|\.search-box|\.addon-tile)/.test(m[1]) && /backdrop-filter:\s*(?!none)/.test(m[2])) bad.push(m[1].trim());
+      }
+       assert.deepEqual(bad, [], `blur on ${bad.join('; ')}`);
+    } },
+    { name: '.panel, .search-box and .addon-tile paint --surface-1', token: '--n-1', check: () => {
+      const css = chain().replace(/\s+/g, ' ');
+      for (const sel of ['.panel', '.search-box', '.addon-tile']) assert.ok(css.split('}').some((r) => r.split('{')[0].split(',').some((x) => x.trim() === sel) && /background: var\(--surface-1\)/.test(r)), `${sel} does not use --surface-1`);
+    } },
+    { name: 'the body font is regular width (no Condensed or Narrow)', token: '--n-1', check: (lch, map) => assert.doesNotMatch(map.get('--font'), /Condensed|Narrow/) },
+    { name: 'titles use League Gothic', token: '--n-1', check: (lch, map) => assert.match(map.get('--font-title'), /^"League Gothic"/) },
+    { name: 'buttons are pills (--button-radius is 999px)', token: '--n-1', check: (lch, map) => assert.equal(map.get('--button-radius'), '999px') },
+    { name: 'any url() in the theme points into /fonts/ and has an OFL licence file', token: '--n-1', check: () => {
+      for (const m of chain().matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/g)) {
+        if (/^\.\.\/[\w-]+\/theme\.css$/.test(m[1])) continue; // the @import of Arctic
+        assert.match(m[1], /^\/fonts\//, `${m[1]} is not under /fonts/`);
+        assert.ok(fs.readdirSync(path.join(ROOT, 'public/fonts')).some((f) => /^OFL/.test(f)), 'no OFL licence in public/fonts');
+      }
+    } },
+    { name: 'the theme asks for the backdrop to follow focus (theme.json)', token: '--n-1', check: () => assert.equal(JSON.parse(fs.readFileSync(path.join(ROOT, 'themes', theme, 'theme.json'), 'utf8')).backdropFollowsFocus, true) },
+  ];
+}
 
 // { [theme]: [{ name, token, media?, attrs?, check(lch, map) }] }
 export const RULES = {
@@ -102,6 +133,8 @@ export const RULES = {
       assert.ok(r >= 3, `ratio ${r.toFixed(2)}`);
     } })),
   ],
+  arctic: arcticRules('arctic'),
+  'arctic-side': arcticRules('arctic-side'),
   orbit: [
     { name: 'the focus ring is white', token: '--focus-ring', check: (lch, map) => assert.equal(hexOf(map, '--focus-ring'), '#ffffff') },
   ],

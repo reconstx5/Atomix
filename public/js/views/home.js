@@ -10,6 +10,7 @@ import { Button, EmptyState } from '../ui/basics.js';
 import { cardItems, eagerCards } from '../components.js';
 import { setTitle, canAdmin, isKidsProfile, isOrbit } from '../app.js';
 import { setBackdrop, artFor, followFocus } from '../backdrop.js';
+import { followFocus as followBackdrop } from '../focus-backdrop.js';
 import { listable, hiddenCount, deviceNow, whenDeviceKnown } from '../dash/playable.js';
 import { rippleOnArrival } from '../transitions.js';
 
@@ -52,7 +53,12 @@ function Home({ data, view }) {
     view.addEventListener('focusin', onFocus);
     // The spotlight (and the artwork behind it) follows whatever card has focus.
     if (featured) followFocus(rows.current, (card) => cardItems.get(card), (item) => setSpotItem(item));
-    return () => view.removeEventListener('focusin', onFocus);
+    // Themes that ask for it (Arctic): the artwork follows a card the remote rests on, after 350 ms.
+    const stopBackdrop = followBackdrop(rows.current, { itemOf: (card) => cardItems.get(card) });
+    return () => {
+      view.removeEventListener('focusin', onFocus);
+      stopBackdrop();
+    };
   }, []);
   eagerCards(6); // Home's first six pictures (the rows on screen first) load at once (v0.24)
   const shownRows = data.rows

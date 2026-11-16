@@ -28,6 +28,8 @@ const RETUNED = {
   // Plan C task 3: Midnight's new surface steps (n-1..n-4) and its solid menu.
   // Plan C task 4: Obsidian's text drops to about 90% lightness (n-12), so --text and its derived tokens change.
   '--text': ['obsidian'],
+  // Plan C task 6: Arctic and Arctic Side drop Roboto Condensed for the system's regular-width face (League Gothic stays for titles).
+  '--font': ['arctic', 'arctic-side'], '--font-display': ['arctic', 'arctic-side'],
   '--bg': ['midnight'], '--bg-2': ['midnight'], '--surface': ['midnight'], '--surface-2': ['midnight'], '--nav-bg': ['midnight'],
 };
 const OLD_SURFACES = ['--bg', '--bg-2', '--surface', '--surface-2'];
