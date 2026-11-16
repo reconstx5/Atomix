@@ -303,6 +303,52 @@ api.registerLiveSource({
   `manifestHeaders` / `streamHeaders` for the manifest and the segments; its `refresh()` channel carries `drm` (the
   system) so the channel is marked encrypted. The address must be a DASH manifest; the browser plays it (see
   ARCHITECTURE "Encrypted channels").
+- **Several systems (v0.28).** A channel may offer more than one key system. Its `refresh()` channel carries
+  `drm: { systems: [{ system, licence, serverCertificate?, initData?, url? }, ...] }` in the provider's order of
+  preference (`system` is `widevine`, `playready`, `fairplay` or `clearkey`; `url` is that system's own stream address,
+  used when it differs from the channel's). The old single shape `drm: { system, licence }` still works and is read as
+  a list of one. Atomix chooses the system for each device, then calls `stream(key, { system })`; return that
+  system's address and licence in the old single shape (`drm: { system, licence }`) and keep `drm.system` equal to
+  the one asked for, or Atomix answers "unreadable". A source that ignores `opts.system` only works for channels
+  with one system.
+- **Provider app link.** A channel may carry `appUrl` (https only) and `appName`. Atomix shows an "Open <name>"
+  button on the card that tells a device it can't play the channel (never to Kids profiles). An admin's own link for
+  a channel wins over the plugin's, which wins over Atomix's short built-in list (TVNZ 1, TVNZ 2, DUKE).
+
+### IPTV Simple: protection lines (`plugins/iptv-simple/drm.js`)
+Put these `#KODIPROP:` lines under the channel's `#EXTINF` line, before its address.
+
+- **`#KODIPROP:inputstream.adaptive.drm={...}`** (Kodi's newer property, one JSON object, one entry per key system,
+  in order of preference). A channel with several systems uses this. What Atomix reads from each entry:
+  - `license.server_url` (http/https only), `license.req_headers` (`Name=Value&Name=Value`, URL-encoded),
+    `license.req_data` (the request body; `R{SSM}`, `b{SSM}` and `B{SSM}` as in the older `license_key`),
+  - `license.unwrapper` (`base64`, `json`, `json,base64` or `base64,json`) and `license.unwrapper_params.path_data`
+    (the JSON path to the licence in the answer),
+  - `license.server_certificate` (base64; FairPlay),
+  - `license.keyids` (ClearKey: `{"<kid hex>": "<key hex>"}`),
+  - `init_data` (base64; the same as `license_data`),
+  - **`atomix_url`** (an Atomix extension): this system's own stream address. FairPlay usually needs the provider's
+    HLS address while the channel's address line is the DASH one. Without it the channel's address is used.
+  Everything else in the JSON is ignored.
+- **Key system names:** `com.widevine.alpha`, `com.microsoft.playready` (also `com.microsoft.playready.recommendation`),
+  `com.apple.fps` (also `com.apple.fps.1_0`) and `org.w3.clearkey`. Other names are skipped; bad JSON adds nothing.
+- **With the older lines:** `license_type` + `license_key` (and `drm_legacy`) still describe one system. They are read
+  after the JSON and only add a system the JSON didn't name, so the two forms can be mixed.
+- **Provider app link (Atomix extensions):** `#KODIPROP:atomix.app_url=https://...` and
+  `#KODIPROP:atomix.app_name=Name`. https only; anything else is ignored.
+
+A channel offering Widevine, PlayReady and FairPlay:
+
+```
+#EXTINF:-1 tvg-id="news1" group-title="News",News One
+#KODIPROP:inputstream.adaptive.drm={"com.widevine.alpha":{"license":{"server_url":"https://lic.example.com/wv","req_headers":"X-Token=abc"}},"com.microsoft.playready":{"license":{"server_url":"https://lic.example.com/pr"}},"com.apple.fps":{"license":{"server_url":"https://lic.example.com/fps?c={CONTENTID}","server_certificate":"MIIB..."},"atomix_url":"https://cdn.example.com/news1/master.m3u8"}}
+#KODIPROP:atomix.app_url=https://www.example.com/app
+#KODIPROP:atomix.app_name=Example+
+https://cdn.example.com/news1/manifest.mpd
+```
+
+Chrome and Android get Widevine, Edge and Xbox PlayReady, Safari on iPhone, iPad and Mac FairPlay (from its
+`atomix_url`).
 - Times are milliseconds since 1970 (UTC). `catchup.mode` is informational for the source; Atomix only uses `days`.
 - Use `api.fetchFollowing(url, { check })` to download playlists and guides (every redirect hop is checked) and
   `api.redactUrl(url)` before logging an address. See `plugins/iptv-simple` for a complete source.

@@ -14,17 +14,12 @@
    Type     League Gothic for titles (when there's no clear logo), Roboto Condensed for everything else.
             Scale from 1.05rem in steps of 1.25: 0.84 / 1.05 / 1.31 / 1.64 / 2.05rem, titles 3.6–7.2rem. */
 :root {
+  --focus-ring: #ffffff; /* A4: a white ring with a dark halo (tokens.css) on every dark theme */
   color-scheme: dark;
-  --bg: #17191c;
-  --bg-2: #1c1f23;
-  --surface: #22262b;
-  --surface-2: #2c3137;
   --border: rgba(238, 241, 244, 0.09);
-  --text: #eef1f4;
-  --text-dim: #a3aab3;
   --tint-default: #7cc7e8;
   --accent: var(--tint);
-  --accent-text: #0e1013;
+  --accent-text: #000000; /* black or white, whichever reads on the accent (APCA Lc >= 60) */
   --signal: #f2b84b;
   --danger: #ff6b78;
   --success: #4fd1a0;
@@ -42,6 +37,64 @@
   --focus-text: #0e1013;
   --halo: color-mix(in srgb, var(--tint) 50%, transparent);
   --backdrop-dim: 24%;
+  --accent-solid: var(--accent); /* the artwork's colour (--tint), like --accent */
+}
+/* Ramps (devtools/ramp.mjs): --n-* neutrals, --a-* accent. Hex for every browser; the same colours in oklch() where
+   it is understood. --bg, --bg-2, --surface, --surface-2 and --text come from these (public/css/tokens.css); --accent
+   is the artwork's colour (--tint). */
+:root {
+  --n-1: #17191c;
+  --n-2: #1c1f23;
+  --n-3: #22262b;
+  --n-4: #2c3137;
+  --n-5: #3f444a;
+  --n-6: #52585e;
+  --n-7: #676d73;
+  --n-8: #7c8289;
+  --n-9: #92989f;
+  --n-10: #a9afb6;
+  --n-11: #c0c6cd;
+  --n-12: #eef1f4;
+  --a-1: #192125;
+  --a-2: #233036;
+  --a-3: #2d4049;
+  --a-4: #38515c;
+  --a-5: #426270;
+  --a-6: #4d7485;
+  --a-7: #58869a;
+  --a-8: #6498b0;
+  --a-9: #7cc7e8;
+  --a-10: #8fdbfc;
+  --a-11: #9ed8f3;
+  --a-12: #ddf2fd;
+}
+@supports (color: oklch(0% 0 0)) {
+  :root {
+    --n-1: oklch(21.26% 0.0067 258.37);
+    --n-2: oklch(23.79% 0.0089 255.60);
+    --n-3: oklch(26.67% 0.0110 254.03);
+    --n-4: oklch(31.07% 0.0128 253.00);
+    --n-5: oklch(38.43% 0.0122 252.95);
+    --n-6: oklch(45.72% 0.0124 248.10);
+    --n-7: oklch(53.16% 0.0119 248.05);
+    --n-8: oklch(60.39% 0.0128 252.15);
+    --n-9: oklch(67.70% 0.0124 252.13);
+    --n-10: oklch(75.14% 0.0121 252.12);
+    --n-11: oklch(82.40% 0.0118 252.11);
+    --n-12: oklch(95.67% 0.0052 247.88);
+    --a-1: oklch(24.17% 0.0139 229.66);
+    --a-2: oklch(29.99% 0.0206 227.88);
+    --a-3: oklch(35.91% 0.0288 228.80);
+    --a-4: oklch(41.92% 0.0354 227.08);
+    --a-5: oklch(47.70% 0.0435 227.13);
+    --a-6: oklch(53.66% 0.0512 227.16);
+    --a-7: oklch(59.46% 0.0586 227.20);
+    --a-8: oklch(65.22% 0.0659 228.74);
+    --a-9: oklch(79.28% 0.0880 227.91);
+    --a-10: oklch(85.36% 0.0880 227.31);
+    --a-11: oklch(85.18% 0.0702 228.43);
+    --a-12: oklch(94.90% 0.0267 230.35);
+  }
 }
 body { font-size: 1.05rem; letter-spacing: 0.01em; }
 h1 { font-size: 2.05rem; font-weight: 700; }
@@ -57,8 +110,7 @@ h3 { font-size: 1.31rem; }
     color-mix(in srgb, var(--bg) var(--backdrop-dim), transparent);
 }
 
-/* Focus you can see from the couch: a frost ring with a halo in the title's colour. */
-:where(a, button, input, select, textarea, [tabindex]):focus-visible { outline-color: var(--focus); }
+/* Focus you can see from the couch: the white ring (tokens.css, A4) with a glow in the title's colour outside its dark halo. */
 
 /* ---------- Header: no bar, just shade over the artwork ---------- */
 body[data-layout="top"] .app-header {
@@ -70,7 +122,7 @@ html.scrolled body[data-layout="top"] .app-header { background-color: rgba(23, 2
 body[data-layout="top"] .nav-links .nav-link .icon { display: none; }
 .nav-link { position: relative; border-radius: 999px; padding: 8px 16px; font-size: 1.1rem; font-weight: 600; color: var(--text-dim); }
 .nav-link:hover { background: rgba(238, 241, 244, 0.1); color: var(--text); }
-.nav-link:focus-visible { background: var(--focus); color: var(--focus-text); outline: none; box-shadow: 0 0 0 4px var(--halo); }
+.nav-link:focus-visible { background: var(--focus); color: var(--focus-text); box-shadow: var(--focus-halo-ring), 0 0 0 calc(var(--focus-offset) + var(--focus-width) + 5px) var(--halo); }
 .nav-link[aria-current="page"] { background: transparent; color: var(--text); }
 .nav-link[aria-current="page"]::after {
   content: ""; position: absolute; left: 50%; bottom: 0; width: 20px; height: 3px; margin-left: -10px; border-radius: 3px; background: var(--tint);
@@ -88,8 +140,8 @@ body[data-layout="top"] .nav-links .nav-link .icon { display: none; }
 .btn-primary:hover { background: color-mix(in srgb, var(--tint) 82%, white); }
 .btn-ghost { --btn-bg: transparent; border-color: rgba(238, 241, 244, 0.2); }
 .btn:focus-visible, html.kbd .btn:focus-visible {
-  background: var(--focus); color: var(--focus-text); border-color: var(--focus); outline: none;
-  box-shadow: 0 0 0 4px var(--halo); transform: scale(1.05);
+  background: var(--focus); color: var(--focus-text); border-color: var(--focus);
+  box-shadow: var(--focus-halo-ring), 0 0 0 calc(var(--focus-offset) + var(--focus-width) + 5px) var(--halo); transform: scale(1.05);
 }
 .btn-danger:focus-visible { background: var(--danger); color: #fff; }
 
@@ -120,7 +172,8 @@ body[data-layout="top"] .nav-links .nav-link .icon { display: none; }
 .art, .card-art { border-radius: var(--radius); }
 .art::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); pointer-events: none; }
 .card-art { transition: transform var(--dur-fast) var(--ease-out); } /* v0.28: the ring and glow appear at once; the growth settles in */
-.card:focus-visible .card-art { transform: scale(1.05); box-shadow: 0 0 0 3px var(--focus), 0 0 34px 4px var(--halo), 0 14px 30px rgba(0, 0, 0, 0.55); transition: transform var(--dur-focus) var(--ease-settle); }
+/* Film, episode and show cards in rows and grids: growth overridden by app.css "Card motion v2" (tokens). */
+.card:focus-visible .card-art { transform: scale(1.05); box-shadow: var(--focus-halo-ring), 0 0 34px 4px var(--halo), 0 14px 30px rgba(0, 0, 0, 0.55); transition: transform var(--dur-focus) var(--ease-settle); }
 @media (hover: hover) and (pointer: fine) {
   .card:hover .card-art { transform: scale(1.05); box-shadow: 0 0 0 3px var(--focus), 0 0 34px 4px var(--halo), 0 14px 30px rgba(0, 0, 0, 0.55); transition: transform var(--dur-focus) var(--ease-settle); }
 }
@@ -132,6 +185,7 @@ html.kbd .card:focus-visible .card-art { transform: scale(1.07); }
 .badge-watched { color: var(--tint); }
 .progress { left: 0; right: 0; bottom: 0; height: 4px; border-radius: 0 0 var(--radius) var(--radius); background: rgba(0, 0, 0, 0.55); }
 .progress span { background: var(--tint); }
+:root { --progress-fill: var(--tint); } /* the shared flush track (v0.29) keeps the artwork colour */
 .row-prev { background: linear-gradient(90deg, rgba(23, 25, 28, 0.85), transparent); }
 .row-next { background: linear-gradient(270deg, rgba(23, 25, 28, 0.85), transparent); }
 /* Continue-watching cards keep their words on the picture. */
@@ -159,12 +213,12 @@ html.kbd .card:focus-visible .card-art { transform: scale(1.07); }
 .settings-tab { border-radius: 999px; padding: 10px 16px; }
 .settings-tab[aria-current="page"] { background: rgba(238, 241, 244, 0.1); box-shadow: none; }
 .settings-tab[aria-current="page"] .icon { color: var(--tint); }
-.settings-tab:focus-visible { background: var(--focus); color: var(--focus-text); outline: none; box-shadow: 0 0 0 4px var(--halo); }
+.settings-tab:focus-visible { background: var(--focus); color: var(--focus-text); box-shadow: var(--focus-halo-ring), 0 0 0 calc(var(--focus-offset) + var(--focus-width) + 5px) var(--halo); }
 .season-tab { border-radius: 999px; border-color: rgba(238, 241, 244, 0.2); }
-.season-tab:focus-visible { background: var(--focus); color: var(--focus-text); outline: none; box-shadow: 0 0 0 4px var(--halo); }
+.season-tab:focus-visible { background: var(--focus); color: var(--focus-text); box-shadow: var(--focus-halo-ring), 0 0 0 calc(var(--focus-offset) + var(--focus-width) + 5px) var(--halo); }
 .episode:hover, .episode:focus-within { background: rgba(238, 241, 244, 0.06); }
 .search-box { background: var(--panel); border-color: rgba(238, 241, 244, 0.14); backdrop-filter: blur(14px); }
-.search-box:focus-within { box-shadow: 0 0 0 3px var(--focus), 0 0 0 7px var(--halo); }
+.search-box:focus-within { box-shadow: var(--focus-halo-ring), 0 0 0 calc(var(--focus-offset) + var(--focus-width) + 5px) var(--halo); }
 .search-section h2, .detail-section > h2 { font-size: 1.2rem; font-weight: 600; color: var(--text-dim); }
 .search-section h2 .muted { opacity: 0.7; }
 .toast { border-radius: 999px; padding: 12px 22px; }
@@ -177,7 +231,8 @@ input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="color
 .picker-page, .auth-page { background: radial-gradient(70% 60% at 50% 110%, color-mix(in srgb, var(--tint) 22%, transparent), transparent 70%), var(--bg); }
 .picker-page h1 { font-size: clamp(3.4rem, 2.4rem + 3vw, 5.6rem); }
 .picker-profile .avatar { border-radius: 50%; }
-.picker-profile:hover .avatar, .picker-profile:focus-visible .avatar { box-shadow: 0 0 0 4px var(--bg), 0 0 0 7px var(--focus), 0 0 40px 6px var(--halo); }
+.picker-profile:hover .avatar { box-shadow: 0 0 0 4px var(--bg), 0 0 0 7px var(--focus), 0 0 40px 6px var(--halo); }
+.picker-profile:focus-visible .avatar { box-shadow: var(--focus-halo-ring), 0 0 40px 6px var(--halo); }
 
 /* ---------- Music ---------- */
 .track-row:hover, .track-row:focus-within { background: rgba(238, 241, 244, 0.06); }
@@ -186,7 +241,7 @@ input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="color
 .mini { background: rgba(20, 22, 25, 0.9); border-top: 1px solid rgba(238, 241, 244, 0.07); }
 .mini-seek-range::-webkit-slider-runnable-track { background: linear-gradient(90deg, var(--tint) var(--pct, 0%), rgba(238, 241, 244, 0.22) var(--pct, 0%)); }
 .mini-seek-range::-moz-range-progress, .mini-line span { background: var(--tint); }
-.mbtn:focus-visible { outline: none; background: var(--focus); color: var(--focus-text); box-shadow: 0 0 0 4px var(--halo); }
+.mbtn:focus-visible { background: var(--focus); color: var(--focus-text); box-shadow: var(--focus-halo-ring), 0 0 0 calc(var(--focus-offset) + var(--focus-width) + 5px) var(--halo); }
 .mbtn-play { background: var(--focus); color: var(--focus-text); }
 .mbtn[aria-pressed="true"] { color: var(--tint); }
 .queue-row:hover, .queue-row:focus-within { background: rgba(238, 241, 244, 0.07); }
@@ -198,7 +253,7 @@ input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="color
 .seekbar::-webkit-slider-runnable-track { background: linear-gradient(90deg, var(--tint) var(--pct, 0%), rgba(255, 255, 255, 0.22) var(--pct, 0%)); }
 .seekbar::-moz-range-progress { background: var(--tint); }
 .pbtn { border-radius: 50%; }
-.pbtn:focus-visible { background: var(--focus); color: var(--focus-text); outline: none; box-shadow: 0 0 0 4px var(--halo); }
+.pbtn:focus-visible { background: var(--focus); color: var(--focus-text); box-shadow: var(--focus-halo-ring), 0 0 0 calc(var(--focus-offset) + var(--focus-width) + 5px) var(--halo); }
 .player-menu { border-radius: var(--radius-lg); }
 .mode-badge { border-color: var(--tint); color: var(--tint); }
 

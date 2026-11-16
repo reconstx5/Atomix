@@ -8,7 +8,7 @@ import { Queue } from './queue.js';
 import { addToPlaylistItems } from './lists.js';
 import { ratingControl, openRating } from './rating.js';
 import { downloadSheetItem } from './offline/ui.js';
-import { detectCaps } from './caps.js';
+import { detectCaps, needsMediaLink } from './caps.js';
 import { markPlaying as gatePlaying } from './gate.js';
 import { art, toast, openDialog, openSheet, sliderText, percentSlider } from './components.js';
 import { VOLUME_KEY, musicKey } from './storage.js';
@@ -312,6 +312,7 @@ export const music = {
   /** Signed in as someone else, or switched profile: load that profile's queue. */
   setProfile(profile) {
     prefs = profile?.prefs || {};
+    applyLevel(); // v0.28: the profile's even-volume choice
     const id = profile?.id ?? null;
     if (id === profileId) return;
     if (queue.current) save(true);
@@ -410,6 +411,31 @@ function applySpeed() {
 audio.addEventListener('loadedmetadata', applySpeed);
 audio.addEventListener('play', applySpeed);
 
+// ---- Even volume (v0.28): songs played at the same loudness, through a gain the server works out from each song's
+// measured loudness. Not on iPhone and iPad (Safari stops Web Audio when the screen locks, which would stop the music).
+const level = { ctx: null, gain: null, db: 0 };
+const appleTouch = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function wireLevel() {
+  if (level.ctx || appleTouch() || typeof AudioContext !== 'function') return;
+  try {
+    const ctx = new AudioContext();
+    if (ctx.state !== 'running') {
+      ctx.close(); // no sound would come out of a suspended context: stay as we are and try again with the next song
+      return;
+    }
+    const gain = ctx.createGain();
+    ctx.createMediaElementSource(audio).connect(gain).connect(ctx.destination);
+    Object.assign(level, { ctx, gain });
+  } catch {
+    /* without Web Audio the songs simply play as they are */
+  }
+}
+function applyLevel() {
+  if (!level.gain) return;
+  const on = prefs.levelVolume !== false && !queue.current?.spoken && !queue.current?.live;
+  level.gain.gain.value = on ? 10 ** ((Number(level.db) || 0) / 20) : 1;
+}
+
 async function load(start = 0, { autoplay = true, forceTranscode = false } = {}) {
   const track = queue.current;
   const token = ++loadToken;
@@ -430,8 +456,8 @@ async function load(start = 0, { autoplay = true, forceTranscode = false } = {})
     res = track.offline
       ? { offline: true, mode: 'direct', url: track.offline, duration: track.duration, item: { id: track.id } }
       : track.live
-      ? await api.post(`/api/live/channels/${track.channelId}/play`, { caps: detectCaps(), audioOnly: true, replaces })
-      : await api.post(`/api/items/${track.id}/playback`, { caps: detectCaps(), start, replaces, forceTranscode });
+      ? await api.post(`/api/live/channels/${track.channelId}/play`, { caps: detectCaps(), mediaLink: needsMediaLink(), audioOnly: true, replaces })
+      : await api.post(`/api/items/${track.id}/playback`, { caps: detectCaps(), mediaLink: needsMediaLink(), start, replaces, forceTranscode });
   } catch (err) {
     if (token !== loadToken) return;
     switching = false;
@@ -447,6 +473,9 @@ async function load(start = 0, { autoplay = true, forceTranscode = false } = {})
   }
   session = res;
   resumeAt = 0;
+  level.db = res.levelDb || 0;
+  if (prefs.levelVolume !== false && level.db) wireLevel();
+  applyLevel();
   if (track.spoken && !track.spoken.chapters?.length && res.chapters?.length) track.spoken.chapters = res.chapters.map((c) => ({ title: c.title, start: c.start }));
   offset = res.mode === 'direct' ? 0 : res.start || 0;
   duration = res.duration || track.duration || 0;

@@ -6,7 +6,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadConfig, ROOT } from './config.js';
-import { logger, setLogLevel } from './log.js';
+import { logger, setLogLevel, setLogFile } from './log.js';
 import { openDatabase } from './db.js';
 import { Settings } from './settings.js';
 import { Hooks } from './hooks.js';
@@ -30,6 +30,7 @@ import { registerPlaybackRoutes } from './api/playback.js';
 import { registerAdminRoutes } from './api/admin.js';
 import { registerExtrasRoutes } from './api/extras.js';
 import { registerListRoutes } from './api/lists.js';
+import { registerHookRoutes } from './api/hooks.js';
 import { registerServerRoutes } from './api/servers.js';
 import { ExtrasStore } from './extras/store.js';
 import { makeJobs } from './extras/jobs.js';
@@ -95,6 +96,8 @@ export const STOP_GRACE_MS = 15_000;
 export async function createApp(overrides = {}) {
   const config = { ...loadConfig(), ...overrides };
   setLogLevel(config.logLevel);
+  // v0.28: every console line is also kept in data/logs/atomix.log (one older copy, atomix.log.1).
+  setLogFile(path.join(config.dataDir, 'logs', 'atomix.log'));
   for (const notice of config.notices || []) log.info(notice);
 
   const db = openDatabase(config.dbFile);
@@ -105,7 +108,8 @@ export async function createApp(overrides = {}) {
   const tools = await detectTools(config, settings);
   if (!tools.ffmpeg.available || !tools.ffprobe.available) {
     log.warn('ffmpeg/ffprobe not found — only browser-friendly files (MP4/WebM) will play and media info will be limited.');
-    log.warn('Install ffmpeg (Windows: winget install Gyan.FFmpeg) or set ATOMIX_FFMPEG / ATOMIX_FFPROBE.');
+    log.warn(`Looked for: ${config.ffmpegPath} and ${config.ffprobePath}. Install ffmpeg (Windows: winget install Gyan.FFmpeg, then close and reopen this window),`);
+    log.warn('or put the full paths in atomix.config.json as "ffmpegPath" and "ffprobePath" (or set ATOMIX_FFMPEG / ATOMIX_FFPROBE).');
   }
   // libass's first run builds a font cache (slow on Windows): done now, in the background, not on the first cast.
   setTimeout(() => warmUpSubtitles(config, tools), 0);
@@ -198,7 +202,7 @@ export async function createApp(overrides = {}) {
     tools: () => core.tools,
     // Converting video needs the CPU; converting music is light enough to share it.
     busy: converting,
-    jobs: makeJobs({ store: core.extras, config, tools: () => core.tools }),
+    jobs: makeJobs({ store: core.extras, config, tools: () => core.tools, settings }),
     previewsDir: config.previewsDir,
   });
   hooks.on('item:added', ({ item }) => core.tasks.prioritise(item));
@@ -221,6 +225,7 @@ export async function createApp(overrides = {}) {
   registerPlaybackRoutes(router, core);
   registerAdminRoutes(router, core);
   registerExtrasRoutes(router, core);
+  registerHookRoutes(router, core);
   registerListRoutes(router, core);
   registerServerRoutes(router, core);
   registerCastRoutes(router, core);
@@ -246,6 +251,14 @@ export async function createApp(overrides = {}) {
     if ('previewsEnabled' in changed || 'introDetection' in changed) core.tasks.kick();
     if ('downloadsCacheGb' in changed) core.downloads.cleanup(); // a lowered limit applies now, not after the next job
   });
+
+  // v0.27.1 diagnostics for phones that can't play: which media requests arrive, and what they carry.
+  const MEDIA_PATH = /^\/api\/(items\/\d+\/file|stream\/|hls\/)/;
+  const isFirstMediaRequest = (req, url) => /index\.m3u8$/.test(url.pathname) || !req.headers.range || /^bytes=0-1?$/.test(String(req.headers.range));
+  const mediaWho = (req, url) => {
+    const names = String(req.headers.cookie || '').split(';').map((c) => c.split('=')[0].trim()).filter(Boolean);
+    return `sign-in cookie: ${names.length ? names.join(', ') : 'none'}; media link: ${url?.searchParams.has('cast') ? 'yes' : 'no'}; range: ${req.headers.range || 'none'}; ${String(req.headers['user-agent'] || 'no user agent').slice(0, 90)}`;
+  };
 
   async function handleApi(req, res, url) {
     // v0.27: a Chromecast's receiver page asking before it POSTs a licence with its cast link (CORS preflight).
@@ -283,6 +296,9 @@ export async function createApp(overrides = {}) {
       if (!tvPost && !type.startsWith('application/json') && !binaryOk) throw new HttpError(415, 'Send requests as application/json');
     }
 
+    // A video's first request (a file, a converted stream, a playlist): one line, so a phone that can't play says on
+    // the server's console whether its requests arrive and carry a sign-in. Cookie names only, never their values.
+    if ((route.cast === 'file' || route.cast === 'stream') && isFirstMediaRequest(req, url)) log.info(`[media] ${req.method} ${url.pathname} — ${mediaWho(req, url)}`);
     const ctx = createContext(req, res, url, params, { core, bodyTimeoutMs: config.bodyTimeoutMs });
     const castToken = route.cast && url.searchParams.get('cast');
     if (castToken) {
@@ -360,6 +376,7 @@ export async function createApp(overrides = {}) {
     } catch (err) {
       const status = err.status || 500;
       if (status >= 500) log.error(`${req.method} ${url.pathname}: ${err.stack || err.message}`);
+      else if (MEDIA_PATH.test(url.pathname)) log.warn(`[media] ${status} ${req.method} ${url.pathname}: ${err.message} — ${mediaWho(req, url)}`);
       if (!res.headersSent) {
         // A body that never finished (408) or was cut off at the cap (413) leaves the request stream open: close the
         // connection once the answer is out (an endless upload would otherwise be drained forever).

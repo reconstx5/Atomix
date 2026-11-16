@@ -1,28 +1,12 @@
-/* Atomix core styles. Colours, radii and fonts come from the active theme
+/* Atomix core styles. Colours, radii and fonts come from public/css/tokens.css and the active theme
    (themes/<name>/theme.css) through CSS custom properties. */
 
 /* ---------- Defaults (overridden by themes) ---------- */
 :root {
   color-scheme: dark;
-  --bg: #0c0e13;
-  --bg-2: #12151c;
-  --surface: #191d27;
-  --surface-2: #232937;
-  --border: rgba(255, 255, 255, 0.08);
-  --text: #eef1f6;
-  --text-dim: #a3abba;
-  --accent: #ff6b3d;
-  --accent-text: #160b06;
-  --danger: #ff5c6c;
-  --success: #3ecf8e;
-  --radius: 10px;
-  --radius-lg: 16px;
+  /* Colours, radii, shadow and fonts: public/css/tokens.css (loaded before this file) and the theme. */
   --poster-w: 164px;
   --card-w: var(--poster-w);
-  --nav-bg: rgba(12, 14, 19, 0.78);
-  --shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
-  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-display: var(--font);
   --header-h: 64px;
   --side-w: 232px;
   --gutter: clamp(16px, 4vw, 56px);
@@ -35,9 +19,17 @@
      browser has linear(); this curve, with a hint of overshoot, stands in elsewhere. Scale only: fades never overshoot. */
   --ease-out: cubic-bezier(0.05, 0.7, 0.1, 1); --ease-in: cubic-bezier(0.3, 0, 1, 1); --ease-move: cubic-bezier(0.2, 0, 0, 1);
   --ease-settle: cubic-bezier(0.2, 0.9, 0.3, 1.04);
-  --dur-focus: 280ms;
+  --dur-focus: 220ms;
+  /* Card motion v2 (v0.28): selecting a film, episode or show card (the rules are at the end). --card-lift, not
+     --lift: Orbit's --lift is its drop shadow. Retuned below per html[data-motion]. */
+  --focus-scale-poster: 1.06; --focus-scale-wide: 1.03; --hover-scale-poster: 1.04; --hover-scale-wide: 1.02;
+  --card-lift: -4px;
+  /* A4: the room a row keeps for its selected card, fixed so the resting layout is the same in every motion setting:
+     the largest growth and rise any theme gives a row card (card motion v2's poster 1.06 and 4 px; Harbour's whole-card
+     1.06) and the ring's reach (offset + width + the 1 px halo). */
+  --focus-grow: 1.06; --focus-rise: 4px; --focus-reach: calc(var(--focus-offset) + var(--focus-width) + 1px);
+  --dim-others: 0.78; --info-rise: 6px; --ripple-step: 20ms; --ripple-rise: 8px; --fade-in-art: 180ms;
   --z-player: 60; --z-mini: 38; --z-pill: 39; --z-header: 40; --z-phone-nav: 41; --z-skip: 100; --z-toast: 200; --z-splash: 300;
-  --focus-ring: 3px solid var(--accent);
   --pill: 999px;
   --rating: #f5c518;
 }
@@ -80,11 +72,20 @@ code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-siz
 }
 .skip-link:focus { top: 12px; }
 
-:where(a, button, input, select, textarea, [tabindex]):focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: 2px;
+/* Focus (visual refresh A4): one ring everywhere, an outline (it survives forced colours) of --focus-ring at
+   --focus-offset with a 1 px halo just outside it (--focus-halo-ring, a box-shadow), plus a second cue per component:
+   cards lift, buttons, chips, menu entries and toggles change their fill (see "Focus: the second cue" near the end).
+   Neither the outline nor the halo ever transitions. Component rules that add their own shadow on focus list
+   var(--focus-halo-ring) first. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: var(--focus-width) solid var(--focus-ring);
+  outline-offset: var(--focus-offset);
+  box-shadow: var(--focus-halo-ring);
 }
-main:focus { outline: none; }
+@media (forced-colors: active) {
+  :focus-visible, .card:focus-visible .card-art, .toggle input:focus-visible + .toggle-track, .search-box:focus-within { outline-color: Highlight !important; }
+}
+main:focus { outline: none; box-shadow: none; }
 
 /* ---------- App shell ---------- */
 .app-header { display: none; }
@@ -101,6 +102,8 @@ body[data-view="player"] .app-header, body[data-view="auth"] .app-header { displ
   text-decoration: none; color: var(--text-dim); font-weight: 600; font-size: 0.95rem; white-space: nowrap;
   transition: color var(--dur-fast), background-color var(--dur-fast);
 }
+/* "More libraries" (v0.29) is a button that looks like the links beside it. */
+button.nav-link { border: 0; background: none; font: inherit; cursor: pointer; text-align: start; }
 .nav-link:hover { color: var(--text); background: color-mix(in srgb, var(--surface) 70%, transparent); }
 .nav-link[aria-current="page"] { color: var(--text); background: var(--surface); }
 .nav-link[aria-current="page"] .icon { color: var(--accent); }
@@ -188,6 +191,7 @@ main { min-height: 100vh; }
 .btn-danger, .btn-ghost.danger { --btn-bg: transparent; color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .btn-danger { --btn-bg: var(--danger); color: #fff; }
 .btn.active { box-shadow: inset 0 0 0 2px var(--accent); }
+.btn.active:focus-visible { box-shadow: var(--focus-halo-ring), inset 0 0 0 2px var(--accent); }
 .btn-icon { padding: 10px; min-width: 44px; }
 .btn-sm { min-height: 44px; padding: 4px 14px; font-size: 0.85rem; } /* a 44 px target (WCAG 2.5.8) */
 .btn-secondary { --btn-bg: var(--surface-2); }
@@ -210,6 +214,8 @@ select:disabled, input:disabled { opacity: 0.6; }
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .field > label, .field-label { font-weight: 650; font-size: 0.9rem; }
 .field-label { margin: 0 0 6px; }
+.choice { display: grid; gap: 6px; justify-items: start; }
+.choice > .hint { margin: 0; }
 .hint { color: var(--text-dim); font-size: 0.82rem; margin: 0; order: 1; }
 .field > .hint { order: 0; }
 .form-error { color: var(--danger); font-weight: 600; margin: 0; }
@@ -235,7 +241,7 @@ select:disabled, input:disabled { opacity: 0.6; }
 .toggle-track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--text-dim); transition: transform 0.2s var(--ease), background-color 0.2s; }
 .toggle input:checked + .toggle-track { background: var(--accent); border-color: var(--accent); }
 .toggle input:checked + .toggle-track::after { transform: translateX(18px); background: var(--accent-text); }
-.toggle input:focus-visible + .toggle-track { outline: var(--focus-ring); outline-offset: 2px; }
+.toggle input:focus-visible + .toggle-track { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); box-shadow: var(--focus-halo-ring); }
 
 .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: var(--pill); background: var(--surface-2); color: var(--text); font-size: 0.8rem; font-weight: 650; }
 .chips, .genres { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; padding: 0; margin: 0 0 14px; }
@@ -254,27 +260,34 @@ select:disabled, input:disabled { opacity: 0.6; }
 /* ---------- Artwork & cards ---------- */
 .art { position: relative; overflow: hidden; border-radius: var(--radius); background: var(--surface); aspect-ratio: 2 / 3; }
 .art-landscape { aspect-ratio: 16 / 9; }
-.art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity var(--dur-slow); }
+/* Card motion v2: the picture fades in over --fade-in-art once decoded (cards.js); one already there when the card is
+   drawn (.is-instant) shows at once. Until then a film, show or episode card paints its artwork's own colour
+   (--card-tint, set on the card); anything else keeps the title's own colours. The placeholder stays under the
+   picture while it fades, then goes. */
+.art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity var(--fade-in-art) var(--ease-out); }
 .art.loaded img { opacity: 1; }
+.art.is-instant img { transition: none; }
 .art-placeholder {
   position: absolute; inset: 0; display: flex; align-items: flex-end; padding: 12px;
-  background:
+  background: var(--card-tint,
     radial-gradient(120% 90% at 0% 0%, hsl(var(--hue) 60% 42% / 0.55), transparent 60%),
-    linear-gradient(160deg, hsl(var(--hue) 35% 24%), hsl(calc(var(--hue) + 40) 40% 12%));
+    linear-gradient(160deg, hsl(var(--hue) 35% 24%), hsl(calc(var(--hue) + 40) 40% 12%)));
   color: #fff; font-weight: 750; font-size: 0.95rem; line-height: 1.2; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.5);
 }
 .art-placeholder span { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
-.art.loaded .art-placeholder { visibility: hidden; }
+.art.loaded .art-placeholder { visibility: hidden; transition: visibility 0s linear var(--fade-in-art); }
+.art.is-instant .art-placeholder { transition: none; }
+html[data-motion="reduce"] .art.loaded .art-placeholder { transition-property: visibility !important; }
 
 .card { display: flex; flex-direction: column; gap: 8px; text-decoration: none; color: inherit; border-radius: var(--radius); min-width: 0; }
-.card:focus-visible { outline: none; }
+.card:focus-visible { outline: none; box-shadow: none; } /* the ring is drawn on the art, which lifts */
 .card-art { position: relative; border-radius: var(--radius); transition: transform var(--dur-fast) var(--ease-out); }
 /* v0.28: the ring and shadow appear at once (the cue); only the growth tweens, settling in on the signature curve. */
 .card:focus-visible .card-art { transform: translateY(-3px) scale(1.035); box-shadow: var(--shadow); transition: transform var(--dur-focus) var(--ease-settle); }
 @media (hover: hover) and (pointer: fine) {
   .card:hover .card-art { transform: translateY(-3px) scale(1.035); box-shadow: var(--shadow); transition: transform var(--dur-focus) var(--ease-settle); }
 }
-.card:focus-visible .card-art { box-shadow: 0 0 0 3px var(--accent), var(--shadow); }
+.card:focus-visible .card-art { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); box-shadow: var(--focus-halo-ring), var(--shadow); }
 .card-meta { display: flex; flex-direction: column; min-width: 0; padding: 0 2px; }
 .card-title { font-weight: 650; font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card-sub { color: var(--text-dim); font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -304,16 +317,22 @@ select:disabled, input:disabled { opacity: 0.6; }
 .row-title-link .icon { opacity: 0; transform: translateX(-4px); transition: opacity 0.2s, transform 0.2s var(--ease-out); color: var(--accent); }
 .row-title-link:hover .icon, .row-title-link:focus-visible .icon { opacity: 1; transform: none; }
 .row-body { position: relative; }
+/* A4: the row's top padding (room for the lifted card, its ring and halo, + 3px for the focus orbit); the arrows line up with it. */
+:is(.row-body, .row-scroller) { --row-pad-top: max(12px, calc((var(--focus-grow) - 1) * var(--card-w) * 0.75 + var(--focus-rise) + var(--focus-reach) + 3px)); }
 .row-scroller {
-  display: grid; grid-auto-flow: column; gap: 14px; overflow-x: auto; overscroll-behavior-x: contain;
-  padding: 12px var(--gutter) 14px; scroll-padding-inline: var(--gutter); scroll-snap-type: x proximity; scrollbar-width: none;
+  display: grid; grid-auto-flow: column; overflow-x: auto; overscroll-behavior-x: contain;
+  /* A4: room for a selected card (--focus-grow, the lift and the ring's reach) so it never covers its neighbour or
+     the row's heading, and the row doesn't clip its ring. The first and last cards grow from their inner edge, so
+     the gap takes the whole growth (the spec's (scale - 1) x width / 2 per side, doubled for an edge card). */
+  gap: max(14px, calc((var(--focus-grow) - 1) * var(--card-w) + var(--focus-reach)));
+  padding: var(--row-pad-top) var(--gutter) max(14px, calc((var(--focus-grow) - 1) * var(--card-w) * 0.75 + var(--focus-reach))); scroll-padding-inline: var(--gutter); scroll-snap-type: x proximity; scrollbar-width: none;
 }
 .row-scroller::-webkit-scrollbar { display: none; }
 .row-poster, .row-list { grid-auto-columns: var(--card-w); }
 .row-landscape { grid-auto-columns: calc(var(--card-w) * 1.85); }
 .row-scroller > .card { scroll-snap-align: start; }
 .row-nav {
-  position: absolute; top: 12px; bottom: 50px; z-index: 2; width: calc(var(--gutter) - 4px); min-width: 36px;
+  position: absolute; top: var(--row-pad-top, 12px); bottom: 50px; z-index: 2; width: calc(var(--gutter) - 4px); min-width: 36px;
   display: grid; place-items: center; border: 0; color: var(--text); cursor: pointer; opacity: 0; transition: opacity 0.2s;
 }
 .row-prev { left: 0; background: linear-gradient(90deg, var(--bg), transparent); }
@@ -361,7 +380,6 @@ select:disabled, input:disabled { opacity: 0.6; }
 .episode { display: grid; grid-template-columns: clamp(150px, 22vw, 260px) 1fr; gap: 18px; align-items: start; padding: 10px; border-radius: var(--radius-lg); transition: background-color var(--dur-fast); }
 .episode:hover, .episode:focus-within { background: var(--surface); }
 .episode-thumb { position: relative; display: block; border-radius: var(--radius); }
-.episode-thumb:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent); }
 .episode-info h3 { margin: 4px 0 4px; font-size: 1.02rem; }
 .episode-info h3 a { text-decoration: none; }
 .episode-info h3 a:hover { text-decoration: underline; }
@@ -395,7 +413,6 @@ select:disabled, input:disabled { opacity: 0.6; }
 .artwork-backdrop .artwork-choice img { aspect-ratio: 16 / 9; }
 .artwork-logo .artwork-choice img { aspect-ratio: 5 / 2; object-fit: contain; }
 .artwork-choice[aria-pressed="true"] { border-color: var(--accent); }
-.artwork-choice:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .artwork-url input { flex: 1; min-width: 0; }
 .artwork-panel[hidden], .artwork-url[hidden] { display: none; }
 .edit-field .input-year { max-width: 180px; }
@@ -409,9 +426,9 @@ select:disabled, input:disabled { opacity: 0.6; }
 /* ---------- Search & add-ons ---------- */
 .search-head { justify-content: center; }
 .search-box { display: flex; align-items: center; gap: 12px; width: min(720px, 100%); padding: 0 18px; border-radius: var(--pill); background: var(--surface); border: 1px solid var(--border); }
-.search-box:focus-within { box-shadow: 0 0 0 3px var(--accent); }
+.search-box:focus-within { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); box-shadow: var(--focus-halo-ring); background: var(--surface-2); }
 .search-box .search-input { border: 0 !important; background: transparent !important; font-size: 1.15rem !important; min-height: 58px !important; padding-left: 0 !important; }
-.search-box .search-input:focus-visible { outline: none; }
+.search-box .search-input:focus-visible { outline: none; box-shadow: none; }
 .search-section { margin-bottom: 30px; }
 .search-section h2 { padding: 0 var(--gutter); }
 .addon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; padding: 0 var(--gutter); }
@@ -453,12 +470,14 @@ select:disabled, input:disabled { opacity: 0.6; }
 .settings-tab { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: var(--radius); text-decoration: none; color: var(--text-dim); font-weight: 650; }
 .settings-tab:hover { background: var(--surface); color: var(--text); }
 .settings-tab[aria-current="page"] { background: var(--surface); color: var(--text); box-shadow: inset 3px 0 0 var(--accent); }
+.settings-tab[aria-current="page"]:focus-visible { box-shadow: var(--focus-halo-ring), inset 3px 0 0 var(--accent); }
 .settings-content { min-width: 0; max-width: 1000px; }
 @media (max-width: 860px) {
   .settings-layout { grid-template-columns: 1fr; }
   .settings-tabs { position: static; flex-direction: row; overflow-x: auto; scrollbar-width: none; }
   .settings-tab { flex: none; }
   .settings-tab[aria-current="page"] { box-shadow: inset 0 -3px 0 var(--accent); }
+  .settings-tab[aria-current="page"]:focus-visible { box-shadow: var(--focus-halo-ring), inset 0 -3px 0 var(--accent); }
 }
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: clamp(18px, 2.5vw, 26px); margin-bottom: 18px; }
 .panel > h2 { margin-bottom: 16px; }
@@ -513,6 +532,26 @@ html[data-layout="orbit"] .row-actions-compact, body[data-layout="orbit"] .row-a
 .theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; margin-bottom: 8px; }
 .theme-card { display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 10px; border-radius: var(--radius-lg); border: 2px solid var(--border); background: var(--bg-2); color: inherit; font: inherit; cursor: pointer; }
 .theme-card[aria-checked="true"] { border-color: var(--accent); }
+/* Accent picker (visual refresh A6): round swatches painted with the colour clamped for this theme (--sw, set by
+   settings.js), a tick on the chosen one (not colour alone), "Theme default" and the Custom… hex field. Focus: the
+   shared ring and halo, and the swatch grows (transform only). */
+.accent-picker { margin: 14px 0; }
+.accent-swatches { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 4px; }
+.accent-swatch { width: 44px; height: 44px; flex: none; border-radius: 50%; border: 2px solid var(--border-strong); padding: 0; display: grid; place-items: center; background: var(--sw); color: var(--sw-ink); cursor: pointer; transition: transform var(--dur-fast, 0.15s) ease; }
+.accent-swatch:focus-visible { transform: scale(1.12); }
+html:is([data-motion="reduce"], [data-motion="none"]) .accent-swatch:is(:focus-visible, :hover) { transform: none; border-width: 4px; } /* nothing grows */
+@media (hover: hover) and (pointer: fine) { .accent-swatch:hover { transform: scale(1.08); } }
+.accent-tick { display: none; }
+:is(.accent-swatch, .accent-default)[aria-pressed="true"] .accent-tick { display: inline-grid; }
+.accent-swatch[aria-pressed="true"] { border-color: var(--text-high); }
+.accent-default[aria-pressed="true"] { border-color: var(--text-high); }
+.accent-custom { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+.accent-custom > .field-label { margin: 0; }
+.accent-custom > .accent-hex { width: 9.5em; flex: none; font-variant-numeric: tabular-nums; }
+.accent-preview { width: 28px; height: 28px; border-radius: 50%; background: var(--sw); border: 2px solid var(--border-strong); flex: none; }
+.accent-preview.is-empty { border-style: dashed; }
+.accent-error { margin: 8px 0 0; padding-left: 10px; border-left: 4px solid var(--danger); color: var(--text-high); font-weight: 600; }
+.accent-error:empty { display: none; }
 .theme-swatch { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; align-content: end; aspect-ratio: 16 / 9; padding: 22px 10px 10px; border-radius: 10px; background: var(--sw-bg); margin-bottom: 6px; overflow: hidden; }
 .sw-nav { position: absolute; background: var(--sw-surface); }
 .sw-nav.sw-top { inset: 0 0 auto 0; height: 14px; }
@@ -573,8 +612,6 @@ body[data-view="player"] .view { padding: 0; animation: none; }
 .seekbar::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; margin-top: -5.5px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent); transition: transform var(--dur-fast); }
 .seekbar::-moz-range-thumb { width: 16px; height: 16px; border: 0; border-radius: 50%; background: #fff; }
 .seekbar:hover::-webkit-slider-thumb, .seekbar:focus-visible::-webkit-slider-thumb { transform: scale(1.25); }
-.seekbar:focus-visible { outline: none; }
-.seekbar:focus-visible::-webkit-slider-runnable-track { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.4); }
 /* Seek-bar preview: a frame from the video and the time, above the scrub point */
 .seek-preview { position: absolute; bottom: calc(100% + 12px); left: 0; transform: translateX(-50%); display: grid; justify-items: center; gap: 6px; pointer-events: none; z-index: 2; }
 .seek-preview[hidden] { display: none; }
@@ -589,7 +626,7 @@ input[type="range"].range, .volume, .mini-seek-range, .mini-volume, .remote-volu
 :is(.volume, .mini-seek-range, .mini-volume, .remote-volume, .np-volume, .np-seek-range)::-moz-range-track { height: 4px; border-radius: 4px; background: color-mix(in srgb, var(--text) 30%, transparent); }
 :is(.volume, .mini-seek-range, .mini-volume, .remote-volume, .np-volume, .np-seek-range)::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border-radius: 50%; background: var(--text); }
 :is(.volume, .mini-seek-range, .mini-volume, .remote-volume, .np-volume, .np-seek-range)::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: var(--text); }
-:is(.volume, .mini-seek-range, .mini-volume, .remote-volume, .np-volume, .np-seek-range):focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+:is(.volume, .mini-seek-range, .mini-volume, .remote-volume, .np-volume, .np-seek-range):focus-visible { border-radius: 4px; }
 /* Seek bars paint what has played in the accent (the --pct the script sets). */
 :is(.mini-seek-range, .np-seek-range)::-webkit-slider-runnable-track { background: linear-gradient(90deg, var(--accent) var(--pct, 0%), color-mix(in srgb, var(--text) 30%, transparent) var(--pct, 0%)); }
 :is(.mini-seek-range, .np-seek-range)::-moz-range-progress { height: 4px; border-radius: 4px; background: var(--accent); }
@@ -612,7 +649,7 @@ input[type="range"].range, .volume, .mini-seek-range, .mini-volume, .remote-volu
 .icon-btn, .pbtn, .mbtn, .rbtn, .watchlist-btn { display: inline-grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; transition: background-color var(--dur-fast), transform var(--dur-fast), color var(--dur-fast); }
 :is(.icon-btn, .pbtn, .mbtn, .rbtn, .watchlist-btn):hover { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }
 :is(.icon-btn, .pbtn, .mbtn, .rbtn, .watchlist-btn):active { transform: scale(0.92); }
-:is(.icon-btn, .pbtn, .mbtn, .rbtn, .watchlist-btn):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; color: var(--text); }
+:is(.icon-btn, .pbtn, .mbtn, .rbtn, .watchlist-btn):focus-visible { color: var(--text); background: var(--border-strong); } /* the soft tint is in the second-cue @supports block at the end */
 :is(.icon-btn, .pbtn, .mbtn, .rbtn, .watchlist-btn):disabled { opacity: 0.35; cursor: default; background: transparent; }
 .pbtn[hidden] { display: none; }
 .mode-badge { border: 1px solid rgba(255, 255, 255, 0.3); background: transparent; color: rgba(255, 255, 255, 0.85); border-radius: var(--pill); padding: 3px 10px; font: inherit; font-size: 0.72rem; font-weight: 750; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; margin-right: 6px; }
@@ -663,7 +700,6 @@ input[type="range"].range, .volume, .mini-seek-range, .mini-volume, .remote-volu
 .skip-intro { position: absolute; right: var(--gutter); bottom: 150px; z-index: 4; overflow: hidden; padding: 12px 24px; border: 0; border-radius: var(--pill); background: rgba(22, 24, 30, 0.92); color: #fff; font: inherit; font-size: 1.05rem; font-weight: 700; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); cursor: pointer; }
 .skip-intro[hidden] { display: none; }
 .skip-intro:hover { background: rgba(40, 44, 54, 0.95); }
-.skip-intro:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
 .skip-intro-bar { position: absolute; left: 0; bottom: 0; height: 3px; width: calc(var(--left, 1) * 100%); background: var(--accent); transition: width 0.25s linear; }
 .player[data-controls="hidden"] .skip-intro { bottom: 60px; }
 @media (prefers-reduced-motion: reduce) { .skip-intro-bar { transition: none; } }
@@ -678,7 +714,6 @@ input[type="range"].range, .volume, .mini-seek-range, .mini-volume, .remote-volu
 
 /* ---------- Keyboard / TV mode ---------- */
 html.kbd .card:focus-visible .card-art { transform: scale(1.07); }
-html.kbd .btn:focus-visible { box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px var(--accent); outline: none; }
 
 /* ---------- How much moves (v0.28): html[data-motion] = full | reduce | none, set by motion.js ----------
    reduce: fades and colour changes stay (they carry the feedback), nothing grows, slides or spins, nothing loops.
@@ -689,7 +724,7 @@ html.kbd .btn:focus-visible { box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px var(--a
 }
 html[data-motion="none"] *, html[data-motion="none"] *::before, html[data-motion="none"] *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 html[data-motion="reduce"] *, html[data-motion="reduce"] *::before, html[data-motion="reduce"] *::after {
-  transition-property: opacity, color, background-color, border-color, outline-color, fill, stroke !important;
+  transition-property: opacity, color, background-color, border-color, fill, stroke !important; /* never outline or box-shadow: focus rings appear at once */
   animation-iteration-count: 1 !important; scroll-behavior: auto !important;
 }
 /* Entrances that travel become plain fades. */
@@ -697,6 +732,13 @@ html[data-motion="reduce"] :is(.dialog[open], .toast, .spot-inner.spot-fade) { a
 html[data-motion="reduce"] .spinner { animation: none !important; }
 /* A held arrow key: nothing tweens, so the focus keeps up with the remote. */
 html.nav-held *, html.nav-held *::before, html.nav-held *::after { transition-duration: 0s !important; }
+/* Card motion v2's tokens: reduce keeps the fades (glow, info strip) and drops growth, lift, rise and dimming;
+   none keeps the end states and drops every duration. */
+html[data-motion="reduce"] {
+  --focus-scale-poster: 1; --focus-scale-wide: 1; --hover-scale-poster: 1; --hover-scale-wide: 1;
+  --card-lift: 0px; --dim-others: 1; --info-rise: 0px; --ripple-rise: 0px;
+}
+html[data-motion="none"] { --dim-others: 1; --info-rise: 0px; --ripple-step: 0ms; --ripple-rise: 0px; --fade-in-art: 0ms; }
 
 /* ---------- Profiles ---------- */
 .avatar {
@@ -716,8 +758,11 @@ body[data-layout="top"] .nav-profile .nav-label { display: none; }
 .picker-grid { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: clamp(16px, 3vw, 36px); max-width: 980px; }
 .picker-profile { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 10px; border: 0; border-radius: var(--radius-lg); background: transparent; color: var(--text-dim); font: inherit; cursor: pointer; transition: color var(--dur-fast); }
 .picker-profile .avatar { transition: transform 0.2s var(--ease); } /* v0.28: the ring appears at once */
-.picker-profile:hover, .picker-profile:focus-visible { color: var(--text); outline: none; }
-.picker-profile:hover .avatar, .picker-profile:focus-visible .avatar { transform: scale(1.06); box-shadow: 0 0 0 4px var(--bg), 0 0 0 7px var(--text); }
+.picker-profile:hover, .picker-profile:focus-visible { color: var(--text); }
+.picker-profile:focus-visible { outline: none; box-shadow: none; } /* the ring goes round the avatar */
+.picker-profile:hover .avatar, .picker-profile:focus-visible .avatar { transform: scale(1.06); }
+.picker-profile:hover .avatar { box-shadow: 0 0 0 4px var(--bg), 0 0 0 7px var(--text); }
+.picker-profile:focus-visible .avatar { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); box-shadow: var(--focus-halo-ring); }
 .picker-name { font-weight: 700; font-size: 1.1rem; }
 .picker-tags { display: flex; gap: 6px; align-items: center; min-height: 22px; }
 .chip-kids { background: color-mix(in srgb, var(--accent) 30%, transparent); }
@@ -831,7 +876,7 @@ html.has-mini { scroll-padding-bottom: calc(var(--mini-h) + 12px); }
 .mini-text { display: flex; flex-direction: column; min-width: 0; }
 .mini-title { font-weight: 700; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mini-title:hover { text-decoration: underline; }
-.mini-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.mini-title:focus-visible { border-radius: 4px; }
 .mini-sub { color: var(--text-dim); font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mini-center { display: flex; flex-direction: column; align-items: center; gap: 0; min-width: 0; }
 .mini-buttons { display: flex; align-items: center; gap: 6px; }
@@ -847,8 +892,9 @@ html.has-mini { scroll-padding-bottom: calc(var(--mini-h) + 12px); }
 .queue-main { flex: 1; min-width: 0; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 6px 8px; border: 0; border-radius: var(--radius); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 /* ---------- One selectable row (v0.15.0): menus, sheets, device/folder/server pickers, songs and queue rows ---------- */
 :is(.option-row, .sheet-item, .cast-device, .folder-item, .identify-option, .plex-server, .track-main, .queue-main):hover { background: var(--surface-2); }
-:is(.option-row, .sheet-item, .cast-device, .folder-item, .identify-option, .plex-server, .track-main, .queue-main):focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
-.menu-item:hover, .menu-item:focus-visible { background: rgba(255, 255, 255, 0.12); outline: none; } /* on the player's dark glass */
+:is(.option-row, .sheet-item, .cast-device, .folder-item, .identify-option, .plex-server, .track-main, .queue-main):focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: calc(-1 * var(--focus-width)); box-shadow: var(--focus-halo-inset); background: var(--surface-2); }
+.menu-item:hover, .menu-item:focus-visible { background: rgba(255, 255, 255, 0.12); }
+.menu-item:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: calc(-1 * var(--focus-width)); box-shadow: var(--focus-halo-inset); } /* on the player's dark glass */
 .queue-main .art { border-radius: 5px; }
 .queue-text { display: flex; flex-direction: column; min-width: 0; }
 .queue-text strong, .queue-text small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -910,6 +956,29 @@ html.has-mini { scroll-padding-bottom: calc(var(--mini-h) + 12px); }
 }
 body[data-view="player"] .backdrop, body[data-view="auth"] .backdrop, body:not(.signed-in) .backdrop { display: none; }
 html.reduce-motion .backdrop img { filter: none; transition: none; }
+
+/* ---------- Scrim (visual refresh A5): the shade that keeps words readable over the artwork ----------
+   Its own full-screen layer just above the backdrop (backdrop.js), never part of it: the card-to-page morph names the
+   backdrop, and the scrim stays put across a page change (its own view-transition group, the same before and after).
+   It covers what the backdrop covers, rail and side menu included, so no edge of it falls inside the picture. One
+   recipe from tokens.css: --scrim-left over the left --scrim-run-x, --scrim-bottom over the lower --scrim-run-y and
+   --scrim-edge from the bottom-left corner, as a mask over --scrim-colour at --scrim-max (black; Daylight its
+   canvas). Shown while the backdrop has a picture; it fades with it. */
+.scrim {
+  --scrim-run-x: 70%; --scrim-run-y: 60%; --scrim-edge-x: 85%; --scrim-edge-y: 100%;
+  position: fixed; inset: 0; z-index: -1; pointer-events: none; display: none; opacity: 0;
+  background: var(--scrim-colour); transition: opacity 0.7s var(--ease);
+  -webkit-mask: var(--scrim-left) left top / var(--scrim-run-x) 100% no-repeat, var(--scrim-bottom) left bottom / 100% var(--scrim-run-y) no-repeat, var(--scrim-edge) left bottom / var(--scrim-edge-x) var(--scrim-edge-y) no-repeat;
+  mask: var(--scrim-left) left top / var(--scrim-run-x) 100% no-repeat, var(--scrim-bottom) left bottom / 100% var(--scrim-run-y) no-repeat, var(--scrim-edge) left bottom / var(--scrim-edge-x) var(--scrim-edge-y) no-repeat;
+}
+body.signed-in[data-view="page"] .scrim { display: block; }
+.backdrop.has-art + .scrim { opacity: var(--scrim-max); }
+html.reduce-motion .scrim { transition: none; }
+html.vt .scrim { view-transition-name: scrim; }
+/* The side-menu layouts start the page about 250 px in, so a title page's words reach three quarters across. */
+body[data-layout="side"] .scrim { --scrim-run-x: 100%; }
+/* Phones: the words take the whole width, so both runs cover the whole screen. */
+@media (max-width: 720px) { .scrim { --scrim-run-x: 100%; --scrim-run-y: 100%; --scrim-edge-x: 100%; } }
 
 /* ---------- Clock ---------- */
 body[data-layout="side"] .nav-clock-item { position: fixed; top: 18px; right: var(--gutter); z-index: var(--z-pill); }
@@ -1015,8 +1084,9 @@ html.reduce-motion .loader :is(.n1, .n2, .n3) { animation: none; opacity: 0.7; }
 .mini { isolation: isolate; overflow: hidden; }
 
 /* ---------- Reduce effects (a profile setting): no blur anywhere, for slow TVs ---------- */
-html.reduce-effects *, html.reduce-effects *::before, html.reduce-effects *::after { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
-html.reduce-effects dialog::backdrop { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+html.reduce-effects *, html.reduce-effects *::before, html.reduce-effects *::after,
+html[data-glass="solid"] *, html[data-glass="solid"] *::before, html[data-glass="solid"] *::after { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+html.reduce-effects dialog::backdrop, html[data-glass="solid"] dialog::backdrop { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
 html.reduce-effects .backdrop img { filter: none !important; }
 html.reduce-effects .mini::before { display: none; filter: none; }
 /* A switch with a line saying what it does */
@@ -1163,7 +1233,7 @@ html.nowplaying-open .mini { display: none; }
 @media (prefers-reduced-motion: no-preference) { .lyrics-synced { transition: transform 0.45s var(--ease); } }
 .lyric-line { font-size: 1.35rem; line-height: 1.35; color: var(--text-dim); border-radius: 8px; padding: 2px 8px; cursor: pointer; transition: color 0.3s, font-size 0.3s; }
 .lyric-line.is-current { color: var(--text); font-size: 1.7rem; font-weight: 650; }
-.lyric-line:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent); }
+.lyric-line:focus-visible { background: rgba(255, 255, 255, 0.1); }
 button.lyric-line { display: block; width: 100%; background: none; border: 0; font-family: inherit; text-align: inherit; }
 .lyrics-plain { overflow: auto; max-height: 62vh; line-height: 1.6; }
 .lyrics-plain p { margin: 0; }
@@ -1211,7 +1281,6 @@ button.lyric-line { display: block; width: 100%; background: none; border: 0; fo
 .cast-pill[hidden], body[data-view="player"] .cast-pill, body:not(.signed-in) .cast-pill, html.remote-open .cast-pill { display: none; }
 html.has-mini .cast-pill { bottom: calc(var(--mini-h) + 14px); }
 .cast-pill-open { display: flex; align-items: center; gap: 10px; min-width: 0; color: inherit; text-decoration: none; border-radius: var(--pill); }
-.cast-pill-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .cast-pill-art { flex: none; width: 44px; height: 44px; border-radius: 50%; overflow: hidden; }
 .cast-pill-art .art { width: 100%; height: 100%; }
 .cast-pill-art img { width: 100%; height: 100%; object-fit: cover; }
@@ -1293,7 +1362,7 @@ html.has-mini .cast-pill { bottom: calc(var(--mini-h) + 14px); }
 .live-item { display: flex; align-items: stretch; gap: 6px; }
 .live-row { flex: 1; min-width: 0; display: grid; grid-template-columns: 56px 3ch minmax(0, 1fr) minmax(0, 0.8fr); align-items: center; gap: 14px; padding: 10px 14px; border: 0; border-radius: var(--radius); background: var(--surface); color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .live-row:hover { background: var(--surface-2); }
-.live-row:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
+.live-row:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: calc(-1 * var(--focus-width)); box-shadow: var(--focus-halo-inset); background: var(--surface-2); }
 .live-logo { display: grid; place-items: center; width: 56px; height: 40px; border-radius: 8px; background: color-mix(in srgb, var(--text) 8%, transparent); overflow: hidden; }
 .live-logo img { width: 100%; height: 100%; object-fit: contain; }
 .live-logo-lg { width: 96px; height: 64px; }
@@ -1307,6 +1376,16 @@ html.has-mini .cast-pill { bottom: calc(var(--mini-h) + 14px); }
 .live-bar > span { display: block; height: 100%; width: calc(var(--p, 0) * 100%); background: var(--accent); }
 .live-radio { font-size: 0.7rem; }
 .live-lock { display: inline-flex; vertical-align: -2px; margin-inline-start: 0.35em; opacity: 0.75; }
+/* v0.28: channels this device can't play, listed with the switch on: the logo or picture dimmed, with a small tag.
+   Text and the tag stay at full contrast (dimming them dropped muted text below 4.5:1 in Daylight). */
+.is-unplayable > .live-row .live-logo, .is-unplayable > .live-card .live-card-art, .is-unplayable > .live-card .live-card-logo { opacity: 0.55; }
+.guide-row.is-unplayable .live-logo, .landscape-card.is-unplayable .card-art { opacity: 0.55; }
+.card-cant { position: absolute; top: 8px; right: 8px; z-index: 1; }
+.live-cant { font-size: 0.7rem; background: color-mix(in srgb, var(--text) 14%, transparent); white-space: nowrap; }
+.live-show-unplayable { display: flex; align-items: center; gap: 8px; margin: 0 0 var(--space-4, 16px); padding: 0 var(--gutter); font-weight: 600; cursor: pointer; }
+.live-show-unplayable input { width: 18px; height: 18px; accent-color: var(--accent); }
+.cant-play-text { margin: 0 0 18px; }
+.cant-play-actions { flex-wrap: wrap; }
 .live-digits { position: fixed; top: 24px; right: 32px; z-index: var(--z-toast, 60); padding: 10px 22px; border-radius: var(--radius); background: color-mix(in srgb, var(--bg) 88%, transparent); font-size: 2.6rem; font-weight: 800; font-variant-numeric: tabular-nums; box-shadow: var(--shadow); }
 @media (max-width: 720px) {
   .live-row { grid-template-columns: 44px minmax(0, 1fr); gap: 10px; }
@@ -1328,7 +1407,7 @@ html.has-mini .cast-pill { bottom: calc(var(--mini-h) + 14px); }
 .guide-cell { position: absolute; top: 0; bottom: 0; }
 .guide-prog, .guide-empty { width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 6px 10px; border: 0; border-radius: 8px; background: var(--surface); color: inherit; font: inherit; text-align: left; cursor: pointer; overflow: hidden; position: relative; }
 .guide-prog:hover, .guide-empty:hover { background: var(--surface-2); }
-.guide-prog:focus-visible, .guide-empty:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); z-index: 1; }
+.guide-prog:focus-visible, .guide-empty:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: calc(-1 * var(--focus-width)); box-shadow: var(--focus-halo-inset); background: var(--surface-2); z-index: 1; }
 .guide-prog.is-now { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); }
 .guide-prog.is-aired { opacity: 0.62; }
 .guide-empty { color: var(--text-soft, var(--text)); font-style: italic; }
@@ -1359,7 +1438,7 @@ html.has-mini .cast-pill { bottom: calc(var(--mini-h) + 14px); }
 .rec-rule-opts { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; margin-top: 0.35rem; }
 .rec-confirm { display: grid; gap: 0.5rem; }
 .rec-confirm p { margin: 0; font-weight: 600; }
-.recordings-view .rec-section h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.recordings-view .rec-section h2:focus-visible { outline-offset: 4px; }
 
 .programme-sheet { display: grid; gap: 10px; max-width: 60ch; }
 .programme-image { width: 100%; max-height: 240px; object-fit: cover; border-radius: var(--radius); }
@@ -1399,7 +1478,7 @@ html.has-mini .cast-pill { bottom: calc(var(--mini-h) + 14px); }
 .live-search-list { list-style: none; margin: 0; padding: 4px var(--gutter) 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 8px; }
 .live-search-chan, .live-search-prog { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 10px 14px; border: 0; border-radius: var(--radius); background: var(--surface); color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .live-search-chan:hover, .live-search-prog:hover { background: var(--surface-2); }
-.live-search-chan:focus-visible, .live-search-prog:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
+.live-search-chan:focus-visible, .live-search-prog:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: calc(-1 * var(--focus-width)); box-shadow: var(--focus-halo-inset); background: var(--surface-2); }
 .live-search-prog span, .live-search-chan span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Live TV in Settings (v0.16.0) */
 .plugin-live { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
@@ -1415,7 +1494,7 @@ html.has-mini .cast-pill { bottom: calc(var(--mini-h) + 14px); }
 .rating-star { background: none; border: 0; padding: 0.35rem; border-radius: 10px; color: var(--muted, currentColor); cursor: pointer; line-height: 0; }
 .rating-star .icon { width: max(26px, calc(34 * var(--px, 1px))); height: max(26px, calc(34 * var(--px, 1px))); }
 .rating-star.is-lit, .rating-star:hover { color: var(--rating, var(--accent)); }
-.rating-star:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+.rating-star:focus-visible { outline-offset: 1px; }
 .my-rating .rating-heart { border-radius: 50%; }
 .my-rating .rating-heart[aria-pressed="true"] { color: var(--rating-heart, #ff5a6e); }
 .rating-dialog .my-rating { margin-top: 0; justify-content: center; }
@@ -1428,7 +1507,8 @@ html.has-mini .cast-pill { bottom: calc(var(--mini-h) + 14px); }
 .smart-media { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .chip-radio { border: 1px solid var(--border, currentColor); background: none; color: inherit; border-radius: 999px; padding: 0.45rem 1rem; cursor: pointer; font: inherit; }
 .chip-radio[aria-checked="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text, #fff); }
-.chip-radio:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.chip-radio:focus-visible { background: var(--surface-2); }
+.chip-radio[aria-checked="true"]:focus-visible { background: var(--accent-hover); }
 .rule-list { display: grid; gap: 0.6rem; }
 .rule-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; min-width: 0; }
 .rule-row { padding-bottom: 0.6rem; border-bottom: 1px solid var(--border, transparent); }
@@ -1530,7 +1610,6 @@ html.has-mini .cast-pill { bottom: calc(var(--mini-h) + 14px); }
 .arrange-row.is-hidden .arrange-title { color: var(--text-dim); }
 .arrange-row.is-moving { outline: 2px solid var(--accent); outline-offset: 2px; background: var(--surface-2); }
 .arrange-handle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 6px 10px; border: 0; border-radius: var(--radius); background: transparent; color: var(--text); font: inherit; text-align: start; cursor: grab; touch-action: none; }
-.arrange-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .arrange-grip { color: var(--text-dim); font-size: 1.2rem; line-height: 1; }
 .arrange-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .arrange-show { flex: none; }
@@ -1618,6 +1697,7 @@ html.has-mini .cast-pill { bottom: calc(var(--mini-h) + 14px); }
 .badge-tool { background: var(--surface-2); color: var(--text); font-weight: 700; }
 .reader-bar[hidden], .reader-jump[hidden], .reader-end[hidden] { display: none; }
 .comic-view { --reader-bg: #0b0b0c; --reader-fg: #e8e8e8; }
+.comic-holder:focus-visible { box-shadow: none; }
 .comic-holder { position: absolute; inset: 0; overflow: hidden; touch-action: none; outline: none; display: flex; align-items: center; justify-content: center; user-select: none; -webkit-user-select: none; }
 .comic-stage { display: flex; align-items: center; justify-content: center; gap: 0; width: 100%; height: 100%; transform-origin: center center; will-change: transform; }
 .comic-page { display: block; max-width: 100%; max-height: 100%; object-fit: contain; -webkit-user-drag: none; }
@@ -1630,9 +1710,10 @@ html.has-mini .cast-pill { bottom: calc(var(--mini-h) + 14px); }
 
 /* ---------- Capture (v0.28): the focus orbit and the press ring (transitions.js) ----------
    Drawn once after the remote rests on a card, over the ring that is already there; full motion only. */
-.capture-arc { position: absolute; inset: -5px; width: calc(100% + 10px); height: calc(100% + 10px); overflow: visible; pointer-events: none; z-index: 3; }
+/* A4: the orbit traces just outside the ring and its halo (--focus-reach), so it never paints over the white ring. */
+.capture-arc { --arc-out: calc(var(--focus-reach) + 2px); position: absolute; inset: calc(-1 * var(--arc-out)); width: calc(100% + 2 * var(--arc-out)); height: calc(100% + 2 * var(--arc-out)); overflow: visible; pointer-events: none; z-index: 3; }
 .capture-arc rect {
-  fill: none; stroke: var(--tint, var(--accent)); stroke-width: 2; stroke-linecap: round; rx: calc(var(--radius) + 5px);
+  fill: none; stroke: var(--tint, var(--accent)); stroke-width: 2; stroke-linecap: round; rx: calc(var(--radius) + var(--arc-out));
   stroke-dasharray: 1; stroke-dashoffset: 1;
   animation: capture-draw 360ms var(--ease-out) forwards, capture-fade 240ms var(--ease-in) 460ms forwards;
 }
@@ -1658,8 +1739,197 @@ html.vt-back::view-transition-old(page) { animation: vt-go 200ms var(--ease-in) 
 html.vt-back::view-transition-new(page) { animation: vt-return 260ms var(--ease-out) both; }
 ::view-transition-group(poster) { animation-duration: 300ms; animation-timing-function: var(--ease-move); }
 ::view-transition-old(poster), ::view-transition-new(poster) { height: 100%; object-fit: cover; }
+/* Card motion v2: the card's art travels into the page's backdrop (or poster) and its title into the page title (text
+   keeps its shape: scaled by height, never stretched). A name left only on the old page (the card has gone or is off
+   screen) leaves with the page: a plain fade, no morph. */
+::view-transition-group(title) { animation-duration: 300ms; animation-timing-function: var(--ease-move); }
+::view-transition-old(title), ::view-transition-new(title) { height: 100%; width: auto; }
+/* Opening into the backdrop (a full-screen picture): its group would paint over the incoming page until the end, so the
+   page goes above it; the old page is gone in 150 ms, the art grows out from under it. */
+html.vt-to-backdrop::view-transition-group(page) { z-index: 1; }
+html.vt-lone-poster::view-transition-old(poster), html.vt-lone-title::view-transition-old(title) { animation: vt-out 150ms var(--ease-in) both; }
+/* The title page's first blocks (data-rise, item.js) after a card opens it: 20 ms apart, 140 ms each, ≤ 200 ms in
+   all; after a morph they wait until the art has nearly landed. Full motion only (transitions.js adds .is-opening only
+   then; the rule says so too): reduce is a crossfade and nothing more, none is instant. */
+html[data-motion="full"]:not(.nav-held) .view.is-opening [data-rise] { animation: open-rise 140ms var(--ease-out) both; animation-delay: calc(var(--open-wait, 0ms) + var(--rise-i, 0) * 20ms); }
+.view.is-opening.after-morph { --open-wait: 200ms; }
+.view.is-opening [data-rise="1"] { --rise-i: 1; }
+.view.is-opening [data-rise="2"] { --rise-i: 2; }
+.view.is-opening [data-rise="3"] { --rise-i: 3; }
+@keyframes open-rise { from { opacity: 0; transform: translateY(8px); } }
 @keyframes vt-out { to { opacity: 0; } }
 @keyframes vt-in { from { opacity: 0; } }
 @keyframes vt-come { from { opacity: 0; transform: scale(0.96); } }
 @keyframes vt-go { to { opacity: 0; transform: scale(0.96); } }
 @keyframes vt-return { from { opacity: 0; transform: scale(1.03); } }
+
+/* ---------- Card motion (v0.28, card-motion.js): pictures from the title, flipped through once on a resting card ---------- */
+.card-flip { position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: 0; transition: opacity 300ms var(--ease-out); }
+.card-flip.is-on { opacity: 1; }
+.card-flip > i { position: absolute; inset: 0; background-repeat: no-repeat; opacity: 0; transition: opacity 280ms var(--ease-move); }
+.card-flip > i.on { opacity: 1; }
+/* Card motion v2: a rested card's 5 s silent clip, over the art. Unseen until its first frame plays (card-motion.js adds
+   .is-on on `playing`), a 200 ms fade in; .is-off fades it back to the poster in 250 ms before it is removed. */
+.card-clip { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; object-fit: cover; pointer-events: none; opacity: 0; transition: opacity 200ms var(--ease-out); }
+.card-clip.is-on { opacity: 1; }
+.card-clip.is-off { opacity: 0; transition-duration: 250ms; }
+
+/* ---------- Card motion v2 (v0.28): selecting a film, episode or show card (card-motion.js marks the row) ----------
+   Every layout, Orbit the reference. At rest nothing here paints: the glow is transparent, the info strip is unseen
+   (it stays in the page for screen readers), the sheen exists only while it runs. Only transform and opacity move;
+   the ring and shadow (each theme's own) still arrive on the key press. A held arrow (html.nav-held) tweens nothing. */
+:is(.row-scroller, .grid) > :is(.poster-card, .landscape-card:not(.live-card)) { position: relative; isolation: isolate; }
+/* Lift: the inner art grows (never the layout box); first and last cards in a row grow from their inner edge.
+   `html body` outranks the themes' own focus growth (Orbit, Arctic), which stays for every other card. */
+.row-scroller > :is(.poster-card, .landscape-card:not(.live-card)):first-child .card-art { transform-origin: 0% 50%; }
+.row-scroller > :is(.poster-card, .landscape-card:not(.live-card)):last-child:not(:first-child) .card-art { transform-origin: 100% 50%; }
+@media (hover: hover) and (pointer: fine) {
+  html body :is(.row-scroller, .grid) > .poster-card:hover .card-art { transform: translateY(var(--card-lift)) scale(var(--hover-scale-poster)); transition: transform var(--dur-focus) var(--ease-settle); }
+  html body :is(.row-scroller, .grid) > .landscape-card:not(.live-card):hover .card-art { transform: translateY(var(--card-lift)) scale(var(--hover-scale-wide)); transition: transform var(--dur-focus) var(--ease-settle); }
+}
+html body :is(.row-scroller, .grid) > .poster-card:focus-visible .card-art { transform: translateY(var(--card-lift)) scale(var(--focus-scale-poster)); transition: transform var(--dur-focus) var(--ease-settle); }
+html body :is(.row-scroller, .grid) > .landscape-card:not(.live-card):focus-visible .card-art { transform: translateY(var(--card-lift)) scale(var(--focus-scale-wide)); transition: transform var(--dur-focus) var(--ease-settle); }
+/* Glow: a shadow in the artwork's own colour (--card-tint; the accent when unknown), painted once under the art;
+   only its opacity moves. Hidden (not just transparent) at rest: a transparent layer alone still changed how
+   Orbit's library posters were drawn by a shade; visibility follows the fade out. */
+:is(.row-scroller, .grid) > :is(.poster-card, .landscape-card:not(.live-card))::before {
+  content: ""; position: absolute; z-index: -1; top: 0; left: 0; right: 0; aspect-ratio: 2 / 3; border-radius: var(--radius); pointer-events: none;
+  box-shadow: 0 12px 40px 2px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 12px 40px 2px color-mix(in srgb, var(--card-tint, var(--accent)) 55%, transparent);
+  opacity: 0; visibility: hidden; transition: opacity var(--dur-focus) var(--ease-out), visibility 0s linear var(--dur-focus);
+}
+:is(.row-scroller, .grid) > .landscape-card:not(.live-card)::before { aspect-ratio: 16 / 9; }
+:is(.row-scroller, .grid) > :is(.poster-card, .landscape-card:not(.live-card)):focus-visible::before { opacity: 1; visibility: visible; transition: opacity var(--dur-focus) var(--ease-out), visibility 0s; }
+@media (hover: hover) and (pointer: fine) {
+  :is(.row-scroller, .grid) > :is(.poster-card, .landscape-card:not(.live-card)):hover::before { opacity: 1; visibility: visible; transition: opacity var(--dur-focus) var(--ease-out), visibility 0s; }
+}
+/* Reduce keeps the glow's fade both ways (its transition list would otherwise drop visibility: an instant cut out). */
+html[data-motion="reduce"] :is(.row-scroller, .grid) > :is(.poster-card, .landscape-card:not(.live-card))::before { transition-property: opacity, visibility !important; }
+/* Neighbours dim while a card in their row is selected (full motion; --dim-others is 1 otherwise). Never the
+   selected card, never the one under the pointer. */
+.row-scroller > :is(.poster-card, .landscape-card:not(.live-card)) { transition: opacity var(--dur-fast) var(--ease-out); }
+.row-scroller.has-selected > :is(.poster-card, .landscape-card:not(.live-card)):not(:focus-visible):not(:hover) { opacity: var(--dim-others); }
+/* Info strip: one line (year · rating · runtime, or S2 · E4 · 45 m) in the page at rest, unseen. Orbit shows it on
+   the lower edge of a selected poster's art in a row, over a shade: it fades and rises in just after the lift starts
+   (reduce: fade only; none and a held arrow: at once). Not under the card: a row clips at its own edge and the room
+   below a card is the ring's. Older themes keep it for screen readers only. */
+.card-info {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; white-space: nowrap;
+  clip: rect(0 0 0 0); clip-path: inset(50%);
+}
+body[data-layout="orbit"] .row-scroller > .poster-card .card-info {
+  z-index: 2; left: 0; right: 0; bottom: 0; width: auto; height: auto; margin: 0; clip: auto; clip-path: none;
+  padding: calc(36 * var(--px, 1px)) calc(14 * var(--px, 1px)) calc(16 * var(--px, 1px)); border-radius: 0 0 var(--radius) var(--radius);
+  text-overflow: ellipsis; font-size: var(--t-caption); font-weight: 600; line-height: 1.25; color: #fff; pointer-events: none;
+  opacity: 0; transform: translateY(var(--info-rise));
+  transition: opacity 120ms var(--ease-in), transform 120ms var(--ease-in);
+}
+/* The shade stays put while the words rise (it moves back by what the strip moves). */
+body[data-layout="orbit"] .row-scroller > .poster-card .card-info::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.78), rgba(0, 0, 0, 0.5) 55%, rgba(0, 0, 0, 0));
+  transform: translateY(calc(-1 * var(--info-rise))); transition: transform 120ms var(--ease-in);
+}
+body[data-layout="orbit"] .row-scroller > .poster-card:focus-visible .card-info { opacity: 1; transform: none; transition: opacity 160ms var(--ease-out) 80ms, transform 160ms var(--ease-out) 80ms; }
+body[data-layout="orbit"] .row-scroller > .poster-card:focus-visible .card-info::before { transform: none; transition: transform 160ms var(--ease-out) 80ms; }
+@media (hover: hover) and (pointer: fine) {
+  body[data-layout="orbit"] .row-scroller > .poster-card:hover .card-info { opacity: 1; transform: none; transition: opacity 160ms var(--ease-out) 80ms, transform 160ms var(--ease-out) 80ms; }
+  body[data-layout="orbit"] .row-scroller > .poster-card:hover .card-info::before { transform: none; transition: transform 160ms var(--ease-out) 80ms; }
+}
+/* A poster still without its picture names itself on the same edge: its name steps aside for the strip. */
+body[data-layout="orbit"] .row-scroller > .poster-card .art-placeholder span { transition: opacity 120ms var(--ease-in); }
+body[data-layout="orbit"] .row-scroller > .poster-card:focus-visible .art-placeholder span { opacity: 0; transition: opacity 120ms var(--ease-out) 40ms; }
+@media (hover: hover) and (pointer: fine) {
+  body[data-layout="orbit"] .row-scroller > .poster-card:hover .art-placeholder span { opacity: 0; transition: opacity 120ms var(--ease-out) 40ms; }
+}
+html:is([data-motion="none"], .nav-held) body .row-scroller > .poster-card .card-info,
+html:is([data-motion="none"], .nav-held) body .row-scroller > .poster-card .card-info::before { transition-delay: 0s !important; }
+/* Sheen: the first time a card is selected on a page, a soft diagonal light crosses its art once (full motion only,
+   never on a held key: card-motion.js adds .is-sheen for the run). */
+.card.is-sheen .art::before {
+  content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: linear-gradient(105deg, transparent 30%, rgba(255, 255, 255, 0.18) 50%, transparent 70%);
+  transform: translateX(-100%); animation: card-sheen 450ms var(--ease-out) forwards;
+}
+html:not([data-motion="full"]) .card.is-sheen .art::before, html.nav-held .card.is-sheen .art::before { display: none; }
+@keyframes card-sheen { to { transform: translateX(100%); } }
+
+/* ---------- TV type floor (visual refresh A3) ----------
+   Wide landscape: raises small text to the --fs-* floors from tokens.css (caption 20, metadata and card titles 24,
+   body 24, metadata weight 500); headings already larger are left alone. Orbit has its own --t-* scale. The
+   `body:not([data-layout="orbit"])` prefix outranks the themes' single-class size rules. */
+@media (min-width: 1600px) and (orientation: landscape) {
+  body:not([data-layout="orbit"]) { font-size: var(--fs-body); }
+  body:not([data-layout="orbit"]) :is(.card-sub, .nav-clock-date, .theme-desc, .toggle-hint, .hint, .badge, .live-badge, .card-live, .live-initials, .media-flags li, .chip, .muted.small, .live-next, .avatar, th, .eyebrow, .art-placeholder span) { font-size: var(--fs-caption); }
+  body:not([data-layout="orbit"]) :is(.card-title, .meta-line, .count, .brand-name, .detail-section > h2, .search-section h2, .nav-clock, .nav-clock-time, .nav-label, .nav-link, .row-title, .row-title-link, .theme-name, .live-name, .live-title, .live-now, .live-num, .overview, p.muted, h3, dt, dd, label, .field-label, .pill, .chip-radio, .skip-link, .btn) { font-size: var(--fs-meta); }
+  body:not([data-layout="orbit"]) :is(.card-sub, .meta-line, .count, .nav-clock-date) { font-weight: var(--fw-meta); }
+}
+
+/* ---------- Focus: the second cue (visual refresh A4) ----------
+   The ring (top of this file) is the first cue; never colour alone, so each focusable thing also changes: cards lift
+   (card motion v2), buttons, chips, menu entries and toggles change their fill. Themes with their own fill (Arctic's
+   frost, Orbit's white) keep it; these are the defaults. Fills may fade (background-color); the ring never does. */
+.btn:focus-visible { background: var(--surface-3); }
+.btn-primary:focus-visible { background: var(--accent-hover); }
+.btn-ghost:focus-visible, .btn-danger.btn-ghost:focus-visible { background: var(--surface-2); }
+.btn-danger:focus-visible { background: var(--danger); filter: brightness(1.15); }
+.nav-link:focus-visible { color: var(--text); background: var(--surface-2); }
+.toggle input:focus-visible + .toggle-track { background: var(--surface-3); }
+.toggle input:checked:focus-visible + .toggle-track { background: var(--accent-hover); }
+/* Over video (fix round 1): their resting shadows would otherwise beat the halo; Skip intro grows (its fill is a fixed
+   dark glass with white text in every theme), the big play
+   button changes its fill and grows (Orbit's is white, so the growth carries it). */
+.skip-intro:focus-visible { transform: scale(1.05); box-shadow: var(--focus-halo-ring), var(--shadow); }
+.player-bigplay:focus-visible { background: var(--accent-hover); transform: scale(1.06); box-shadow: var(--focus-halo-ring), var(--shadow); }
+/* The mixed fills where color-mix() is understood. Old TV browsers (Chromium 88-110, Safari < 16.2) would throw a
+   color-mix() with var() inside out at computed-value time (a transparent fill), so they keep the ramp steps above.
+   test/old-browsers.test.js keeps it that way. */
+@supports (color: color-mix(in srgb, red, blue)) {
+  .btn:focus-visible { background: color-mix(in srgb, var(--btn-bg) 82%, var(--text)); }
+  .btn-ghost:focus-visible { background: var(--surface-2); } /* stays as above */
+  .btn-primary:focus-visible { background: color-mix(in srgb, var(--accent) 82%, var(--text)); }
+  .btn-danger:focus-visible { background: color-mix(in srgb, var(--danger) 82%, var(--text)); filter: none; }
+  .toggle input:focus-visible + .toggle-track { background: color-mix(in srgb, var(--surface-2) 70%, var(--text)); }
+  .toggle input:checked:focus-visible + .toggle-track { background: color-mix(in srgb, var(--accent) 82%, var(--text)); }
+  .player-bigplay:focus-visible { background: color-mix(in srgb, var(--accent) 82%, var(--text)); }
+  :is(.icon-btn, .pbtn, .mbtn, .rbtn, .watchlist-btn):focus-visible { background: color-mix(in srgb, currentColor 18%, transparent); }
+}
+
+/* Settings → Menu (visual refresh B3): one row per library, its Pin switch then Move up / Move down. */
+.menu-libraries { display: grid; gap: 8px; }
+.menu-library { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.menu-library > .toggle { flex: 1 1 14rem; min-width: 0; }
+
+/* ---------- Shared polish pieces (visual refresh B4) ---------- */
+/* Logo box: a fixed-height box for the title's clear logo, so nothing moves when it arrives; the typed title fills it
+   until then (two lines at most) and stays if the logo fails. */
+.logo-box { position: relative; display: flex; align-items: flex-end; height: 120px; height: clamp(64px, 15vh, 160px); max-width: max(40%, min(100%, 320px)); margin: 0 0 18px; }
+.logo-box > .detail-title { margin: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.logo-box > .detail-logo { position: absolute; left: 0; bottom: 0; max-width: 100%; max-height: 100%; margin: 0; object-fit: contain; object-position: left bottom; }
+/* Chips from the media info: outlined. */
+.media-chips li { border: 1px solid var(--border-strong); background: transparent; color: var(--text-high); }
+/* Badges: short words top-left on a solid chip; the watched tick top-right in a small opaque disc (no blur on rows). */
+.card-art > .badge:not(.badge-watched):not(.badge-current) { left: 8px; right: auto; background: var(--surface-3); color: var(--text-high); }
+.card-art > .badge-watched { left: auto; right: 8px; background: var(--surface-3); color: var(--success); -webkit-backdrop-filter: none; backdrop-filter: none; border-radius: 50%; }
+/* Progress track: flush with the art's bottom edge, 3 px (4 px on TV). Orbit keeps its own floating track. */
+body:not([data-layout="orbit"]) .card-art > .progress { left: 0; right: 0; bottom: 0; height: 3px; border-radius: 0 0 var(--radius) var(--radius); background: var(--n-6); }
+body:not([data-layout="orbit"]) .card-art > .progress span { background: var(--progress-fill, var(--accent-solid, var(--accent))); border-radius: 0; }
+/* Above the OLED and More contrast card edges (card-art::after), so the edge never hides how far you are. */
+.card-art > .progress { z-index: 1; }
+@media (min-width: 1600px) and (orientation: landscape) { body:not([data-layout="orbit"]) .card-art > .progress { height: 4px; } }
+/* Skeletons: page-shaped placeholders, shown only after a second of waiting. A soft shimmer, none when motion is
+   reduced or on TV-size screens. */
+.skeleton { display: grid; gap: 22px; padding: 24px var(--gutter, 24px); }
+.skeleton .sk { position: relative; overflow: hidden; border-radius: var(--radius); background: var(--surface-2); }
+.skeleton .sk-hero { height: clamp(180px, 42vh, 460px); border-radius: var(--radius-lg); }
+.skeleton .sk-row { display: flex; gap: 14px; overflow: hidden; }
+.skeleton .sk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--poster-w, 150px), 1fr)); gap: 14px; }
+.skeleton .sk-poster { flex: 0 0 var(--poster-w, 150px); aspect-ratio: 2 / 3; }
+.skeleton .sk-lines { display: grid; gap: 12px; max-width: 60ch; }
+.skeleton .sk-line { height: 14px; border-radius: 7px; }
+.skeleton .sk-line:last-child { width: 60%; }
+.skeleton .sk-heading { height: 34px; width: 40%; }
+.skeleton .sk::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, var(--shimmer), transparent); transform: translateX(-100%); animation: sk-shimmer 1.6s ease-in-out infinite; }
+@keyframes sk-shimmer { to { transform: translateX(100%); } }
+html:not([data-motion="full"]) .skeleton .sk::after { animation: none; }
+@media (min-width: 1600px) and (orientation: landscape) { .skeleton .sk::after { animation: none; } }

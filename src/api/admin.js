@@ -125,6 +125,7 @@ export function registerAdminRoutes(r, core) {
     () => {
       const s = settings.all();
       for (const k of SECRET_SETTINGS) s[k] = s[k] ? '••••••••' + String(s[k]).slice(-4) : '';
+      delete s.arrKey; // v0.28: read from /api/admin/arr only
       s.recordingsDirDefault = config.recordingsDir; // where Live TV recordings go when the folder is left empty
       return s;
     },
@@ -152,6 +153,7 @@ export function registerAdminRoutes(r, core) {
       // Don't overwrite secrets with their masked placeholder.
       for (const k of SECRET_SETTINGS) if (typeof body[k] === 'string' && body[k].startsWith('••••')) delete body[k];
       delete body.plexClientId; // this Atomix's device id at plex.tv: made once, never changed by hand
+      delete body.arrKey; // v0.28: the download apps' webhook key, made and replaced only by /api/admin/arr
       if (body.castEnabled !== undefined) body.castEnabled = body.castEnabled !== false && body.castEnabled !== 'false';
       if (body.castBaseUrl !== undefined) {
         const v = String(body.castBaseUrl ?? '').trim();
@@ -166,6 +168,18 @@ export function registerAdminRoutes(r, core) {
           if (!u || !/^https?:$/.test(u.protocol) || u.search || u.hash) throw new HttpError(400, 'Enter the address TVs use as http://<address>:<port>, like http://192.168.1.20:8787.');
           body.castBaseUrl = `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, '')}`;
         }
+      }
+      if (body.requestUrl !== undefined) {
+        // v0.28: where "Request it" on Search goes (Seerr and friends): an http(s) address, or nothing.
+        const v = String(body.requestUrl ?? '').trim();
+        if (v) {
+          let u = null;
+          try {
+            u = new URL(v);
+          } catch {}
+          if (!u || !/^https?:$/.test(u.protocol)) throw new HttpError(400, 'Enter the request page as an address starting with http:// or https://, like http://192.168.1.20:5055.');
+          body.requestUrl = `${u.origin}${u.pathname.replace(/\/+$/, '')}`;
+        } else body.requestUrl = '';
       }
       if (body.maxTranscodes != null) body.maxTranscodes = Math.max(1, Math.min(32, Number(body.maxTranscodes) || 1));
       // These go straight into ffmpeg's command line: only the known values.

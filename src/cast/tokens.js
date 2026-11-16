@@ -48,8 +48,17 @@ export class CastLinks {
   revokeSession(sessionId) {
     for (const [t, l] of this.links) if (l.sessionId === sessionId) this.links.delete(t);
   }
+  /** Every link for an encrypted Live TV session (v0.28: the TV moved to another channel). */
+  revokeDrm(drmSessionId) {
+    for (const [t, l] of this.links) if (l.drmSessionId === drmSessionId) this.links.delete(t);
+  }
   /** Every link for a cast session (it ended). */
   revokeCast(castId) {
     for (const [t, l] of this.links) if (l.castId === castId) this.links.delete(t);
   }
+}
+
+/** `url` with a link added (`?cast=` or `&cast=`): the media routes accept it in place of a sign-in. */
+export function withLink(url, token) {
+  return `${url}${url.includes('?') ? '&' : '?'}cast=${encodeURIComponent(token)}`;
 }

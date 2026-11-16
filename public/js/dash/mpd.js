@@ -1,6 +1,6 @@
 // Reads a DASH manifest (MPD) into what the player needs: the timing of a live stream, its periods, the video and
 // audio adaptation sets with their quality levels, the segment templates (merged down from period to
-// representation, as the standard says) and the content protection (which key system, the key id, Widevine's pssh).
+// representation, as the standard says) and the content protection (which key system, the key id, the pssh, PlayReady's mspr:pro).
 // SegmentTemplate only (with or without a SegmentTimeline) — what live packagers publish. Pure (no DOM).
 import { parseXml, localName } from './xml.js';
 
@@ -67,6 +67,7 @@ function protectionOf(el) {
       schemeIdUri: cp.attrs.schemeIdUri || '',
       kid: kidAttr ? kidAttr.toLowerCase().replace(/-/g, '') : null,
       pssh,
+      pro: kids(cp, 'pro')[0]?.text?.trim() || null, // v0.28: PlayReady's header object (mspr:pro), base64
     };
   });
 }

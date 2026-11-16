@@ -1,15 +1,9 @@
 /* Daylight — light theme. */
 :root {
+  --focus-halo: rgba(255, 255, 255, 0.8); /* A4: the ring is n-12 (near-black, tokens.css); a light halo outside it */
   color-scheme: light;
-  --bg: #f4f5f8;
-  --bg-2: #eceef3;
-  --surface: #ffffff;
-  --surface-2: #e6e9f0;
   --border: rgba(15, 23, 42, 0.12);
-  --text: #121826;
-  --text-dim: #4d5669;
-  --accent: #2457e6;
-  --accent-text: #ffffff;
+  --accent-text: #ffffff; /* black or white, whichever reads on the accent (APCA Lc >= 60) */
   --danger: #c8283b;
   --success: #12805c;
   --radius: 12px;
@@ -20,7 +14,67 @@
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-display: var(--font);
 }
+/* Ramps (devtools/ramp.mjs): --n-* neutrals, --a-* accent. Hex for every browser; the same colours in oklch() where
+   it is understood. --bg, --bg-2, --surface, --surface-2, --text and --accent come from these (public/css/tokens.css). */
+:root {
+  --n-1: #f4f5f8;
+  --n-2: #eceef3;
+  --n-3: #ffffff;
+  --n-4: #e6e9f0;
+  --n-5: #ced2db;
+  --n-6: #b7bcc7;
+  --n-7: #a0a5b3;
+  --n-8: #89909f;
+  --n-9: #737b8b;
+  --n-10: #5e6778;
+  --n-11: #4a5366;
+  --n-12: #121826;
+  --a-1: #fafcff;
+  --a-2: #eaf1ff;
+  --a-3: #dae6ff;
+  --a-4: #cadbff;
+  --a-5: #bad1ff;
+  --a-6: #aac6ff;
+  --a-7: #9abaff;
+  --a-8: #8aafff;
+  --a-9: #2457e6;
+  --a-10: #1746d5;
+  --a-11: #1741be;
+  --a-12: #0c225f;
+}
+@supports (color: oklch(0% 0 0)) {
+  :root {
+    --n-1: oklch(97.02% 0.0041 271.37);
+    --n-2: oklch(94.90% 0.0070 268.55);
+    --n-3: oklch(100.00% 0.0000 0);
+    --n-4: oklch(93.38% 0.0100 267.36);
+    --n-5: oklch(86.33% 0.0131 266.69);
+    --n-6: oklch(79.46% 0.0165 266.25);
+    --n-7: oklch(72.24% 0.0210 270.13);
+    --n-8: oklch(65.26% 0.0238 265.68);
+    --n-9: oklch(58.18% 0.0264 264.35);
+    --n-10: oklch(51.23% 0.0292 263.19);
+    --n-11: oklch(44.18% 0.0334 265.12);
+    --n-12: oklch(21.03% 0.0294 266.12);
+    --a-1: oklch(99.04% 0.0045 258.32);
+    --a-2: oklch(95.70% 0.0203 264.47);
+    --a-3: oklch(92.36% 0.0364 265.14);
+    --a-4: oklch(89.03% 0.0530 265.30);
+    --a-5: oklch(85.91% 0.0690 264.11);
+    --a-6: oklch(82.61% 0.0863 264.24);
+    --a-7: oklch(79.14% 0.1049 264.95);
+    --a-8: oklch(75.90% 0.1227 264.70);
+    --a-9: oklch(51.91% 0.2230 264.51);
+    --a-10: oklch(46.98% 0.2235 264.52);
+    --a-11: oklch(43.85% 0.2005 264.59);
+    --a-12: oklch(28.01% 0.1122 264.76);
+  }
+}
 /* Keep artwork a little softer so dark text stays readable over it. */
 
 /* Clear logos are usually drawn for dark screens (white lettering); give them an outline of shade here. */
 .spot-logo, .detail-logo { filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.75)) drop-shadow(0 2px 14px rgba(0, 0, 0, 0.45)); }
+
+/* Text on artwork (visual refresh A5): the scrim behind the hero and title page is the canvas colour, eased like the
+   dark themes' black one, so the dark words stay; card captions and Live TV cards keep their dark scrims. */
+:root { --scrim-colour: var(--app-bg); --rating: #8a5a00; } /* the rating's star and number: amber dark enough for the canvas */

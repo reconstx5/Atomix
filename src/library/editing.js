@@ -297,7 +297,7 @@ export async function setArtwork(core, item, type, { tmdbPath, url, buffer } = {
   const locks = new Set(lockedFields(item));
   locks.add(type);
   const now = Date.now();
-  db.run(`UPDATE items SET ${type} = ?, locked_fields = ?, metadata_at = ?, updated_at = ? WHERE id = ?`, ref, JSON.stringify([...locks]), now, now, item.id);
+  db.run(`UPDATE items SET ${type} = ?, colors = NULL, locked_fields = ?, metadata_at = ?, updated_at = ? WHERE id = ?`, ref, JSON.stringify([...locks]), now, now, item.id);
   const updated = db.get('SELECT * FROM items WHERE id = ?', item.id);
   await core.hooks?.emit('metadata:updated', { item: updated });
   return updated;

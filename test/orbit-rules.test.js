@@ -77,3 +77,11 @@ test('the phone pill hides scrolling down and comes back on any scroll up or at 
   assert.equal(pillShown({ y: 202, lastY: 200, shown: false }), false);
   assert.equal(pillShown({ y: 4, lastY: 0, shown: false }), true, 'at the top it shows');
 });
+
+test('a wheel turn over a screen\'s fixed top area scrolls the list below it, by the same amount', async () => {
+  const { wheelPixels } = await import('../public/js/orbit-rules.js');
+  assert.equal(wheelPixels({ deltaY: 100, deltaMode: 0 }, 800), 100, 'pixels as they come');
+  assert.equal(wheelPixels({ deltaY: -3, deltaMode: 1 }, 800), -120, 'lines are 40 px');
+  assert.equal(wheelPixels({ deltaY: 1, deltaMode: 2 }, 800), 800, 'a page is the list\'s height');
+  assert.equal(wheelPixels({ deltaY: 0, deltaMode: 0 }, 800), 0);
+});

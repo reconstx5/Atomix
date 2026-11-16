@@ -6,17 +6,18 @@ import { art, toast, endsAt, sliderText, percentSlider, announce, openSheet, ope
 import { Scrubber, COMMIT_AFTER_MS } from '../scrub.js';
 import { seekPreview } from '../seekpreview.js';
 import { tileFor } from '../previews.js';
-import { introRange, inIntro, introLeft, upNextAt, focusIsFree, creditsStep, reportedPosition } from '../markers.js';
+import { introLeft, skipSegment, upNextAt, focusIsFree, creditsStep, reportedPosition } from '../markers.js';
 import { state, goBack, navigate, setTitle, isOrbit, canAdmin } from '../app.js';
-import { NEED_SECURE, NO_WIDEVINE, NO_WIDEVINE_IPHONE } from '../dash/eme.js'; // a small module of sentences and helpers (the engine itself loads on demand)
+import { NEED_SECURE, NO_WIDEVINE, NO_WIDEVINE_IPHONE, NO_COMMON_SYSTEM, NO_PROTECTION_IOS } from '../dash/eme.js'; // a small module of sentences and helpers (the engine itself loads on demand)
 import { markPlaying } from '../gate.js';
 import { phoneLive } from './phone-live.js';
-import { detectCaps } from '../caps.js';
+import { detectCaps, needsMediaLink } from '../caps.js';
 import { parseVtt, cueHtml } from '../vtt.js';
 import { VOLUME_KEY } from '../storage.js';
 import { openCastPicker } from '../cast.js';
 import { joinTogether, startRoom, joinRoom, newsLine } from '../together.js';
-import { guide as fetchGuide, channels as fetchChannels, protectionOf, zapOrder, setZapOrder, neighbour, zapQueue, programmeTimes, clockTime, programmeProgress, channelLabel, sessionPath, takeOver } from '../live.js';
+import { listable, unplayableHere, deviceNow, deviceSoon, mayHide } from '../dash/playable.js';
+import { guide as fetchGuide, channels as fetchChannels, protectionOf, castableDrm, zapOrder, setZapOrder, neighbour, zapQueue, programmeTimes, clockTime, programmeProgress, channelLabel, sessionPath, takeOver } from '../live.js';
 import { rowName, channelLogo, lockBadge } from '../live-bits.js';
 
 const QUALITIES = [
@@ -33,6 +34,11 @@ const round1 = (v) => Math.round(v * 10) / 10;
 const delayText = (v) => (v ? `${v > 0 ? '+' : '−'}${Math.abs(v).toFixed(1)} s` : 'Off');
 const LANG3 = { eng: 'en', spa: 'es', fre: 'fr', fra: 'fr', ger: 'de', deu: 'de', ita: 'it', jpn: 'ja', por: 'pt', rus: 'ru', chi: 'zh', zho: 'zh', kor: 'ko', dut: 'nl', nld: 'nl', swe: 'sv', nor: 'no', dan: 'da', fin: 'fi', pol: 'pl', tur: 'tr', ara: 'ar', hin: 'hi', mao: 'mi', mri: 'mi' };
 const lang2 = (l) => (l ? LANG3[l.toLowerCase()] || l.toLowerCase().slice(0, 2) : null);
+// v0.28: the key system an encrypted session plays with, by its name (the reply's `system`, else its EME name).
+const SYSTEM_NAMES = { widevine: 'Widevine', playready: 'PlayReady', clearkey: 'ClearKey', fairplay: 'FairPlay' };
+const EME_SYSTEMS = { 'com.widevine.alpha': 'widevine', 'com.microsoft.playready.recommendation': 'playready', 'com.microsoft.playready': 'playready', 'org.w3.clearkey': 'clearkey', 'com.apple.fps': 'fairplay' };
+const systemOf = (res) => res?.system || EME_SYSTEMS[res?.keySystem] || 'clearkey';
+const systemName = (res) => SYSTEM_NAMES[systemOf(res)] || 'ClearKey';
 const MODE_LABEL = { direct: 'Direct play', remux: 'Remux (no quality loss)', transcode: 'Transcoding', encrypted: 'Encrypted' };
 
 const MINUTE = 60_000;
@@ -60,7 +66,9 @@ export async function render(el, params, query) {
   const errorEl = h('div', { class: 'player-error', hidden: true, role: 'alert' });
   const infoEl = h('div', { class: 'player-info', hidden: true });
   const upNext = h('div', { class: 'upnext', hidden: true });
-  const skipBtn = h('button', { class: 'skip-intro', type: 'button', hidden: true, onClick: () => skipIntro() }, h('span', {}, 'Skip intro'), h('span', { class: 'skip-intro-bar', 'aria-hidden': 'true' }));
+  // v0.28: the same button skips a recap ("Previously on…") first, then the intro.
+  const skipLabel = h('span', {}, 'Skip intro');
+  const skipBtn = h('button', { class: 'skip-intro', type: 'button', hidden: true, onClick: () => skipIntro() }, skipLabel, h('span', { class: 'skip-intro-bar', 'aria-hidden': 'true' }));
 
   const seek = h('input', { type: 'range', class: 'seekbar', min: 0, max: 1, step: 1, value: 0, 'aria-label': 'Seek' });
   const bufferBar = h('div', { class: 'seek-buffer' });
@@ -174,7 +182,7 @@ export async function render(el, params, query) {
   let item = null;
   let lastReported = 0;
   let autoSkip = prefs.skipIntros === true; // "Watch it" turns this off for the rest of the video
-  let autoSkipped = false; // auto-skip once per play-through
+  let autoSkipped = new Set(); // auto-skip once per play-through (v0.28: the recap and the intro each once)
   let creditsArmed = true; // Up next may start at the credits (again after seeking back)
   let upNextCancelled = false; // cancelled during the credits: don't start it again at the end
   const subCache = new Map();
@@ -231,8 +239,25 @@ export async function render(el, params, query) {
     bigPlay.hidden = false;
     spinnerEl.hidden = true;
   };
+  // What the browser itself said about each failed try (v0.27.1): shown small under the sentence, for support.
+  const mediaErrors = [];
+  let startedAt = null; // when the latest start was asked for (performance.now())
+  /** v0.28: tell the server what went wrong (it writes it to data/logs/atomix.log), since a phone has no console. */
+  function reportProblem(message) {
+    let src = '';
+    try {
+      src = video.currentSrc ? new URL(video.currentSrc, location.href).pathname : '';
+    } catch {
+      /* ignore */
+    }
+    const caps = detectCaps();
+    const details = [...mediaErrors, `session ${session?.mode || '-'}/${session?.delivery || '-'}`, src && `src ${src}`, `page ${location.protocol}//${location.host}`, `caps hls:${Boolean(caps.hls)} mse:${Boolean(caps.mse)} link:${needsMediaLink()}`];
+    api.post('/api/client-log', { message, details: details.filter(Boolean), itemId: liveMode ? undefined : Number(params.id) || undefined, liveChannelId: liveMode ? params.live : undefined }).catch(() => {});
+  }
   function showError(message) {
     clear(errorEl).append(h('h2', {}, "Can't play this right now"), h('p', {}, message));
+    if (mediaErrors.length) errorEl.append(h('p', { class: 'muted small player-error-details' }, `Details: ${mediaErrors.join('; ')}`));
+    reportProblem(message);
     // v0.27: an encrypted channel on a plain (http) page: the secure address plays it, if there is one.
     if (message === NEED_SECURE) {
       const secureUrl = state.status?.secureUrl;
@@ -240,7 +265,7 @@ export async function render(el, params, query) {
       else errorEl.append(h('p', { class: 'muted' }, 'Ask the admin to turn on the secure address (Settings → Server)'));
     }
     // v0.27: a phone that can't play this channel's protection can send it to a Chromecast or Google TV.
-    const tvFor = (message === NO_WIDEVINE_IPHONE || message === NO_WIDEVINE) && liveMode && globalThis.matchMedia?.('(pointer: coarse)').matches ? zapTarget ?? tvChannel?.id ?? Number(params.live) : null;
+    const tvFor = (message === NO_WIDEVINE_IPHONE || message === NO_WIDEVINE || ((message === NO_PROTECTION_IOS || message === NO_COMMON_SYSTEM) && castableDrm(protectionOf(zapTarget ?? tvChannel?.id ?? Number(params.live)) ?? tvChannel?.drm))) && liveMode && globalThis.matchMedia?.('(pointer: coarse)').matches ? zapTarget ?? tvChannel?.id ?? Number(params.live) : null;
     if (tvFor != null) errorEl.append(h('p', {}, h('button', { class: 'btn btn-primary', type: 'button', onClick: () => openCastPicker({ liveChannelId: tvFor }, { encrypted: true }) }, icon('cast', { size: 20 }), ' Watch on TV')));
     errorEl.append(h('button', { class: `btn ${(message === NEED_SECURE && state.status?.secureUrl) || tvFor != null ? 'btn-secondary' : 'btn-primary'}`, type: 'button', onClick: () => leave() }, 'Go back'));
     errorEl.hidden = false;
@@ -359,11 +384,13 @@ export async function render(el, params, query) {
   }
 
   async function startSession(start, { forceTranscode = false, resume = false } = {}) {
+    startedAt = performance.now();
     errorEl.hidden = true;
     spinnerEl.hidden = false;
     clearTimeout(pendingSeek);
     const body = {
       caps: detectCaps(),
+      mediaLink: needsMediaLink(),
       listId: query.list ? Number(query.list) : undefined, // playing through a playlist: "next" follows it
       start: resume ? undefined : Math.max(0, start || 0),
       resume,
@@ -382,7 +409,7 @@ export async function render(el, params, query) {
       res = offlineMode
         ? await offlineSession(start, resume)
         : catchupMode
-        ? await api.post(`/api/live/programmes/${params.catchup}/play`, { caps: body.caps, quality: body.quality, replaces: body.replaces, from: body.start || 0 })
+        ? await api.post(`/api/live/programmes/${params.catchup}/play`, { caps: body.caps, mediaLink: body.mediaLink, quality: body.quality, replaces: body.replaces, from: body.start || 0 })
         : await api.post(`/api/items/${params.id}/playback`, body);
     } catch (err) {
       if (carried) audioDelayDirty = true; // not saved: the next restart (or leaving) still sends it
@@ -556,10 +583,14 @@ export async function render(el, params, query) {
 
   // ---- Intros and credits ----
   function updateIntro(now, total) {
-    const range = introRange(session?.markers, total);
-    const show = inIntro(range, now) && seekTarget == null && !scrubbing;
-    if (show && autoSkip && !autoSkipped) {
-      autoSkipped = true;
+    const range = skipSegment(session?.markers, now, total);
+    const show = Boolean(range) && seekTarget == null && !scrubbing;
+    if (range) {
+      const label = range.kind === 'recap' ? 'Skip recap' : 'Skip intro';
+      if (skipLabel.textContent !== label) skipLabel.textContent = label;
+    }
+    if (show && autoSkip && !autoSkipped.has(range.kind)) {
+      autoSkipped.add(range.kind); // a recap and then the intro are each skipped once
       skipIntro({ auto: true });
       return;
     }
@@ -575,13 +606,13 @@ export async function render(el, params, query) {
     }
   }
   function skipIntro({ auto = false } = {}) {
-    const range = introRange(session?.markers, totalDuration());
+    const range = skipSegment(session?.markers, currentTime(), totalDuration());
     if (!range) return;
     skipBtn.hidden = true;
     if (document.activeElement === skipBtn) root.focus({ preventScroll: true });
     seekTo(range.end);
     if (auto) {
-      setNotice('Skipped intro', {
+      setNotice(range.kind === 'recap' ? 'Skipped recap' : 'Skipped intro', {
         label: 'Watch it',
         onClick: () => {
           autoSkip = false;
@@ -613,7 +644,15 @@ export async function render(el, params, query) {
     report();
   });
   video.addEventListener('waiting', () => (spinnerEl.hidden = false));
-  video.addEventListener('playing', () => (spinnerEl.hidden = true));
+  video.addEventListener('playing', () => {
+    spinnerEl.hidden = true;
+    // v0.28: a slow start (over 4 s from pressing play) is noted in the server's log with how it was played.
+    if (startedAt != null) {
+      const took = (performance.now() - startedAt) / 1000;
+      startedAt = null;
+      if (took > 4 && !liveMode) api.post('/api/client-log', { message: `Slow start: ${took.toFixed(1)} s to the first picture`, details: [`session ${session?.mode || '-'}/${session?.delivery || '-'}`], itemId: Number(params.id) || undefined }).catch(() => {});
+    }
+  });
   video.addEventListener('canplay', () => (spinnerEl.hidden = true));
   video.addEventListener('loadedmetadata', updateTimeline);
   video.addEventListener('loadedmetadata', () => drawChapters());
@@ -643,6 +682,8 @@ export async function render(el, params, query) {
     if (!video.getAttribute('src') || dash) return; // an encrypted channel's engine reports its own
     if (liveMode && reconnect()) return;
     const code = video.error?.code;
+    const label = { direct: 'Direct play', remux: 'Remuxing', transcode: 'Converting' }[session?.mode] || session?.mode || 'Playing';
+    mediaErrors.push(`${label} (${session?.delivery || '?'}): error ${code ?? '?'}${video.error?.message ? ` — ${video.error.message}` : ''}`);
     if (!isSource && session && !retried && session.mode !== 'transcode') {
       retried = true;
       setNotice("This browser couldn't play the original, so the server is converting it.");
@@ -1118,8 +1159,8 @@ export async function render(el, params, query) {
     if (!session) return;
     // dom.js append() skips nulls (the native one would print "null").
     append(infoEl, [
-      h('h2', {}, MODE_LABEL[session.mode] || session.mode),
-      h('p', {}, session.delivery === 'drm' ? `Delivery: encrypted ${session.keySystem === 'com.apple.fps' ? 'HLS' : 'DASH'}, played by the browser (${{ 'com.widevine.alpha': 'Widevine', 'com.apple.fps': 'FairPlay' }[session.keySystem] || 'ClearKey'}) · Quality: ${dash?.level === 'auto' || !dash ? 'Auto' : `${dashLevels.find((l) => l.id === dash.level)?.height || ''}p`}${dash?.ahead === 10 ? ' · Buffer: 10 s ahead (mobile data)' : ''}` : `Delivery: ${session.delivery === 'file' ? 'original file' : session.delivery === 'hls' ? 'HLS' : 'MP4 stream'} · Quality: ${session.quality === 'original' ? 'original' : `${session.quality}p`}`),
+      h('h2', {}, session.delivery === 'drm' ? `Encrypted (${systemName(session)})` : MODE_LABEL[session.mode] || session.mode),
+      h('p', {}, session.delivery === 'drm' ? `Delivery: encrypted ${systemOf(session) === 'fairplay' ? 'HLS' : 'DASH'}, played by the browser (${systemName(session)}) · Quality: ${dash?.level === 'auto' || !dash ? 'Auto' : `${dashLevels.find((l) => l.id === dash.level)?.height || ''}p`}${dash?.ahead === 10 ? ' · Buffer: 10 s ahead (mobile data)' : ''}` : `Delivery: ${session.delivery === 'file' ? 'original file' : session.delivery === 'hls' ? 'HLS' : 'MP4 stream'} · Quality: ${session.quality === 'original' ? 'original' : `${session.quality}p`}`),
       session.reasons?.length ? h('ul', {}, session.reasons.map((r) => h('li', {}, r))) : null,
     ]);
     if (liveMode) {
@@ -1301,7 +1342,7 @@ export async function render(el, params, query) {
     spinnerEl.hidden = false;
     let res;
     try {
-      res = await api.post(`/api/live/channels/${id}/play`, { caps: detectCaps(), quality: quality || undefined, replaces: session?.sessionId, behind });
+      res = await api.post(`/api/live/channels/${id}/play`, { caps: detectCaps(), mediaLink: needsMediaLink(), quality: quality || undefined, replaces: session?.sessionId, behind });
     } catch (err) {
       return showError(err.message);
     }
@@ -1405,7 +1446,7 @@ export async function render(el, params, query) {
     quality = res.quality;
     errorEl.hidden = true;
     stopDash();
-    castBtn.hidden = isSource || (Boolean(tvChannel.drm) && tvChannel.drm !== 'widevine' && tvChannel.drm !== 'clearkey'); // v0.27: FairPlay can't be cast
+    castBtn.hidden = isSource || (Boolean(tvChannel.drm) && !castableDrm(tvChannel.drm)); // v0.27: FairPlay can't be cast
     const modeText = res.delivery === 'drm' ? 'Encrypted' : res.mode === 'remux' ? 'Remuxing' : 'Converting';
     modeBadge.replaceChildren(icon(res.delivery === 'drm' ? 'lock' : 'info', { size: 14 }), document.createTextNode(modeText));
     modeBadge.title = modeText;
@@ -1423,7 +1464,7 @@ export async function render(el, params, query) {
     convPausedAt = 0;
     setRewindUi();
     if ((res.reasons || []).includes("Rewind isn't available on this channel") && !retry) setNotice("Rewind isn't available on this channel");
-    if (res.delivery === 'drm' && res.keySystem === 'com.apple.fps') return playFairPlayChannel(res);
+    if (res.delivery === 'drm' && systemOf(res) === 'fairplay') return playFairPlayChannel(res);
     if (res.delivery === 'drm' || res.delivery === 'dash') return playEncrypted(res);
     const load = () => {
       if (destroyed || session !== res) return;
@@ -1565,21 +1606,38 @@ export async function render(el, params, query) {
     fps = mine;
     video.play().catch(playRefused(res));
   }
-  const SYSTEM_OF = { 'com.widevine.alpha': 'widevine', 'org.w3.clearkey': 'clearkey', 'com.apple.fps': 'fairplay' };
-  /** Can this device play `system`? A sentence when it can't (dash/support.js, loaded only for encrypted channels). */
-  const verdictFor = async (system) => (system ? (await import('../dash/support.js')).protectionVerdict(system) : null);
+  /**
+   * Can this device play `drm` (a channel's systems, or one)? A sentence when it can't (dash/support.js, loaded only
+   * for encrypted channels). v0.28: a single v0.27 system keeps its own sentences; a list (or PlayReady) is asked as one.
+   */
+  const verdictFor = async (drm) => {
+    const list = Array.isArray(drm) ? drm.filter(Boolean) : drm ? [drm] : [];
+    if (!list.length) return null;
+    const one = list.length === 1 && ['widevine', 'fairplay', 'clearkey'].includes(list[0]);
+    return (await import('../dash/support.js')).protectionVerdict(one ? list[0] : list);
+  };
+  /** v0.28: the key systems this device has, best first, for a multi-system (or not yet known) channel's play request. */
+  const keySystemsFor = async (drm) => {
+    if (drm === null) return undefined; // a plain channel: the encrypted helpers aren't loaded
+    const support = await import('../dash/support.js');
+    if (!support.sendsKeySystems(drm)) return undefined; // plain, or one system: the v0.27 request
+    const list = await support.deviceKeySystems();
+    // A plain-http page has none to name: the server picks the channel's first, and the secure-address sentence follows.
+    return list.length || globalThis.isSecureContext !== false ? list : undefined;
+  };
   /**
    * Start a channel (v0.27): an encrypted one this device can't play says why first and opens no stream. Before the
    * channel list has loaded (a direct link) nothing waits for it: the reply names the protection, and a stream this
    * device can't play is stopped at once.
    */
   const startChannel = async (id) => {
-    const drm = channelsById.has(id) ? channelsById.get(id).drm : protectionOf(id);
+    const drm = channelsById.has(id) ? channelsById.get(id).drm ?? null : protectionOf(id);
     const known = drm !== undefined;
     const before = await verdictFor(drm);
     if (before) throw Object.assign(new Error(before), { verdict: true });
-    const res = await api.post(`/api/live/channels/${id}/play`, { caps: detectCaps(), quality: quality || undefined, replaces: session?.sessionId });
-    const after = !known && res?.delivery === 'drm' ? await verdictFor(SYSTEM_OF[res.keySystem]) : null;
+    const keySystems = await keySystemsFor(drm);
+    const res = await api.post(`/api/live/channels/${id}/play`, { caps: detectCaps(), mediaLink: needsMediaLink(), quality: quality || undefined, replaces: session?.sessionId, keySystems });
+    const after = !known && res?.delivery === 'drm' ? await verdictFor(systemOf(res)) : null;
     if (after) {
       api.post(`${sessionPath(res)}/stop`, {}).catch(() => {});
       throw Object.assign(new Error(after), { verdict: true });
@@ -1611,7 +1669,7 @@ export async function render(el, params, query) {
   function zap(dir) {
     if (!liveMode || !channelList.length) return; // the channel list hasn't loaded: nothing to step through yet
     showControls();
-    zapTo(neighbour(zapTarget ?? tvChannel?.id, dir));
+    zapTo(neighbour(zapTarget ?? tvChannel?.id ?? Number(params.live), dir)); // v0.28: from the opened channel, even if it didn't start
   }
   /** A live stream that ended or broke: ask for it again (a new request restarts it), 3 times in 2 minutes. */
   function reconnect() {
@@ -1646,7 +1704,8 @@ export async function render(el, params, query) {
   async function openChannels() {
     await loadChannels();
     const order = zapOrder();
-    const shown = order.map((id) => channelsById.get(id)).filter(Boolean);
+    // v0.28: without the channels this device can't play (dimmed, opening the message card, with the switch on).
+    const shown = listable(order.map((id) => channelsById.get(id)).filter(Boolean));
     clear(channelsEl).append(
       h('h2', { class: 'player-channels-title' }, 'Channels'),
       h(
@@ -1655,13 +1714,13 @@ export async function render(el, params, query) {
         shown.map((c) =>
           h(
             'li',
-            { class: 'live-item' },
+            { class: c.unplayable ? 'live-item is-unplayable' : 'live-item' },
             h(
               'button',
-              { type: 'button', class: `live-row${c.id === tvChannel?.id ? ' is-current' : ''}`, 'aria-label': rowName(c), 'aria-current': c.id === tvChannel?.id ? 'true' : null, dataset: { id: c.id }, onClick: () => zapTo(c.id) },
+              { type: 'button', class: `live-row${c.id === tvChannel?.id ? ' is-current' : ''}`, 'aria-label': c.unplayable ? `${rowName(c)}, can't play here` : rowName(c), 'aria-current': c.id === tvChannel?.id ? 'true' : null, dataset: { id: c.id }, onClick: () => (c.unplayable ? cantPlay(c) : zapTo(c.id)) },
               channelLogo(c, 'sm'),
               h('span', { class: 'live-num' }, c.number != null ? String(c.number) : ''),
-              h('span', { class: 'live-main' }, h('span', { class: 'live-name' }, c.name, lockBadge(c)), h('span', { class: 'live-now muted small' }, c.now ? c.now.title : 'No guide information')),
+              h('span', { class: 'live-main' }, h('span', { class: 'live-name' }, c.name, lockBadge(c), c.unplayable ? h('span', { class: 'chip live-cant' }, "Can't play here") : null), h('span', { class: 'live-now muted small' }, c.now ? c.now.title : 'No guide information')),
             ),
           ),
         ),
@@ -1672,6 +1731,11 @@ export async function render(el, params, query) {
     showControls(true);
     (channelsEl.querySelector('.is-current') || channelsEl.querySelector('.live-row'))?.focus();
     channelsEl.querySelector('.is-current')?.scrollIntoView({ block: 'center' });
+  }
+  /** v0.28: the message card for a channel this device can't play (no stream is asked for). */
+  async function cantPlay(c) {
+    closeChannels();
+    await (await import('../ui/cant-play.js')).openCantPlay(c);
   }
   function closeChannels({ refocus = false } = {}) {
     if (channelsEl.hidden) return false;
@@ -1888,7 +1952,7 @@ export async function render(el, params, query) {
 
   // ---- Casting: Atomix drives the TV from where this player is; the player closes to the Remote ----
   function castToTv() {
-    if (liveMode) return tvChannel && (!tvChannel.drm || tvChannel.drm === 'widevine' || tvChannel.drm === 'clearkey') && openCastPicker({ liveChannelId: tvChannel.id }, { encrypted: Boolean(tvChannel.drm), onStarted: () => video.pause() });
+    if (liveMode) return tvChannel && (!tvChannel.drm || castableDrm(tvChannel.drm)) && openCastPicker({ liveChannelId: tvChannel.id }, { encrypted: Boolean(tvChannel.drm), onStarted: () => video.pause() });
     if (catchupMode) return openCastPicker({ catchupProgrammeId: Number(params.catchup) }, { position: Math.round(currentTime()), onStarted: () => video.pause() });
     if (!item) return;
     const subtitle = burnIndex != null ? `e${burnIndex}` : currentSub?.id || null;
@@ -2070,14 +2134,29 @@ export async function render(el, params, query) {
   if (liveMode) {
     state.playingItemHash = '#/live';
     qualityBtn.hidden = false;
-    loadChannels().then(() => {
+    const listed = loadChannels().then(() => {
       const c = channelsById.get(Number(params.live));
       if (c && !session) clear(titleEl).append(h('h1', {}, channelLabel(c)), h('p', {}, c.now ? c.now.title : 'No guide information'));
     });
-    try {
-      applyLive(await startChannel(Number(params.live)));
-    } catch (err) {
-      refused(err);
+    // v0.28: a channel this device is known not to play (a link from Home, an old bookmark) shows the message card
+    // instead of a stream, and Go back leaves the player. A fresh load (a bookmark, a shared link, a reload) knows no
+    // channel's protection yet: the channel list says it first, and elsewhere than an iPhone the probe has a moment.
+    // Where nothing can be hidden (a plain-http page off an iPhone), the stream is asked for at once.
+    const liveId = Number(params.live);
+    if (protectionOf(liveId) === undefined && mayHide()) await listed;
+    const drm = protectionOf(liveId);
+    if (drm && mayHide() && !deviceNow()) await deviceSoon([{ drm }]);
+    if (!destroyed && unplayableHere(drm)) {
+      const c = channelsById.get(liveId) || { id: liveId, name: 'This channel', drm };
+      spinnerEl.hidden = true;
+      await (await import('../ui/cant-play.js')).openCantPlay(c);
+      if (!destroyed) leave(); // Watch on TV's picker stays open over the Live TV page
+    } else if (!destroyed) {
+      try {
+        applyLive(await startChannel(Number(params.live)));
+      } catch (err) {
+        refused(err);
+      }
     }
   } else if (catchupMode) {
     state.playingItemHash = '#/live/guide';

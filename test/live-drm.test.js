@@ -58,8 +58,8 @@ const stopAll = () => {
 
 test('channels say they are encrypted', async () => {
   const list = (await admin.get('/api/live/channels')).data;
-  assert.equal(list.find((c) => c.name === 'Five').drm, 'clearkey');
-  assert.equal(list.find((c) => c.name === 'Six').drm, 'widevine');
+  assert.deepEqual(list.find((c) => c.name === 'Five').drm, ['clearkey']);
+  assert.deepEqual(list.find((c) => c.name === 'Six').drm, ['widevine']);
   assert.equal(list.find((c) => c.name === 'One').drm, null);
 });
 

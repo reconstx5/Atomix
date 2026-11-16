@@ -147,6 +147,15 @@ export class PluginManager {
       },
       manifest: rec.manifest,
       folder: rec.folder,
+      /** v0.28: this Atomix's own address on this machine (for a source whose stream Atomix makes itself). */
+      selfUrl: () => {
+        const host = core.config.host && !['0.0.0.0', '::', ''].includes(core.config.host) ? core.config.host : '127.0.0.1';
+        return `http://${host.includes(':') ? `[${host}]` : host}:${core.listening?.port ?? core.config.port}`;
+      },
+      /** v0.28: the ffmpeg Atomix uses. */
+      get ffmpegPath() {
+        return core.config.ffmpegPath;
+      },
       dataDir,
       log: logger(id),
       storage,
@@ -242,6 +251,11 @@ export class PluginManager {
         startedShows: (viewer, opts) => core.library.startedShows(viewer, opts),
         partlySeenSeries: (viewer, opts) => core.library.partlySeenSeries(viewer, opts),
         playedOn: (viewer, date, opts) => core.library.playedOn(viewer, date, opts),
+        /**
+         * v0.28 (Your own channels): the local films and episodes a rule names — { type: 'library'|'genre'|'show'|
+         * 'collection'|'playlist', value: a name } — as rows with path and duration, in their natural order.
+         */
+        titlesFor: (rule) => titlesFor(core, rule),
         /** v0.23: the titles Home's Continue watching row holds for the viewer (in progress, then next up). */
         continueWatching: (viewer) => [...core.library.continueWatching(viewer, 20), ...core.library.nextUp(viewer, 20)],
       },
@@ -415,5 +429,38 @@ export class PluginManager {
     const s = this.sources.get(`${pluginId}/${sourceId}`);
     if (!s) throw new HttpError(404, 'That add-on source is not available (is the plugin enabled?)');
     return s;
+  }
+}
+
+/** v0.28: the local films and episodes a channel rule names (see the plugin API's library.titlesFor). */
+function titlesFor(core, rule) {
+  const { db, library } = core;
+  const value = String(rule?.value || '').trim();
+  const playable = (rows) => rows.filter((r) => (r.kind === 'movie' || r.kind === 'episode') && r.path && !String(r.path).startsWith('remote:') && r.duration > 0);
+  const episodesOf = (showId) => library.list({ showId, kind: 'episode', sort: 'episode' });
+  const expand = (rows) => rows.flatMap((r) => (r.kind === 'show' ? episodesOf(r.id) : [r]));
+  if (!value) return [];
+  switch (rule.type) {
+    case 'library': {
+      const lib = db.get('SELECT id, type FROM libraries WHERE name = ? COLLATE NOCASE', value);
+      if (!lib) return [];
+      return playable(lib.type === 'tv' ? library.list({ libraryId: lib.id, kind: 'episode', sort: 'episode' }) : library.list({ libraryId: lib.id, kind: 'movie' }));
+    }
+    case 'genre':
+      return playable([...library.list({ genre: value, kind: 'movie' }), ...expand(library.list({ genre: value, kind: 'show' }))]);
+    case 'show': {
+      const show = library.list({ kind: 'show', search: value }).find((s) => s.title.toLowerCase() === value.toLowerCase()) || library.list({ kind: 'show', search: value })[0];
+      return show ? playable(episodesOf(show.id)) : [];
+    }
+    case 'collection': {
+      const c = db.get('SELECT id FROM collections WHERE name = ? COLLATE NOCASE', value);
+      return c ? playable(expand(db.all('SELECT i.* FROM collection_items ci JOIN items i ON i.id = ci.item_id WHERE ci.collection_id = ? ORDER BY ci.position, i.year', c.id))) : [];
+    }
+    case 'playlist': {
+      const l = db.get("SELECT id FROM lists WHERE name = ? COLLATE NOCASE AND kind != 'music' ORDER BY shared DESC, id LIMIT 1", value);
+      return l ? playable(expand(db.all('SELECT i.* FROM list_items li JOIN items i ON i.id = li.item_id WHERE li.list_id = ? ORDER BY li.position', l.id))) : [];
+    }
+    default:
+      return [];
   }
 }

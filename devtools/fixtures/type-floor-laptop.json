@@ -1,0 +1,96 @@
+{
+  "home": {
+    "html": {
+      "size": "15.84px",
+      "weight": "400"
+    },
+    ".orbit-menu .nav-link": {
+      "size": "15.84px",
+      "weight": "600"
+    },
+    ".orbit-clock, .nav-clock": {
+      "size": "14.4px",
+      "weight": "500"
+    },
+    ".row h2, .row-title": {
+      "size": "18.72px",
+      "weight": "600"
+    },
+    ".card-title": {
+      "size": "13.68px",
+      "weight": "600"
+    },
+    ".card-sub": {
+      "size": "11.88px",
+      "weight": "400"
+    },
+    ".spot-title": {
+      "size": "83.52px",
+      "weight": "700"
+    },
+    ".spot-meta": {
+      "size": "15.84px",
+      "weight": "400"
+    },
+    ".badge": {
+      "size": "11.88px",
+      "weight": "800"
+    },
+    ".spot-genres": {
+      "size": "14.4px",
+      "weight": "500"
+    }
+  },
+  "title": {
+    ".detail-title, h1": {
+      "size": "72px",
+      "weight": "700"
+    },
+    ".meta-line": {
+      "size": "14.4px",
+      "weight": "500"
+    },
+    ".detail-synopsis, .detail-info p": {
+      "size": "15.84px",
+      "weight": "400"
+    },
+    ".btn": {
+      "size": "15.84px",
+      "weight": "600"
+    }
+  },
+  "live": {
+    ".live-card-name": {
+      "size": "12.3552px",
+      "weight": "600"
+    },
+    ".live-card-next": {
+      "size": "12.3552px",
+      "weight": "400"
+    },
+    ".live-card-num": {
+      "size": "13.464px",
+      "weight": "700"
+    },
+    ".live-badge": null
+  },
+  "settings": {
+    "h1, h2": {
+      "size": "40.32px",
+      "weight": "700"
+    },
+    "label": {
+      "size": "14.4px",
+      "weight": "600"
+    },
+    ".hint": {
+      "size": "11.88px",
+      "weight": "400"
+    },
+    ".toggle-hint": {
+      "size": "14.4px",
+      "weight": "400"
+    },
+    ".page-head .count": null
+  }
+}

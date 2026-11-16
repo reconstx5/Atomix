@@ -9,6 +9,7 @@ import { profileStats } from '../stats.js';
 import { logger } from '../log.js';
 
 const log = logger('setup');
+const playerLog = logger('player');
 
 const PREF_KEYS = {
   spokenSpeed: 'number', // v0.22: books and podcasts (0.75–3), and their skips in seconds
@@ -27,13 +28,20 @@ const PREF_KEYS = {
   audioLanguage: 'string',
   autoplayNext: 'boolean',
   skipIntros: 'boolean',
+  cardPreviews: 'boolean', // v0.28 card motion: cards play a short clip after resting (on unless turned off)
+  levelVolume: 'boolean', // v0.28: even out volume between songs (on unless turned off)
   quality: 'string',
   reduceMotion: 'boolean',
-  reduceEffects: 'boolean',
+  reduceEffects: 'boolean', // before v0.29; Glass 'solid' replaces it (still read)
+  glass: 'string', // v0.29 visual refresh B: 'clear' | 'tinted' | 'solid'
+  oled: 'boolean',
+  contrast: 'string', // 'more' | 'normal' (unset = follow the system)
+  textScale: 'number', // 1 | 1.15 | 1.3
+  pinnedLibraries: 'ids', // ordered library ids shown in the menu; the rest go under More
   musicVolume: 'number', // Now Playing's volume, 0–1
 };
 
-function cleanPrefs(input, current) {
+export function cleanPrefs(input, current) {
   const out = { ...current };
   for (const [k, type] of Object.entries(PREF_KEYS)) {
     if (!(k in input)) continue;
@@ -45,6 +53,10 @@ function cleanPrefs(input, current) {
     if (type === 'number' && Number.isFinite(Number(v))) out[k] = Number(v);
     if (type === 'boolean') out[k] = Boolean(v);
     if (type === 'string') out[k] = String(v).slice(0, 64);
+    if (type === 'ids') {
+      if (Array.isArray(v)) out[k] = [...new Set(v.filter((n) => typeof n === 'number' && Number.isInteger(n) && n > 0))].slice(0, 50);
+      else delete out[k];
+    }
   }
   if (out.accent && !/^#[0-9a-f]{6}$/i.test(out.accent)) delete out.accent;
   if (out.musicVolume != null) out.musicVolume = Math.max(0, Math.min(1, out.musicVolume));
@@ -60,6 +72,9 @@ function cleanPrefs(input, current) {
   oneOf('readerTheme', ['light', 'sepia', 'dark', 'app']);
   oneOf('readerMargins', ['small', 'medium', 'large']);
   oneOf('comicFit', ['width', 'height', 'screen']);
+  oneOf('glass', ['clear', 'tinted', 'solid']);
+  oneOf('contrast', ['more', 'normal']);
+  oneOf('textScale', [1, 1.15, 1.3]);
   return out;
 }
 
@@ -125,6 +140,7 @@ export function registerAccountRoutes(r, core) {
         profilePinned: profiles.some((p) => p.pin_hash),
         defaultQuality: s.defaultQuality,
         pickerIdleMinutes: s.pickerIdleMinutes,
+        requestUrl: row && !profile?.kids && s.requestUrl ? s.requestUrl : null, // v0.28: "Request it" on Search
         secureUrl: core.https?.secureUrlFor(ctx.req.headers.host) ?? null, // v0.27: the HTTPS address phones should use (null: none)
         // v0.21: what the installed app may keep on this device.
         downloads: row
@@ -220,6 +236,22 @@ export function registerAccountRoutes(r, core) {
     },
     { auth: 'none' },
   );
+  // v0.28: a player that couldn't play says what the browser told it, so the problem can be read in the server's log
+  // (a phone has no console to look at). Links' private parts (?cast=…) are cut before writing.
+  const reports = new Map(); // user id -> times of recent reports
+  r.post('/api/client-log', async (ctx) => {
+    const now = Date.now();
+    const recent = (reports.get(ctx.user.id) || []).filter((t) => now - t < 60_000);
+    if (recent.length >= 20) throw new HttpError(429, 'Too many reports; try again in a minute.');
+    recent.push(now);
+    reports.set(ctx.user.id, recent);
+    const b = (await ctx.body()) || {};
+    const clean = (v, n) => String(v ?? '').replace(/[?&](cast|key|token|api_key)=[^&\s;]*/gi, '').replace(/[\r\n]+/g, ' ').slice(0, n);
+    const details = Array.isArray(b.details) ? b.details.slice(0, 8).map((d) => clean(d, 300)).filter(Boolean) : [];
+    const item = Number.isInteger(b.itemId) ? `item ${b.itemId}: ` : b.liveChannelId != null ? `channel ${clean(b.liveChannelId, 20)}: ` : '';
+    playerLog.warn(`${item}${clean(b.message, 300)}${details.length ? ` — ${details.join('; ')}` : ''} — ${clean(ctx.req.headers['user-agent'] || 'no user agent', 140)}`);
+  });
+
   r.post('/api/quickconnect/approve', async (ctx) => {
     if (settings.get('quickConnect') === false) throw new HttpError(403, 'Quick Connect is turned off.');
     auth.checkRateLimit(ctx.req);

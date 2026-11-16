@@ -37,7 +37,7 @@ after(async () => {
 
 test('the shell list: everything the app needs to start, nothing else, and a version that follows the files', async () => {
   const s = (await anon.get('/api/shell')).data;
-  for (const f of ['/', '/index.html', '/js/app.js', '/css/app.css', '/css/orbit.css', '/manifest.webmanifest', '/img/icon-192.png']) assert.ok(s.files.includes(f), f);
+  for (const f of ['/', '/index.html', '/js/app.js', '/css/tokens.css', '/css/app.css', '/css/orbit.css', '/manifest.webmanifest', '/img/icon-192.png']) assert.ok(s.files.includes(f), f);
   const pub = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
   const modules = [];
   const walk = (d) => {

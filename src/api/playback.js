@@ -7,6 +7,8 @@ import { serializeItem } from './serialize.js';
 import { listSubtitles } from '../stream/subtitles.js';
 import { QUALITIES } from '../stream/playback.js';
 import { parseJson } from '../db.js';
+import { withLink } from '../cast/tokens.js';
+import { levelGain } from '../library/loudness.js';
 
 const list = (v) => (Array.isArray(v) ? v.map(String) : typeof v === 'string' ? v.split(',') : []).map((s) => s.trim().toLowerCase()).filter(Boolean);
 
@@ -81,6 +83,11 @@ export function registerPlaybackRoutes(r, core) {
       clientIp: auth.clientIp(ctx.req),
     });
 
+    // v0.28: a converted HLS stream starts now, not on the phone's first request.
+    if (session.delivery === 'hls' && !session.live) playback.startHls(session);
+    // v0.28: Safari on iPhone may fetch the video without the sign-in cookie; a player that asks gets a private link
+    // in the address instead (one title or one stream, ended with this playback, as a TV's cast link).
+    const mediaLink = body.mediaLink ? core.cast.links.issue({ sessionId: session.id, itemId: item.id, userId: ctx.user.id, profileId: ctx.profile?.id ?? null }) : null;
     const listId = body.listId ? Number(body.listId) : null;
     const list = listId ? core.lists.get(listId) : null;
     const next = AUDIO_KINDS.has(item.kind) || item.kind === 'extra' ? null : list && core.lists.visibleTo(list, ctx.viewer) ? core.lists.nextIn(list.id, item.id, ctx.viewer) : library.nextEpisode(item);
@@ -91,7 +98,7 @@ export function registerPlaybackRoutes(r, core) {
       parent: parent ? { id: parent.id, title: parent.title, kind: parent.kind } : undefined,
       mode: session.mode,
       delivery: session.delivery,
-      url,
+      url: mediaLink ? withLink(url, mediaLink) : url,
       start: session.mode === 'direct' ? start : session.start,
       resumed,
       duration: item.duration || media?.duration || null,
@@ -110,6 +117,9 @@ export function registerPlaybackRoutes(r, core) {
       listId: list && core.lists.visibleTo(list, ctx.viewer) ? list.id : null,
       previews: AUDIO_KINDS.has(item.kind) ? null : core.extras.previewManifest(item),
       markers: item.kind === 'episode' ? core.extras.playbackMarkers(item.id) : { intro: null, credits: null },
+      loudness: item.kind === 'track' && Number.isFinite(media?.loudness?.i) ? media.loudness.i : null, // v0.28: even volume
+      levelDb: item.kind === 'track' ? levelGain(media?.loudness) : 0, // the gain that brings it to the same loudness as the rest
+      peak: item.kind === 'track' && Number.isFinite(media?.loudness?.tp) ? media.loudness.tp : null,
     };
   });
 

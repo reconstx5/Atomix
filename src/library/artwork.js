@@ -3,6 +3,7 @@
 // the cache instead of sending the client to it.
 import { HttpError } from '../http/router.js';
 import { sendPicture } from './thumbs.js';
+import { noteColor } from './colors.js';
 import { isRemotePath, resolveSource } from '../remote/index.js';
 
 // Album art, artists, podcasts and songs are square; everything else uses the poster, backdrop or logo sizes.
@@ -12,7 +13,10 @@ export async function sendArtwork(core, ctx, row, type, { redirect = true } = {}
   const { db, library, images } = core;
   const sizes = type === 'poster' && SQUARE.has(row.kind) ? 'square' : type;
   // stable: a downloaded copy is named by its source, so a versioned address can be kept for a year.
-  const send = (file, stable = true) => sendPicture(core, ctx, file, { type: sizes, stable });
+  const send = (file, stable = true) => {
+    noteColor(core, row, type, file); // fire and forget: the colour for the card's tint, kept for next time
+    return sendPicture(core, ctx, file, { type: sizes, stable });
+  };
   let ref = row[type];
   // Tracks use their album's cover.
   if (!ref && row.kind === 'track' && row.parent_id) ref = library.get(row.parent_id)?.[type];

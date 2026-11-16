@@ -5,9 +5,9 @@ import { Icon, Button, EmptyState, Spinner, Island } from '../ui/basics.js';
 import { Grid } from '../ui/cards.js';
 import { api, qs } from '../api.js';
 import { browseTarget, cardItems } from '../components.js';
-import { setTitle, canAdmin, liveAllowed, isOrbit } from '../app.js';
+import { setTitle, canAdmin, liveAllowed, isOrbit, state as appState } from '../app.js';
 import { orbitLibraryIcon } from '../orbit-rules.js';
-import { search as liveSearch, clockTime, playChannel, channelLabel } from '../live.js';
+import { search as liveSearch, onTvHere, clockTime, playChannel, channelLabel } from '../live.js';
 import { trackList } from '../music.js';
 import { followFocus } from '../backdrop.js';
 
@@ -49,6 +49,12 @@ function Results({ found, libraries }) {
   const tvCount = tv ? tv.channels.length + tv.programmes.length : 0;
   if (!sections.length && !tvCount) {
     const browse = browseTarget(libraries, 'watchlist');
+    // v0.28: with a request page set (Seerr and friends), the way to ask for it.
+    const request = appState.status?.requestUrl;
+    if (request) {
+      const href = `${request}/search?query=${encodeURIComponent(q)}`;
+      return html`<${EmptyState} title=${`No results for “${q}”`} text="It isn’t in the library yet. Check the spelling, or request it." icon="search" action=${html`<${Button} label=${`Request “${q}”`} icon="plus" variant="primary" href=${href} attrs=${{ target: '_blank', rel: 'noopener noreferrer' }} />`} />`;
+    }
     const action = canAdmin() ? html`<${Button} label="Open Add-ons" icon="addons" variant="ghost" href="#/addons" />` : browse ? html`<${Button} label=${browse.label} icon=${browse.icon} variant="ghost" href=${browse.href} />` : null;
     return html`<${EmptyState} title=${`No results for “${q}”`} text=${canAdmin() ? 'Check the spelling, or look in Add-ons for online sources.' : 'Check the spelling.'} icon="search" action=${action} />`;
   }
@@ -116,7 +122,7 @@ export function Screen({ query }) {
     }
     setFound({ loading: true });
     // Live TV's matches ride along (channels by name, programmes in the next 24 h), only for viewers who have it.
-    const [data, tv] = await Promise.all([api.get(`/api/search${qs({ q })}`), liveAllowed() ? liveSearch(q).catch(() => null) : null]);
+    const [data, tv] = await Promise.all([api.get(`/api/search${qs({ q })}`), liveAllowed() ? liveSearch(q).then(onTvHere).catch(() => null) : null]);
     if (left.current || my !== token.current) return;
     const tvCount = tv ? tv.channels.length + tv.programmes.length : 0;
     const sections = SECTIONS.map(([t, key]) => [t, data[key] || []]).filter(([, items]) => items.length);

@@ -2,15 +2,15 @@
 import { api, setUnauthorizedHandler, setProfileRequiredHandler } from './api.js';
 import { h, icon, clear, logoMark } from './dom.js';
 import { initNavigation, focusFirst, isKeyboardMode, configureNavigation, openMenu } from './nav.js';
-import { toast, spinner, avatar, announce, ensureLiveRegions } from './components.js';
+import { toast, spinner, avatar, announce, ensureLiveRegions, openSheet, skeleton } from './components.js';
 import { music, miniPlayer } from './music.js';
 import { castPill, setCastProfile } from './cast.js';
-import { backdropLayer, environmentLayer, repaintEnvironment, routeStart, routeEnd } from './backdrop.js';
+import { backdropLayer, scrimLayer, environmentLayer, repaintEnvironment, routeStart, routeEnd } from './backdrop.js';
 import { renderOrbitNav, libraryIcon } from './shell.js';
-import { FRAME_QUERY, homeBack, pillShown } from './orbit-rules.js';
+import { FRAME_QUERY, homeBack, pillShown, wheelPixels } from './orbit-rules.js';
 import { readNote, writeNote, clearNote, gateDecision, startGate, stopGate, rememberReturn, takeReturn, forgetReturn } from './gate.js';
 import { showSplash, endSplash, pageReady } from './splash.js';
-import { readableAccent, accentInk } from './tint.js';
+import { accentRamp, onAccent } from './tint.js';
 import { registerWorker } from './offline/install.js';
 import { downloads } from './offline/downloader.js';
 import { canDownloadHere } from './offline/ui.js';
@@ -18,8 +18,10 @@ import { sync, keepSnapshot, readSnapshot, forgetSnapshot } from './offline/sync
 import { watchState, notifyState } from './state-events.js';
 import { mountView } from './screen.js';
 import { applyMotion } from './motion.js';
+import { glassMode, contrastMode, textScale, orderLibraries, movePinned, effectsReduced } from './appearance-rules.js';
 import { historyStep } from './motion-rules.js';
 import { noteStep, beginPageChange, initCapture } from './transitions.js';
+import { initCardMotion } from './card-motion.js';
 
 export const state = watchState({
   status: null,
@@ -234,6 +236,53 @@ const THEME_WAIT_MS = 600;
 /** Resolves once the last theme stylesheet applyTheme() asked for has arrived (or after a short cap). */
 export const themeReady = () => themeLoad;
 
+// A profile's chosen accent, in every theme (visual refresh A6): clamped to the band the theme's colour scheme needs
+// (tint.js clampAccent), its --a-1..12 ramp regenerated from it, and black or white ink on it by APCA. Set inline on
+// <html>, so it wins over the theme's own ramp; all removed again when the profile has no accent. Arctic and Orbit
+// still take --accent from the artwork (--tint); the chosen colour is their light for pages without any
+// (--tint-default). The focus ring (--focus-ring: white, or n-12 on Daylight) is not the accent, so it is unaffected.
+const ACCENT_PROPS = ['--accent', '--accent-solid', '--accent-hover', '--accent-text', '--on-accent', '--tint-default', ...Array.from({ length: 12 }, (_, i) => `--a-${i + 1}`)];
+function applyAccent(root, chosen, scheme) {
+  const ramp = chosen ? accentRamp(chosen, scheme) : null;
+  if (!ramp) {
+    for (const p of ACCENT_PROPS) root.removeProperty(p);
+    return;
+  }
+  for (let i = 1; i <= 12; i++) root.setProperty(`--a-${i}`, ramp[i]);
+  const ink = onAccent(ramp[9]);
+  root.setProperty('--accent', ramp[9]);
+  root.setProperty('--accent-solid', ramp[9]);
+  root.setProperty('--accent-hover', ramp[10]);
+  root.setProperty('--accent-text', ink);
+  root.setProperty('--on-accent', ink);
+  root.setProperty('--tint-default', ramp[9]);
+}
+
+// v0.29 visual refresh B: the profile's Glass choice (and, below, its modes) as attributes on <html>. The device facts
+// (TV-size screen, blur support, the system's reduce transparency) are read live, and a change re-applies.
+const TV_QUERY = '(min-width: 1600px) and (orientation: landscape)';
+const mq = (q) => (typeof matchMedia === 'function' ? matchMedia(q) : { matches: false, addEventListener() {} });
+const appearanceQueries = { tv: mq(TV_QUERY), reducedTransparency: mq('(prefers-reduced-transparency: reduce)'), contrastMore: mq('(prefers-contrast: more)') };
+const blurSupported = () => typeof CSS !== 'undefined' && (CSS.supports('backdrop-filter', 'blur(1px)') || CSS.supports('-webkit-backdrop-filter', 'blur(1px)'));
+let appearanceWatched = false;
+function applyAppearance(prefs, scheme = document.documentElement.style.colorScheme || 'dark') {
+  const html = document.documentElement;
+  const contrast = contrastMode(prefs, { prefersMore: appearanceQueries.contrastMore.matches });
+  html.dataset.contrast = contrast;
+  // True black only means something on a dark theme (Daylight keeps its canvas).
+  if (prefs.oled && scheme !== 'light') html.dataset.oled = '';
+  else delete html.dataset.oled;
+  html.style.setProperty('--text-scale', String(textScale(prefs)));
+  const glass = glassMode(prefs, { tv: appearanceQueries.tv.matches, backdropFilter: blurSupported(), reducedTransparency: appearanceQueries.reducedTransparency.matches, contrastMore: contrast === 'more' });
+  html.dataset.glass = glass;
+  html.classList.toggle('reduce-effects', effectsReduced(prefs)); // the profile's own choice: card motion stops its sheen and clips
+  if (!appearanceWatched) {
+    appearanceWatched = true;
+    const again = () => applyAppearance(state.profile?.prefs || (state.user && state.lastPrefs) || {});
+    for (const q of Object.values(appearanceQueries)) q.addEventListener?.('change', again);
+  }
+}
+
 export function applyTheme() {
   notifyState('prefs'); // the prefs may have changed inside the profile, which the state wrapper can't see
   // While "Who's watching?" shows (the client has no profile, the server still does), keep the last
@@ -257,20 +306,10 @@ export function applyTheme() {
   document.documentElement.dataset.layout = layout;
   document.documentElement.style.colorScheme = theme?.colorScheme || 'dark';
   const root = document.documentElement.style;
-  // A chosen colour is also used as text (labels, the playing song): on a dark theme it's lifted first if it's too
-  // dark to read; a light theme keeps the colour as chosen (dark reads fine there).
-  const light = theme?.colorScheme === 'light';
-  const accent = prefs.accent ? (light ? prefs.accent : readableAccent(prefs.accent)) : null;
-  if (accent) root.setProperty('--accent', accent);
-  else root.removeProperty('--accent');
-  // Arctic takes its colour from the artwork; a chosen accent is the light for pages without any.
-  if (accent) root.setProperty('--tint-default', accent);
-  else root.removeProperty('--tint-default');
-  if (accent) root.setProperty('--accent-text', accentInk(accent));
-  else root.removeProperty('--accent-text');
+  applyAccent(root, prefs.accent, theme?.colorScheme === 'light' ? 'light' : 'dark');
   root.setProperty('--subtitle-scale', String(prefs.subtitleSize || 1));
   applyMotion({ profileReduce: Boolean(prefs.reduceMotion) }); // v0.28: data-motion (and html.reduce-motion)
-  document.documentElement.classList.toggle('reduce-effects', Boolean(prefs.reduceEffects));
+  applyAppearance(prefs, theme?.colorScheme === "light" ? "light" : "dark");
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta && theme?.preview?.background) meta.setAttribute('content', theme.preview.background);
   // Orbit and the older layouts build different menus.
@@ -299,11 +338,41 @@ function navLink(id, href, label, iconName) {
   return h('a', { class: 'nav-link', href, dataset: { nav: id } }, icon(iconName, { size: 20 }), h('span', { class: 'nav-label' }, label));
 }
 
+// v0.29 visual refresh B3: the profile's pinned libraries, in its order; the rest under "More libraries".
+const menuLibraries = () => orderLibraries(state.libraries, state.profile?.prefs?.pinnedLibraries);
+/** A library entry's menu (right click, long press or the menu key): Pin or Unpin, Move up, Move down. */
+export function libraryMenu(lib) {
+  const { pinned } = menuLibraries();
+  const ids = pinned.map((l) => l.id);
+  // The menu is rebuilt; focus goes back to this library's entry (or, after Unpin, the menu's first library) so a
+  // remote stays in the menu.
+  const change = (dir) => updatePrefs({ pinnedLibraries: movePinned(ids, lib.id, dir) })
+    .then(() => requestAnimationFrame(() => (navEl.querySelector(`[data-nav="lib-${lib.id}"]`) || navEl.querySelector('[data-nav^="lib-"], [data-nav="more-libs"]'))?.focus()))
+    .catch(() => toast("Couldn't change the menu. Try again.", { type: 'error' }));
+  const i = ids.indexOf(lib.id);
+  openSheet(lib.name, [
+    ids.includes(lib.id) ? { label: 'Unpin', icon: 'close', onSelect: () => change('unpin') } : { label: 'Pin', icon: 'plus', onSelect: () => change('pin') },
+    i > 0 ? { label: 'Move up', icon: 'chan-up', onSelect: () => change(-1) } : null,
+    i >= 0 && i < ids.length - 1 ? { label: 'Move down', icon: 'chan-down', onSelect: () => change(1) } : null,
+  ]);
+}
+function moreLibrariesSheet(rest) {
+  openSheet('More libraries', rest.map((l) => ({ label: l.name, icon: libraryIcon(l.type), href: `#/library/${l.id}` })));
+}
+function withLibraryMenu(a, lib) {
+  a.addEventListener('contextmenu', (e) => { e.preventDefault(); libraryMenu(lib); });
+  return a;
+}
+
 export function renderNav() {
+  const { pinned, rest } = menuLibraries();
   if (isOrbit()) {
     renderOrbitNav(navEl, {
       serverName: state.status?.serverName || 'Atomix',
       libraries: state.libraries,
+      menuLibraries: pinned,
+      moreLibraries: rest,
+      libraryMenu,
       profile: state.profile,
       addons: addonsAllowed(),
       live: liveAllowed(),
@@ -318,7 +387,8 @@ export function renderNav() {
   }
   configureNavigation();
   clear(navEl);
-  const libs = state.libraries.map((l) => navLink(`lib-${l.id}`, `#/library/${l.id}`, l.name, libraryIcon(l.type)));
+  const libs = pinned.map((l) => withLibraryMenu(navLink(`lib-${l.id}`, `#/library/${l.id}`, l.name, libraryIcon(l.type)), l));
+  if (rest.length) libs.push(h('button', { type: 'button', class: 'nav-link', dataset: { nav: 'more-libs' }, 'aria-haspopup': 'dialog', onClick: () => moreLibrariesSheet(rest) }, icon('more', { size: 20 }), h('span', { class: 'nav-label' }, 'More libraries')));
   navEl.append(
     h('a', { class: 'brand', href: '#/', 'aria-label': `${state.status?.serverName || 'Atomix'} home` }, logoMark(30), h('span', { class: 'brand-name' }, state.status?.serverName || 'Atomix')),
     h(
@@ -408,6 +478,25 @@ function pageScroller() {
   return isOrbit() && document.body.dataset.view === 'page' && framed.matches ? main : document.scrollingElement || document.documentElement;
 }
 
+// Orbit's Home, Live TV and library pages keep their top area still and scroll only the list under it: a wheel turn over
+// the top area (the spotlight) scrolls that list too, rather than nothing (v0.28: Home only scrolled on its lower half).
+const PAGE_LISTS = '.home-rows, .live-scroll, .library-scroll';
+const scrollsDown = (el) => {
+  const o = getComputedStyle(el).overflowY;
+  return (o === 'auto' || o === 'scroll') && el.scrollHeight > el.clientHeight + 1;
+};
+function forwardWheel(e) {
+  if (e.ctrlKey || !e.deltaY || e.target.closest?.(PAGE_LISTS)) return;
+  // Anything on the way up that scrolls by itself (a sheet, a long description) keeps the wheel.
+  for (let p = e.target; p && p !== main; p = p.parentElement) if (p instanceof Element && scrollsDown(p)) return;
+  const doc = document.scrollingElement || document.documentElement;
+  if (scrollsDown(main) || doc.scrollHeight > doc.clientHeight + 1) return; // the page itself scrolls: leave it be
+  const list = [...main.querySelectorAll(PAGE_LISTS)].find(scrollsDown);
+  if (!list) return;
+  e.preventDefault();
+  list.scrollBy({ top: wheelPixels(e, list.clientHeight) });
+}
+
 /** Back (the remote's Back, Backspace), once dialogs and the menu have had their turn. */
 function onBackKey() {
   if (!state.profile && state.user) return; // "Who's watching?" is not a page to go back from
@@ -466,15 +555,25 @@ async function render() {
 
   // A change with a transition keeps a still copy of the old page up while the next loads (a spinner only if that
   // takes a while); otherwise the spinner shows at once, as before.
+  // v0.29 B4: pages show nothing for their first second, then a skeleton shaped like the page (never the spinner);
+  // the player and the profile picker keep the spinner.
+  const started = performance.now();
+  const loading = () => {
+    if (route.fullscreen || route.picker) return spinner();
+    const holder = h('div', { class: 'page-loading', role: 'status' }, h('span', { class: 'visually-hidden' }, 'Loading'));
+    const kind = path === '/' ? 'home' : /^\/library\//.test(path) ? 'library' : /^\/item\//.test(path) ? 'title' : 'page';
+    setTimeout(() => token === renderToken && holder.isConnected && holder.append(skeleton(kind)), Math.max(0, 1000 - (performance.now() - started)));
+    return holder;
+  };
   if (route.fullscreen || route.picker || !change.hold()) {
     change.end();
     clear(main);
-    main.append(spinner());
+    main.append(loading());
   } else {
     change.later(() => {
       if (token !== renderToken) return;
       clear(main);
-      main.append(spinner());
+      main.append(loading());
     });
   }
   routeStart();
@@ -509,8 +608,8 @@ async function render() {
       opened.removeAttribute('data-focus-now');
       opened.focus({ preventScroll: true });
       opened.scrollIntoView({ block: 'center', inline: 'nearest' });
-    } else pageScroller().scrollTo(0, 0);
-    if (!route.fullscreen && !opened) {
+    } else if (!change.restored) pageScroller().scrollTo(0, 0); // Back to a card: transitions.js put it back
+    if (!route.fullscreen && !opened && !change.restored) {
       if (isKeyboardMode()) focusFirst(main);
       else main.focus({ preventScroll: true });
     }
@@ -656,6 +755,7 @@ export async function updatePrefs(prefs) {
   state.profile = res.profile;
   music.setProfile(res.profile); // the same profile: only its prefs (v0.22 speed and skips) are taken
   applyTheme();
+  if ('pinnedLibraries' in prefs) renderNav(); // the menu shows the new order at once
   return state.profile;
 }
 
@@ -664,9 +764,11 @@ async function boot() {
   main = document.getElementById('main');
   navEl = document.getElementById('nav');
   applyMotion();
+  main.addEventListener('wheel', forwardWheel, { passive: false });
   initNavigation({ onBack: onBackKey });
   initCapture();
-  document.body.prepend(environmentLayer, backdropLayer);
+  initCardMotion();
+  document.body.prepend(environmentLayer, backdropLayer, scrimLayer);
   // Themes can give the header a solid background once the page scrolls under it.
   window.addEventListener('scroll', () => document.documentElement.classList.toggle('scrolled', window.scrollY > 8), { passive: true });
   // Orbit on a phone: the profile pill slides away while scrolling down and comes back on any scroll up (v0.24).

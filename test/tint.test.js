@@ -59,25 +59,22 @@ test('contrast helper matches WCAG', () => {
   assert.equal(contrast('#777777', '#777777'), 1);
 });
 
-test('readableAccent lifts a dark chosen colour to readable text on the dark pages, keeping its hue', async () => {
-  const { readableAccent, luminance } = await import('../public/js/tint.js');
-  const lifted = readableAccent('#101040');
-  assert.ok(luminance(lifted) >= 0.3, `${lifted} ${luminance(lifted)}`);
-  const [r, g, b] = [1, 3, 5].map((i) => parseInt(lifted.slice(i, i + 2), 16));
-  assert.ok(b > r && b > g, 'still blue');
-  assert.equal(readableAccent('#8fe9ff'), '#8fe9ff', 'a light colour is left alone');
-  assert.equal(readableAccent('nonsense'), 'nonsense');
-});
-
-// v0.15.0 fix pass (C1): the ink on a chosen accent is whichever of dark/white contrasts more with the colour that is
-// actually painted — the lifted one — never a fixed luminance threshold that lands at 2.9:1.
-test('accentInk picks the ink with the higher contrast against the lifted accent', async () => {
-  const { accentInk, readableAccent } = await import('../public/js/tint.js');
+// v0.15 had readableAccent (a dark chosen colour lifted to luminance 0.30) and accentInk (#111 or white by WCAG, which
+// had to reach 4.5:1). Visual refresh A6 (Plan A task 6) replaced both: a chosen colour is clamped in OKLCH
+// (clampAccent) and its ink is black or white by APCA (onAccent), which must reach Lc 60 — test/accent-clamp.test.js.
+// The old WCAG 4.5:1 rule still holds on the dark themes (black on L >= 70 %: about 9.7:1 at worst), so it is kept for
+// the colours this test used; on Daylight it is no longer asserted (white on L <= 55 % is ~4.5:1 at worst, APCA rules).
+test('the ink on a clamped dark-theme accent reaches APCA Lc 60 and still WCAG 4.5:1', async () => {
+  const { clampAccent, onAccent, apcaLc } = await import('../public/js/tint.js');
+  const full = (c) => (c.length === 4 ? '#' + [...c.slice(1)].map((x) => x + x).join('') : c);
   for (const dark of ['#101040', '#400010', '#104010', '#301030']) {
-    const lifted = readableAccent(dark);
-    const ink = accentInk(lifted);
-    assert.ok(contrast(lifted, ink) >= 4.5, `${dark} → ${lifted} with ${ink} is ${contrast(lifted, ink).toFixed(2)}:1`);
+    const a = clampAccent(dark, 'dark');
+    const ink = full(onAccent(a));
+    assert.ok(Math.abs(apcaLc(ink, a)) >= 60, `${dark} → ${a} with ${ink}: Lc ${apcaLc(ink, a).toFixed(1)}`);
+    assert.ok(contrast(a, ink) >= 4.5, `${dark} → ${a} with ${ink} is ${contrast(a, ink).toFixed(2)}:1`);
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
+    if (dark === '#101040') assert.ok(b > r && b > g, 'still blue');
   }
-  assert.equal(accentInk('#ffffff'), '#111111');
-  assert.equal(accentInk('#000000'), '#ffffff');
+  assert.equal(onAccent('#ffffff'), '#000');
+  assert.equal(onAccent('#000000'), '#fff');
 });

@@ -1,0 +1,14 @@
+import { open, go, check, failed } from './lib.mjs';
+const { browser, page, errors } = await open();
+await go(page, '#/play/11');
+await page.waitForFunction(() => document.querySelector('video')?.currentTime > 0.5, null, { timeout: 15000 });
+await page.waitForTimeout(800);
+const first = await page.evaluate(() => ({ hidden: document.querySelector('.skip-intro')?.hidden, text: document.querySelector('.skip-intro span')?.textContent }));
+check('a recap shows Skip recap', first.hidden === false && first.text === 'Skip recap', JSON.stringify(first));
+await page.click('.skip-intro');
+await page.waitForTimeout(1200);
+const after = await page.evaluate(() => ({ t: document.querySelector('video').currentTime, text: document.querySelector('.skip-intro span')?.textContent, hidden: document.querySelector('.skip-intro')?.hidden }));
+check('skipping lands after the recap, and Skip intro follows', after.t >= 8.9 && after.text === 'Skip intro' && after.hidden === false, JSON.stringify(after));
+check('no page errors', !errors.length, errors.join(' | '));
+await browser.close();
+process.exit(failed() ? 1 : 0);

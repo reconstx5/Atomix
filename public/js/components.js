@@ -4,7 +4,9 @@ import { reduceMotion } from './motion.js';
 import { h, icon, clear, hueFor, episodeLabel, formatRuntime, formatClock, MARK } from './dom.js';
 import { posterFraction } from './library-rules.js';
 import { listCard } from './lists.js';
+import { unplayableHere, liveTarget } from './dash/playable.js';
 import { sizedAttrs } from './sized.js';
+import { cardInfoLine, cardLabel, cardTint } from './card-motion-rules.js';
 
 // ---- Artwork ----
 /** True on Orbit: it asks for artwork at the size shown (v0.24); the older themes keep the originals. */
@@ -21,6 +23,9 @@ export function eagerTake(eager) {
   return now;
 }
 export const ART_TYPE = { poster: 'poster', square: 'square', landscape: 'backdrop' };
+
+/** Resolves once `img` is decoded (at once where the browser can't say, or the decode fails: the fade still runs). */
+export const decoded = (img) => (typeof img.decode === 'function' ? img.decode().catch(() => {}) : Promise.resolve());
 
 export function art(src, title, { kind = 'poster', eager = false, alt = '' } = {}) {
   const hue = hueFor(title || '');
@@ -39,7 +44,9 @@ export function art(src, title, { kind = 'poster', eager = false, alt = '' } = {
       src: sizes.src,
       alt,
     });
-    img.addEventListener('load', () => wrap.classList.add('loaded'));
+    // Card motion v2: already there (cached) → shown at once; otherwise decoded first, then a 180 ms fade (CSS).
+    if (img.complete && img.naturalWidth) wrap.classList.add('loaded', 'is-instant');
+    else img.addEventListener('load', () => decoded(img).then(() => wrap.classList.add('loaded')));
     img.addEventListener('error', () => img.remove());
     wrap.append(img);
   }
@@ -94,13 +101,23 @@ export function itemHref(item) {
 export const cardItems = new WeakMap();
 const remember = (el, item) => (cardItems.set(el, item), el);
 
+/**
+ * Card motion v2: a film, episode or show card carries its artwork's colour as --card-tint (its glow when selected;
+ * the theme's accent stands in when unknown). Not --tint: themes paint progress bars and ticks inside cards with that.
+ */
+export const tintStyle = (item, style) => {
+  const c = item && ['movie', 'episode', 'show'].includes(item.kind) ? cardTint(item, style) : null;
+  return c ? { '--card-tint': c } : null;
+};
+
 /** Portrait card for movies and shows. */
 export function posterCard(item) {
   const sub = item.note ? (item.kind === 'episode' && item.showTitle ? `${item.showTitle} · ${item.note}` : item.note) : item.kind === 'episode' ? `${item.showTitle || ''} · ${episodeLabel(item)}` : item.subtitle || (item.kind === 'series' ? 'Series' : item.kind === 'book' ? item.author : null) || item.year || (item.kind === 'season' && item.childCount ? `${item.childCount} episodes` : '');
+  const info = cardInfoLine(item);
   return remember(h(
     'a',
-    { class: 'card poster-card', href: itemHref(item), 'aria-label': `${item.title}${item.year ? ` (${item.year})` : ''}${cardState(item)}` },
-    h('div', { class: 'card-art' }, art(item.poster, item.title), badge(item), progressBar(item)),
+    { class: 'card poster-card', href: itemHref(item), 'aria-label': cardLabel(item, cardState(item)), style: tintStyle(item, 'poster') },
+    h('div', { class: 'card-art' }, art(item.poster, item.title), badge(item), progressBar(item), info ? h('span', { class: 'card-info' }, info) : null),
     h('div', { class: 'card-meta' }, h('span', { class: 'card-title' }, item.title), sub ? h('span', { class: 'card-sub' }, String(sub)) : null),
   ), item);
 }
@@ -125,21 +142,23 @@ export function squareCard(item) {
  * the music player). Not a library title, so the spotlight doesn't follow it.
  */
 export function liveCard(item) {
-  const label = item.title && item.title !== item.subtitle ? `Watch ${item.title} on ${item.subtitle}` : `Watch ${item.subtitle}`;
+  const label = (item.title && item.title !== item.subtitle ? `Watch ${item.title} on ${item.subtitle}` : `Watch ${item.subtitle}`) + (item.unplayable ? ", can't play here" : '');
   const pct = Math.round(Math.max(0, Math.min(1, Number(item.progress) || 0)) * 100);
   const play = async (e) => {
-    if (!item.radio) return; // the link plays it
+    if (!item.radio && !unplayableHere(item.drm)) return; // the link plays it
     e.preventDefault();
+    if (!item.radio) return (await import('./live.js')).playChannel(liveTarget(item)); // v0.28: the card saying why
     (await import('./live.js')).playChannel({ id: item.channelId, radio: true, name: item.subtitle, logo: item.logo, now: null });
   };
   return h(
     'a',
-    { class: 'card landscape-card live-card', href: `#/live/play/${item.channelId}`, 'aria-label': label, dataset: { channel: item.channelId }, onClick: play },
+    { class: `card landscape-card live-card${item.unplayable ? ' is-unplayable' : ''}`, href: `#/live/play/${item.channelId}`, 'aria-label': label, dataset: { channel: item.channelId }, onClick: play },
     h(
       'div',
       { class: `card-art${item.image && item.image === item.logo ? ' is-logo' : ''}` },
       art(item.image, item.subtitle, { kind: 'landscape' }),
       h('span', { class: 'live-badge card-live', 'aria-hidden': 'true' }, item.radio ? 'RADIO' : 'LIVE'),
+      item.unplayable ? h('span', { class: 'chip live-cant card-cant', 'aria-hidden': 'true' }, "Can't play here") : null,
       h('div', { class: 'progress', role: 'presentation' }, h('span', { style: { width: `${Math.max(2, pct)}%` } })),
     ),
     h('div', { class: 'card-meta' }, h('span', { class: 'card-title' }, item.title), h('span', { class: 'card-sub' }, item.subtitle)),
@@ -212,7 +231,7 @@ export function landscapeCard(item, { play = true } = {}) {
   const href = item.href || (play ? `#/play/${item.id}` : itemHref(item));
   return remember(h(
     'a',
-    { class: 'card landscape-card', href, 'aria-label': `${play ? 'Play ' : ''}${title}${isEp ? `, ${episodeLabel(item)}, ${item.title}` : ''}${cardState(item)}` },
+    { class: 'card landscape-card', href, 'aria-label': `${play ? 'Play ' : ''}${title}${isEp ? `, ${episodeLabel(item)}, ${item.title}` : ''}${cardState(item)}`, style: tintStyle(item, 'landscape') },
     h(
       'div',
       { class: 'card-art' },
@@ -288,6 +307,39 @@ export function mediaFlags(item) {
   if (a?.codec) flags.push({ aac: 'AAC', ac3: 'Dolby Digital', eac3: 'DD+', truehd: 'TrueHD', dts: 'DTS', flac: 'FLAC', opus: 'Opus', mp3: 'MP3' }[a.codec] || a.codec.toUpperCase());
   if (m.subtitles) flags.push('CC');
   return flags;
+}
+
+/**
+ * v0.29 visual refresh B4: the title page's outlined chips, from the file's media info: 4K, the HDR kind, Atmos,
+ * 5.1/7.1 and Subtitles (codec words stay in Details). Null when there is nothing to say.
+ */
+export function mediaChips(item) {
+  const m = item.media;
+  if (!m) return null;
+  const a = m.audio?.find((t) => t.default) || m.audio?.[0];
+  const words = [
+    m.resolution === '4K' ? '4K' : null,
+    m.hdrFormat || (m.hdr ? 'HDR' : null),
+    m.atmos ? 'Atmos' : null,
+    a?.channels >= 6 ? CHANNELS[a.channels] || `${a.channels}ch` : null,
+    m.subtitles ? 'Subtitles' : null,
+  ].filter(Boolean);
+  return words.length ? h('ul', { class: 'media-flags media-chips', 'aria-label': 'Picture and sound' }, words.map((w) => h('li', {}, w))) : null;
+}
+
+/**
+ * v0.29 visual refresh B4: a page-shaped placeholder shown while a slow page loads (app.js shows it only after 1 s).
+ * kind: 'home' (a hero and two rows), 'library' (a grid), 'title' (a hero and text lines) or 'page' (text lines).
+ */
+export function skeleton(kind = 'page') {
+  const sk = (cls) => h('div', { class: `sk ${cls}` });
+  const posters = (n) => h('div', { class: 'sk-row' }, Array.from({ length: n }, () => sk('sk-poster')));
+  const lines = (n) => h('div', { class: 'sk-lines' }, Array.from({ length: n }, (_, i) => sk(i === 0 ? 'sk-line sk-heading' : 'sk-line')));
+  const body = kind === 'home' ? [sk('sk-hero'), posters(8), posters(8)]
+    : kind === 'library' ? [lines(1), h('div', { class: 'sk-grid' }, Array.from({ length: 18 }, () => sk('sk-poster')))]
+    : kind === 'title' ? [sk('sk-hero'), lines(4)]
+    : [lines(6)];
+  return h('div', { class: `skeleton skeleton-${kind}`, 'aria-hidden': 'true' }, body);
 }
 
 export function metaLine(item) {
@@ -648,16 +700,34 @@ export async function confirmDialog(title, text, { confirm = 'OK', danger = fals
 
 /**
  * A short list of actions in a small panel: the "…" menu, a song's menu. Items are
- * { label, icon, onSelect } or, for links, { label, icon, href, download }. Falsy items are skipped;
+ * { label, icon, onSelect, current?, checked? } or, for links, { label, icon, href, download }. Falsy items are skipped;
  * the first one has the focus, and choosing one closes the panel.
  */
+/**
+ * A sheet button's icon and attributes. v0.25: `current` marks the choice in force (a sort, a genre) with a tick.
+ * v0.28: `checked` (a boolean) makes the item an on/off switch: a toggle button (aria-pressed), ticked when on.
+ */
+export function sheetItemAttrs(it, i) {
+  const toggle = typeof it.checked === 'boolean';
+  const ticked = toggle ? it.checked : Boolean(it.current);
+  return {
+    icon: ticked ? 'check' : it.icon,
+    attrs: {
+      type: 'button',
+      class: `sheet-item${it.danger ? ' danger' : ''}${ticked ? ' is-current' : ''}`,
+      'aria-current': !toggle && it.current ? 'true' : null,
+      'aria-pressed': toggle ? String(it.checked) : null,
+      'data-autofocus': i === 0 || null,
+    },
+  };
+}
+
 export function openSheet(title, items) {
   const entry = (it, i) => {
-    // v0.25: `current` marks the choice in force (a sort, a genre) with a tick.
-    const content = [icon(it.current ? 'check' : it.icon, { size: 22 }), h('span', {}, it.label)];
     const close = (e) => e.currentTarget.closest('dialog')?.close('done');
-    if (it.href) return h('a', { class: 'sheet-item', href: it.href, download: it.download || null, 'data-autofocus': i === 0 || null, onClick: close }, content);
-    return h('button', { type: 'button', class: `sheet-item${it.danger ? ' danger' : ''}${it.current ? ' is-current' : ''}`, 'aria-current': it.current ? 'true' : null, 'data-autofocus': i === 0 || null, onClick: (e) => (close(e), it.onSelect()) }, content);
+    if (it.href) return h('a', { class: 'sheet-item', href: it.href, download: it.download || null, 'data-autofocus': i === 0 || null, onClick: close }, [icon(it.current ? 'check' : it.icon, { size: 22 }), h('span', {}, it.label)]);
+    const { icon: name, attrs } = sheetItemAttrs(it, i);
+    return h('button', { ...attrs, onClick: (e) => (close(e), it.onSelect()) }, [icon(name, { size: 22 }), h('span', {}, it.label)]);
   };
   return openDialog({ title, body: h('div', { class: 'sheet' }, items.filter(Boolean).map(entry)), actions: [] });
 }
@@ -682,6 +752,38 @@ export function toggle(label, checked, onChange, { hint } = {}) {
   const input = h('input', { type: 'checkbox', id, role: 'switch', checked, 'aria-describedby': hint ? `${id}-hint` : null, onChange: (e) => onChange?.(e.target.checked) });
   const text = hint ? h('span', { class: 'toggle-text' }, h('span', {}, label), h('span', { class: 'toggle-hint', id: `${id}-hint` }, hint)) : h('span', {}, label);
   return h('label', { class: 'toggle', for: id }, input, h('span', { class: 'toggle-track', 'aria-hidden': 'true' }), text);
+}
+
+/**
+ * A short choice of a few options shown as pills (v0.29: Glass, Text size). Left/Right move and choose, like radios.
+ * options: [[value, text], …]; onPick(value) runs when the choice changes.
+ */
+export function pillChoice(label, options, value, onPick, { hint } = {}) {
+  const id = `c-${Math.random().toString(36).slice(2, 9)}`;
+  let current = options.some(([v]) => v === value) ? value : options[0][0];
+  const group = h('div', { class: 'kind-pills', role: 'radiogroup', 'aria-label': label, 'aria-describedby': hint ? `${id}-hint` : null });
+  const pick = (v, focus = false) => {
+    const changed = v !== current;
+    current = v;
+    for (const b of group.children) {
+      const on = b.dataset.value === String(v);
+      b.setAttribute('aria-checked', String(on));
+      b.tabIndex = on ? 0 : -1;
+      if (focus && on) b.focus();
+    }
+    if (changed) onPick?.(v);
+  };
+  for (const [v, text] of options) group.append(h('button', { type: 'button', role: 'radio', class: 'pill', 'data-value': String(v), 'aria-checked': String(v === current), tabindex: v === current ? 0 : -1, onClick: () => pick(v) }, text));
+  group.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const i = options.findIndex(([v]) => v === current);
+    const j = i + (e.key === 'ArrowRight' ? 1 : -1);
+    if (j < 0 || j >= options.length) return; // at the ends the arrow leaves the group (spatial navigation)
+    e.preventDefault();
+    e.stopPropagation();
+    pick(options[j][0], true);
+  });
+  return h('div', { class: 'choice' }, h('span', { class: 'field-label', id: `${id}-label` }, label), hint ? h('p', { class: 'hint', id: `${id}-hint` }, hint) : null, group);
 }
 
 export { clear };

@@ -25,6 +25,7 @@ function setup() {
   const db = openDatabase(path.join(tempDir(), 't.db'));
   const store = new ExtrasStore(db);
   const settings = new Settings(db);
+  settings.set({ cardClips: false }); // these tests use stand-in jobs without a clip job (test/clips.test.js covers it)
   const t = Date.now();
   let seq = 0;
   const lib = (type) => Number(db.run('INSERT INTO libraries (name, type, paths, created_at) VALUES (?, ?, ?, ?)', type, type, '[]', t).lastInsertRowid);
@@ -72,7 +73,7 @@ test('one job at a time: new titles first, then intros, then the backlog oldest 
   await runner.stop();
   assert.deepEqual(log, [`p${m2}`, `i${s1}`, `p${m1}`, `p${e1}`]);
   assert.equal(most, 1, 'never two at once');
-  assert.deepEqual(runner.status().queued, { previews: 0, intros: 0, thumbs: 0, lyrics: 0, subtitles: 0 });
+  assert.deepEqual(runner.status().queued, { previews: 0, intros: 0, thumbs: 0, clips: 0, lyrics: 0, subtitles: 0, loudness: 0 });
   db.close();
 });
 
@@ -231,5 +232,38 @@ test('a preview folder that cannot be deleted does not stop the server or the ru
   } finally {
     rm.mock.restore();
   }
+  db.close();
+});
+
+// Card motion v2 final review: with previews switched off no clip is made, so none is counted as waiting.
+test('previews off: the clips count is 0 even with "Make preview clips for cards" on', () => {
+  const { db, store, settings, lib, add } = setup();
+  const movies = lib('movies');
+  add({ library_id: movies, kind: 'movie' });
+  settings.set({ previewsEnabled: false, cardClips: true });
+  assert.ok(store.pendingCounts().clips > 0, 'a film is waiting for its clip in the store');
+  const runner = new TaskRunner({ store, settings, tools: withFfmpeg, busy: () => false, jobs: {}, previewsDir: tempDir(), pollMs: 30 });
+  assert.equal(runner.status().queued.clips, 0);
+  settings.set({ previewsEnabled: true });
+  assert.ok(runner.status().queued.clips > 0, 'counted again once previews are on');
+  db.close();
+});
+
+// A clip whose source file is missing (an unplugged drive) records a clear failure instead of finishing silently.
+test("a clip with its file missing fails with a plain sentence the runner records", async () => {
+  const { db, store, settings, lib, add, row } = setup();
+  settings.set({ previewsEnabled: true, cardClips: true, introDetection: false });
+  const movies = lib('movies');
+  const id = add({ library_id: movies, kind: 'movie', path: path.join(tempDir(), 'gone.mkv') });
+  const real = makeJobs({ store, config: { ffmpegPath: 'ffmpeg', previewsDir: tempDir() }, tools: withFfmpeg, settings });
+  await assert.rejects(real.clip(row(id), {}), /The file isn't there \(is the drive unplugged\?\)/);
+  const jobs = { previews: async (item) => done(store, item), clip: real.clip, intros: async () => {} };
+  const runner = new TaskRunner({ store, settings, tools: withFfmpeg, busy: () => false, jobs, previewsDir: tempDir(), pollMs: 30, busyPollMs: 10, gapMs: 0 });
+  runner.start();
+  await until(() => db.get("SELECT status FROM media_jobs WHERE item_id = ? AND job = 'clip'", id), 'the clip job recorded');
+  await runner.stop();
+  const rec = db.get("SELECT status, error FROM media_jobs WHERE item_id = ? AND job = 'clip'", id);
+  assert.equal(rec.status, 'failed');
+  assert.match(rec.error, /The file isn't there/);
   db.close();
 });

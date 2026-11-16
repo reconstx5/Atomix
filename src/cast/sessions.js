@@ -23,10 +23,13 @@ const PLAYABLE = ['movie', 'episode', 'track', 'extra'];
 const NOTE_MS = 2 * 60_000;
 const LIBASS = "This ffmpeg can't draw subtitles onto video (it needs libass)";
 const SUBS_DIR = (config) => path.join(config.transcodeDir, 'cast-subs');
-// v0.27: encrypted channels play on a Chromecast or Google TV (its own Widevine); other TVs can't.
+// v0.27: encrypted channels play on a Chromecast or Google TV (its own Widevine or PlayReady, or ClearKey; v0.28); other TVs can't.
 export const DLNA_ENCRYPTED = "This TV can't play encrypted channels; use a Chromecast or Google TV";
 export const CANT_CAST_ENCRYPTED = "This channel is encrypted, so it can't be cast";
-const CASTABLE_DRM = new Set(['widevine', 'clearkey']);
+// v0.28: the TV's choice, best first (the relay picks the first one the channel offers).
+const CAST_SYSTEMS = ['widevine', 'playready', 'clearkey'];
+/** Whether a TV can play any of the channel's key systems (a FairPlay-only channel can't be cast). */
+export const castableChannel = (channel) => (channel.drmSystems?.length ? channel.drmSystems : [channel.drm]).some((d) => CAST_SYSTEMS.includes(d));
 const loadFailed = (device, base) => `${device} couldn't load the video from ${base}. Check the address in Settings → Server → Casting.`;
 const withTimeout = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(r, ms).unref?.())]);
 
@@ -384,6 +387,7 @@ export class CastManager {
     if (oldDrm) {
       s.drmSessionId = null;
       this.core.live.drm.stop(oldDrm, 'cast restart');
+      this.core.cast.links.revokeDrm(oldDrm); // v0.28: the encrypted channel's link ends with it
     }
   }
 
@@ -413,7 +417,7 @@ export class CastManager {
    */
   async playEncrypted(s) {
     const { channel } = s.live;
-    if (!CASTABLE_DRM.has(channel.drm)) throw new HttpError(400, CANT_CAST_ENCRYPTED);
+    if (!castableChannel(channel)) throw new HttpError(400, CANT_CAST_ENCRYPTED);
     if (s.kind !== 'chromecast') throw new HttpError(400, DLNA_ENCRYPTED);
     if (s.live.kind !== 'live') throw new HttpError(400, CANT_CAST_ENCRYPTED); // live only
     const drm = this.core.live.drm;
@@ -426,7 +430,7 @@ export class CastManager {
     s.replacingDrm = oldDrm;
     let d;
     try {
-      d = await this.withRoom(s, (replaces) => drm.start({ user: s.user, profile: s.profile, channel, source, replaces, isAdmin: s.user.role === 'admin', clientIp: 'cast', castId: s.id }), oldDrm || oldPs);
+      d = await this.withRoom(s, (replaces) => drm.start({ user: s.user, profile: s.profile, channel, source, replaces, isAdmin: s.user.role === 'admin', clientIp: 'cast', castId: s.id, keySystems: CAST_SYSTEMS }), oldDrm || oldPs);
     } finally {
       s.replacingId = null;
       s.replacingDrm = null;
@@ -441,13 +445,17 @@ export class CastManager {
       await s.driver.load({ url, contentType: 'application/dash+xml', kind: 'movie', live: true, title: s.item.title, subtitle: null, image: logo, startTime: 0, tracks: [], activeTrackIds: [] });
     } catch (err) {
       drm.stop(d.id, 'cast failed');
+      this.core.cast.links.revokeDrm(d.id);
       s.drmSessionId = oldDrm && drm.sessions.has(oldDrm) ? oldDrm : null;
       s.playbackSessionId = oldPs && this.core.playback.sessions.has(oldPs) ? oldPs : null;
       throw err;
     } finally {
       s.busy = false;
     }
-    if (oldDrm && oldDrm !== d.id) drm.stop(oldDrm, 'cast restart');
+    if (oldDrm && oldDrm !== d.id) {
+      drm.stop(oldDrm, 'cast restart');
+      this.core.cast.links.revokeDrm(oldDrm); // v0.28: the old channel's link ends with it
+    }
     if (oldPs && this.core.playback.sessions.has(oldPs)) this.core.playback.stop(oldPs, 'cast restart');
   }
 

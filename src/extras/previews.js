@@ -8,7 +8,7 @@ import { run } from '../library/probe.js';
 export const TILE_WIDTH = 320;
 export const GRID = 10;
 // HDR → normal colours, only used when this ffmpeg has zscale and tonemap.
-const TONEMAP = 'zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p';
+export const TONEMAP = 'zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p';
 
 /** The layout for a title's previews, or null when it can't have any. A rotated (phone) video is sized as it plays. */
 export function planPreviews(duration, video) {
@@ -48,6 +48,9 @@ export async function generatePreviews({ ffmpegPath, dir, item, media, hdrFilter
     await run(ffmpegPath, previewArgs({ item, plan, tonemap: Boolean(media.video.hdr && hdrFilters), tmp }), { timeout, onSpawn });
     const sheets = fs.readdirSync(tmp).filter((f) => /^\d+\.jpg$/.test(f)).length;
     if (!sheets) throw new Error('ffmpeg made no pictures.');
+    // A preview clip made earlier lives in the same folder: carried over, not wiped.
+    const clip = path.join(final, 'clip.mp4');
+    if (fs.existsSync(clip)) fs.renameSync(clip, path.join(tmp, 'clip.mp4'));
     fs.rmSync(final, { recursive: true, force: true });
     fs.renameSync(tmp, final);
     return { ...plan, sheets, count: Math.min(plan.count, sheets * GRID * GRID) };

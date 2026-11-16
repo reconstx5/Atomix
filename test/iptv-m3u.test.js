@@ -128,8 +128,8 @@ test('stream_params, manifest_params, license_data and server_certificate are re
 https://cdn.example/x.mpd
 `);
   const c = r.channels[0];
-  assert.equal(c.drm.serverCertificate, 'Q0VSVA==');
-  assert.equal(c.drm.initData, 'SU5JVA==');
+  assert.equal(c.drm.systems[0].serverCertificate, 'Q0VSVA==');
+  assert.equal(c.drm.systems[0].initData, 'SU5JVA==');
   assert.equal(c.manifestParams, 'a=1');
   assert.equal(c.streamParams, 'b=2');
 });

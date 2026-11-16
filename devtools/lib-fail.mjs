@@ -1,0 +1,13 @@
+import { open, go, check, failed } from './lib.mjs';
+const { browser, page } = await open({ theme: 'midnight' });
+await go(page, '#/library/1');
+await page.waitForSelector('.library-results a.card', { timeout: 15000 });
+await page.route('**/api/libraries/1/items**', (r) => r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Database is busy' }) }));
+await page.selectOption('select[aria-label="Sort by"]', { index: 1 });
+await page.waitForTimeout(1500);
+const s = await page.evaluate(() => ({ spin: Boolean(document.querySelector('.library-results [role="status"], .library-results .spinner-wrap')), toast: document.querySelector('.toasts')?.textContent || '', cards: document.querySelectorAll('.library-results a.card').length }));
+check('a failed filter request takes the spinner down', !s.spin, JSON.stringify(s));
+check('and says what went wrong', /busy|try again/i.test(s.toast), s.toast);
+check('the titles already shown stay', s.cards > 0, String(s.cards));
+await browser.close();
+process.exit(failed() ? 1 : 0);

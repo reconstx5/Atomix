@@ -41,7 +41,7 @@ body[data-layout="orbit"] { --gutter: calc(96 * var(--px)); --header-h: 0px; }
   }
   body[data-layout="orbit"][data-view="page"] main::-webkit-scrollbar { display: none; }
   /* The crisp artwork fills the screen, under the page. */
-  body[data-layout="orbit"][data-view="page"] .backdrop { inset: 0; }
+  body[data-layout="orbit"][data-view="page"] :is(.backdrop, .scrim) { inset: 0; }
   /* Nothing shows round the page any more; the environment stays for the sign-in and profile screens. */
   html[data-layout="orbit"] body[data-view="page"]:not(:has(.music-header, .nowplaying-view)) .environment { display: none; }
   /* Rows slide under the pill to the screen's edge rather than being chopped mid-pill; their first card still sits
@@ -97,7 +97,7 @@ body[data-layout="orbit"] :is(.orbit-list, .orbit-pinned) > li { flex: none; }
 /* More is the phone dock's: the rail lists everything already. */
 body[data-layout="orbit"] .orbit-more { display: none; }
 /* A button dressed as the other entries: no specificity, so the theme's .nav-link hover, focus and current-page looks win. */
-:where(body[data-layout="orbit"] .orbit-more-btn) { width: 100%; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+:where(body[data-layout="orbit"] .orbit-more-btn, body[data-layout="orbit"] .orbit-more-libs) { width: 100%; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 /* The More panel: one row per entry, names wrap rather than widen the screen. */
 body[data-layout="orbit"] .dialog:has(.orbit-more-list) { max-width: calc(100vw - 24px); }
 body[data-layout="orbit"] .orbit-more-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
@@ -142,7 +142,7 @@ body[data-layout="orbit"] .orbit-profile .avatar { width: max(32px, calc(40 * va
   body[data-layout="orbit"] { --gutter: 20px; }
   body[data-layout="orbit"].signed-in main { padding-bottom: calc(110px + env(safe-area-inset-bottom)); }
   body[data-layout="orbit"][data-view="page"] .view { padding-top: calc(72px + env(safe-area-inset-top)); }
-  body[data-layout="orbit"] .backdrop { inset: 0 0 auto 0; height: 64vh; }
+  body[data-layout="orbit"] :is(.backdrop, .scrim) { inset: 0 0 auto 0; height: 64vh; }
   html[data-layout="orbit"] .environment canvas { display: none; }
   body[data-layout="orbit"] .brand, body[data-layout="orbit"] .app-header::before { display: none; }
   body[data-layout="orbit"] .orbit-menu {
@@ -254,6 +254,13 @@ body[data-layout="orbit"] .episode-about .btn { flex: none; }
 body[data-layout="orbit"] .tracks { max-width: calc(1080 * var(--px)); }
 /* Music pages: the window shows the cover softly (the environment through a light shade), not a sharp copy. */
 body[data-layout="orbit"]:has(.music-header) .backdrop img { opacity: 0 !important; }
+body[data-layout="orbit"]:has(.music-header) .scrim { display: none; }
+/* A5: Orbit's words are TV-sized and reach about half the screen across: the run from the left takes the width. On
+   phones and portrait screens the artwork is the top 64vh, under the words' upper part: the runs cover that box. */
+body[data-layout="orbit"] .scrim { --scrim-run-x: 100%; }
+@media not all and (min-width: 1000px) and (orientation: landscape) {
+  body[data-layout="orbit"] .scrim { --scrim-run-y: 100%; --scrim-edge-x: 100%; }
+}
 @media not all and (min-width: 1000px) and (orientation: landscape) {
   body[data-layout="orbit"] .music-header .detail-inner { flex-direction: column; align-items: flex-start; gap: 20px; }
   body[data-layout="orbit"] .music-header .detail-poster { width: 200px; }
@@ -365,7 +372,7 @@ html.has-mini body[data-layout="orbit"] .cast-pill { bottom: calc(36 * var(--px)
 body[data-layout="orbit"] .cast-pill-art { width: max(40px, calc(60 * var(--px))); height: max(40px, calc(60 * var(--px))); }
 body[data-layout="orbit"] .cast-pill-label { font-size: var(--t-caption); }
 body[data-layout="orbit"] .cast-pill-title { font-size: max(13px, calc(18 * var(--px))); }
-body[data-layout="orbit"] .cast-pill-open:focus-visible { outline: none; box-shadow: var(--ring); }
+body[data-layout="orbit"] .cast-pill-open:focus-visible { box-shadow: var(--ring); }
 html.has-cast body[data-layout="orbit"] :is(.view:not(.home-view), .home-rows) { padding-bottom: calc(150 * var(--px)); }
 body[data-layout="orbit"] .cast-device { min-height: max(48px, calc(72 * var(--px))); padding: 0 calc(20 * var(--px)); border-radius: calc(20 * var(--px)); font-size: var(--t-body); }
 body[data-layout="orbit"] .remote-main { grid-template-columns: calc(420 * var(--px)) minmax(0, 1fr); gap: calc(64 * var(--px)); padding-block: calc(40 * var(--px)); }
@@ -540,4 +547,11 @@ body[data-layout="orbit"] .progress.is-show-line { display: none; }
 body[data-layout="orbit"] .library-view.has-spot .progress.is-show-line { display: block; }
 @media (min-width: 1000px) and (orientation: landscape) {
   body[data-layout="orbit"] .library-view.has-spot.spot-hidden .library-scroll { padding-top: calc(128 * var(--px)); }
+}
+
+/* TV type floor (visual refresh A3): small text that sizes itself (em or px) takes the caption token at TV widths, so nothing is under 20 px at 1080p. */
+@media (min-width: 1600px) and (orientation: landscape) {
+  body[data-layout="orbit"] :is(.badge, .media-flags li, .live-badge, .card-live, .live-initials, .live-card-num, .live-card-name, .live-card-next) { font-size: var(--t-caption); }
+  body[data-layout="orbit"] .page-head .count { font-weight: 500; }
+  body[data-layout="orbit"] .orbit-profile .avatar { font-size: var(--t-caption); }
 }

@@ -31,7 +31,7 @@ function seasonDb(files, durations = {}) {
 
 test('intro and credits chapters are recognised by name', () => {
   const ch = (start, end, title) => ({ start_time: String(start), end_time: String(end), tags: title == null ? {} : { title } });
-  assert.deepEqual(markersFromChapters([ch(0, 5, 'Recap'), ch(5, 20, ' OPENING '), ch(20, 50, 'Chapter 2'), ch(50, 60, 'End Credits')]), { intro: { start: 5, end: 20 }, credits: { start: 50, end: 60 } });
+  assert.deepEqual(markersFromChapters([ch(0, 5, 'Recap'), ch(5, 20, ' OPENING '), ch(20, 50, 'Chapter 2'), ch(50, 60, 'End Credits')]), { intro: { start: 5, end: 20 }, credits: { start: 50, end: 60 }, recap: { start: 0, end: 5 } }); // v0.28: recaps too
   assert.deepEqual(markersFromChapters([ch(0, 30, 'Intro Song'), ch(30, 30, 'Intro'), ch(40, 60, null)]), { intro: null, credits: null }, 'near misses and empty chapters are ignored');
   assert.deepEqual(markersFromChapters(undefined), { intro: null, credits: null });
 });
@@ -72,7 +72,7 @@ test('a real season: shared theme, chapters, and a clip too short to check', { s
   near(m1.end, 26, 'E01 end');
   near(m2.start, 17, 'E02 start');
   near(m2.end, 37, 'E02 end');
-  assert.deepEqual(store.markers(ids.e3), { intro: { start: 5, end: 20, source: 'chapter' }, credits: { start: 80, end: 100, source: 'chapter' } });
+  assert.deepEqual(store.markers(ids.e3), { intro: { start: 5, end: 20, source: 'chapter' }, credits: { start: 80, end: 100, source: 'chapter' }, recap: { start: 0, end: 5, source: 'chapter' } }); // v0.28: its Recap chapter too
   assert.equal(store.markers(ids.e4).intro, null);
   assert.deepEqual(['e1', 'e2', 'e3', 'e4'].map((k) => store.job(ids[k], 'intros').status), ['done', 'done', 'done', 'none']);
   db.close();

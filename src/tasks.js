@@ -86,7 +86,7 @@ export class TaskRunner {
     return {
       running: c ? { job: c.job, itemId: c.itemId, title: c.title, startedAt: c.startedAt } : null,
       paused,
-      queued: this.store.pendingCounts(),
+      queued: { ...this.store.pendingCounts(), ...(!s.previewsEnabled || s.cardClips === false ? { clips: 0 } : {}) }, // not waiting for what is switched off (clips need previews on)
       failed: this.store.failed(20),
     };
   }
@@ -100,7 +100,7 @@ export class TaskRunner {
       return;
     }
     const keep = this.store.previewIds();
-    const working = this.current?.job === 'previews' ? this.current.itemId : null;
+    const working = ['previews', 'clip'].includes(this.current?.job) ? this.current.itemId : null;
     for (const e of entries) {
       if (!e.isDirectory()) continue;
       const id = Number(e.name.replace(/\.tmp$/, ''));
@@ -120,7 +120,7 @@ export class TaskRunner {
     if (!this.tools()?.ffmpeg?.available) return true;
     if (s.previewsEnabled || s.introDetection) return false;
     const q = this.store.pendingCounts();
-    return !q.lyrics && !q.subtitles;
+    return !q.lyrics && !q.subtitles && !q.loudness;
   }
 
   next() {
@@ -139,12 +139,20 @@ export class TaskRunner {
         const ex = this.store.nextThumbItem(only);
         if (ex) return { key: `thumb:${ex.id}:${ex.size}:${ex.mtime}`, job: 'thumb', item: ex, itemId: ex.id, title: this.store.itemLabel(ex) };
       }
+      // v0.28 card motion: a 5 s silent clip for cards (after the previews, intro checks and thumbnails).
+      if (s.previewsEnabled && s.cardClips !== false) {
+        const item = this.store.nextClipItem(only);
+        if (item) return { key: `clip:${item.id}:${item.size}:${item.mtime}`, job: 'clip', item, itemId: item.id, title: this.store.itemLabel(item) };
+      }
       // Embedded lyrics for songs probed before 0.10: one ffprobe each, once.
       const song = this.store.nextLyricsItem(only);
       if (song) return { key: `lyrics:${song.id}`, job: 'lyrics', item: song, itemId: song.id, title: this.store.itemLabel(song) };
       // Embedded text subtitles, extracted once so the player doesn't demux the whole file on demand.
       const sub = this.store.nextSubtitleItem(only);
       if (sub) return { key: `subtitles:${sub.id}`, job: 'subtitles', item: sub, itemId: sub.id, title: this.store.itemLabel(sub) };
+      // v0.28: each song's loudness, measured once, for even volume.
+      const song2 = this.store.nextLoudnessItem(only);
+      if (song2) return { key: `loudness:${song2.id}`, job: 'loudness', item: song2, itemId: song2.id, title: this.store.itemLabel(song2) };
       return null;
     };
     if (this.priority.size) {
@@ -219,15 +227,17 @@ export class TaskRunner {
     try {
       if (task.job === 'previews') await this.jobs.previews(task.item, ctx);
       else if (task.job === 'thumb') await this.jobs.thumb(task.item, ctx);
+      else if (task.job === 'clip') await this.jobs.clip(task.item, ctx);
       else if (task.job === 'lyrics') await this.jobs.lyrics(task.item, ctx);
       else if (task.job === 'subtitles') await this.jobs.subtitles(task.item, ctx);
+      else if (task.job === 'loudness') await this.jobs.loudness(task.item, ctx);
       else await this.jobs.intros(task.seasonId, ctx);
       this.lastDone = task.key;
     } catch (err) {
       this.lastDone = null;
       if (controller.signal.aborted) log.info(`Stopped "${task.title}" for now; it will be redone later.`);
       else {
-        log.warn(`${{ previews: 'Previews', thumb: 'Thumbnail', intros: 'Intro check', lyrics: 'Lyrics check', subtitles: 'Subtitle check' }[task.job]} for "${task.title}" failed: ${err.message}`);
+        log.warn(`${{ previews: 'Previews', thumb: 'Thumbnail', clip: 'Preview clip', intros: 'Intro check', lyrics: 'Lyrics check', subtitles: 'Subtitle check', loudness: 'Volume check' }[task.job]} for "${task.title}" failed: ${err.message}`);
         this.recordFailure(task, err);
       }
     } finally {
@@ -236,8 +246,8 @@ export class TaskRunner {
   }
 
   recordFailure(task, err) {
-    if (task.job === 'lyrics' || task.job === 'subtitles') return; // the job marks the item checked itself
-    if (task.job === 'previews' || task.job === 'thumb') this.store.saveJob(task.item, task.job, { status: 'failed', error: err.message });
+    if (task.job === 'lyrics' || task.job === 'subtitles' || task.job === 'loudness') return; // the job marks the item checked itself
+    if (task.job === 'previews' || task.job === 'thumb' || task.job === 'clip') this.store.saveJob(task.item, task.job, { status: 'failed', error: err.message });
     else for (const ep of this.store.pendingIntroEpisodes(task.seasonId)) this.store.saveJob(ep, 'intros', { status: 'failed', error: err.message });
   }
 }

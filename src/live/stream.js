@@ -139,11 +139,6 @@ export class LiveStreams {
     return { ok: true, release: this.hold(key) };
   }
 
-  /**
-   * Tune a channel for a recording: its tuner (shared with whoever watches it; started if needed), or — for a
-   * channel the tuner can't buffer — the provider's address for a recorder of its own.
-   * @returns {Promise<{ tuner } | { direct: { url, headers, media } }>}
-   */
   /** Each restart of a tuner asks the source for the channel's address again (a provider's addresses can expire) —
    *  only ever a network address, as at a start. */
   resolverFor(source, channel) {
@@ -153,16 +148,24 @@ export class LiveStreams {
     };
   }
 
-  /** The source's address for a channel; one that doesn't answer in time is the channel not answering (502). */
-  async addressOf(source, channel) {
+  /**
+   * The source's address for a channel; one that doesn't answer in time is the channel not answering (502).
+   * `system` (v0.28) asks a multi-system channel for that key system's entry.
+   */
+  async addressOf(source, channel, { system } = {}) {
     try {
-      return await withTimeout(source.stream(channel.key, { log: this.log }), this.resolveTimeoutMs);
+      return await withTimeout(source.stream(channel.key, system ? { log: this.log, system } : { log: this.log }), this.resolveTimeoutMs);
     } catch (err) {
       if (err?.code === 'RESOLVE_TIMEOUT') throw new HttpError(502, "This channel isn't answering right now (the provider closed the connection)");
       throw err;
     }
   }
 
+  /**
+   * Tune a channel for a recording: its tuner (shared with whoever watches it; started if needed), or — for a
+   * channel the tuner can't buffer — the provider's address for a recorder of its own.
+   * @returns {Promise<{ tuner } | { direct: { url, headers, media } }>}
+   */
   async tuneForRecording(source, channel, holder) {
     const key = `${source.key}\0${channel.key}`;
     const tuned = this.tuners?.get(key);

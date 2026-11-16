@@ -30,7 +30,15 @@ export function renderOrbitNav(nav, o) {
         'ul',
         { class: 'orbit-list', role: 'list' },
         entry('home', '#/', 'Home', 'home', 'orbit-dock'),
-        o.libraries.map((l, i) => entry(`lib-${l.id}`, `#/library/${l.id}`, l.name, orbitLibraryIcon(l), i < 3 ? 'orbit-dock' : null)),
+        (o.menuLibraries || o.libraries).map((l, i) => {
+          const li = entry(`lib-${l.id}`, `#/library/${l.id}`, l.name, orbitLibraryIcon(l), i < 3 ? 'orbit-dock' : null);
+          if (o.libraryMenu) li.querySelector('a').addEventListener('contextmenu', (e) => { e.preventDefault(); o.libraryMenu(l); });
+          return li;
+        }),
+        // v0.29: libraries the profile hasn't pinned (phones reach them from the dock's More panel too).
+        o.moreLibraries?.length
+          ? h('li', {}, h('button', { type: 'button', class: 'nav-link orbit-more-libs', dataset: { nav: 'more-libs' }, 'aria-haspopup': 'dialog', onClick: () => openMore(o.moreLibraries.map((l) => ({ nav: `lib-${l.id}`, href: `#/library/${l.id}`, label: l.name, icon: orbitLibraryIcon(l) }))) }, icon('more', { size: 26 }), h('span', { class: 'nav-label' }, 'More libraries')))
+          : null,
         entry('lists', '#/lists', 'Lists', 'list'),
         o.live ? entry('live', '#/live', 'Live TV', 'mast') : null,
         o.downloads ? entry('downloads', '#/downloads', 'Downloads', 'download') : null,
@@ -63,7 +71,7 @@ export function renderOrbitNav(nav, o) {
 /** Everything the phone's More panel lists: every library, Lists, Live TV, Downloads, Add-ons and Settings. */
 function moreEntries(o) {
   return [
-    ...o.libraries.map((l) => ({ nav: `lib-${l.id}`, href: `#/library/${l.id}`, label: l.name, icon: orbitLibraryIcon(l) })),
+    ...[...(o.menuLibraries || o.libraries), ...(o.moreLibraries || [])].map((l) => ({ nav: `lib-${l.id}`, href: `#/library/${l.id}`, label: l.name, icon: orbitLibraryIcon(l) })),
     { nav: 'lists', href: '#/lists', label: 'Lists', icon: 'list' },
     o.live ? { nav: 'live', href: '#/live', label: 'Live TV', icon: 'mast' } : null,
     o.downloads ? { nav: 'downloads', href: '#/downloads', label: 'Downloads', icon: 'download' } : null,

@@ -3,7 +3,7 @@ import { sizedAttrs } from '../sized.js';
 import { api, qs } from '../api.js';
 import { openCastPicker } from '../cast.js';
 import { h, icon, clear, episodeLabel, formatRuntime, formatBytes, formatClock } from '../dom.js';
-import { art, metaLine, button, toast, openDialog, landscapeCard, spinner, grid, mediaFlags, endsAt, timeLeft, field, moreButton, row, episodeCaption, cardState, TOASTS } from '../components.js';
+import { art, metaLine, button, toast, openDialog, landscapeCard, spinner, grid, mediaChips, endsAt, timeLeft, field, moreButton, row, episodeCaption, cardState, TOASTS } from '../components.js';
 import { watchlistButton, addToPlaylistItems } from '../lists.js';
 import { ratingControl, openRating, canRate } from '../rating.js';
 import { parseClock } from '../markers.js';
@@ -13,17 +13,23 @@ import { setBackdrop, followFocus } from '../backdrop.js';
 import { openEditDetails } from './edit-details.js';
 import { downloadButton, downloadSheetItem } from '../offline/ui.js';
 
-/** The title as its clear logo when there is one (the text stays for screen readers and as a fallback). */
+/**
+ * The title as its clear logo when there is one (v0.29 B4: in a fixed-height logo box, so nothing moves when it
+ * arrives). The typed title shows in the box until the logo has loaded, and stays if it fails; it stays for screen
+ * readers either way.
+ */
 function titleArt(logoUrl, text) {
   const heading = h('h1', { class: 'detail-title' }, text);
   if (!logoUrl) return heading;
-  heading.classList.add('visually-hidden');
-  const img = h('img', { class: 'detail-logo', src: sizedAttrs(logoUrl, 'logo', { orbit: document.body?.dataset.layout === 'orbit', width: Math.min(600, window.innerWidth * 0.8) * (window.devicePixelRatio || 1) }).src, alt: '', decoding: 'async' });
-  img.addEventListener('error', () => {
-    img.remove();
-    heading.classList.remove('visually-hidden');
+  const img = h('img', { class: 'detail-logo', hidden: true, src: sizedAttrs(logoUrl, 'logo', { orbit: document.body?.dataset.layout === 'orbit', width: Math.min(600, window.innerWidth * 0.8) * (window.devicePixelRatio || 1) }).src, alt: '', decoding: 'async' });
+  const box = h('div', { class: 'logo-box' }, img, heading);
+  img.addEventListener('load', () => {
+    img.hidden = false;
+    heading.classList.add('visually-hidden');
+    box.classList.add('has-logo');
   });
-  return [img, heading];
+  img.addEventListener('error', () => img.remove());
+  return box;
 }
 
 function resumeInfo(item) {
@@ -489,12 +495,16 @@ export async function render(el, params, query) {
   const meta = metaLine(item);
   const ends = item.kind === 'movie' || item.kind === 'episode' ? endsAt(timeLeft(item)) : null;
   if (ends) meta.append(h('span', { class: 'ends-at' }, ends));
-  const flags = mediaFlags(item);
+  const chips = mediaChips(item);
+  // The first-screen blocks that rise in, in turn, after a card opens the page (data-rise: their order).
+  meta.dataset.rise = '0';
+  const overview = item.overview ? h('p', { class: 'overview', dataset: { rise: '1' } }, item.overview) : h('p', { class: 'overview muted', dataset: { rise: '1' } }, 'No description yet.');
 
   el.append(
     h(
       'header',
-      { class: 'detail-header' },
+      // data-art: what a card opening this page travels into (transitions.js): the backdrop, else the poster.
+      { class: 'detail-header', dataset: { art: backdrop ? 'backdrop' : 'poster' } },
       h(
         'div',
         { class: 'detail-inner' },
@@ -505,12 +515,12 @@ export async function render(el, params, query) {
           eyebrow,
           titleArt(item.kind === 'episode' ? null : item.logo, item.title),
           meta,
-          flags.length ? h('ul', { class: 'media-flags', 'aria-label': 'Media' }, flags.map((f) => h('li', {}, f))) : null,
+          chips,
           item.genres?.length ? h('ul', { class: 'genres', role: 'list' }, item.genres.map((g) => h('li', { class: 'chip' }, g))) : null,
           item.tagline ? h('p', { class: 'tagline' }, item.tagline) : null,
-          item.overview ? h('p', { class: 'overview' }, item.overview) : h('p', { class: 'overview muted' }, 'No description yet.'),
+          overview,
           r?.left ? h('p', { class: 'muted small' }, `${formatRuntime(r.left / 60)} left`) : null,
-          h('div', { class: 'actions' }, actions),
+          h('div', { class: 'actions', dataset: { rise: '2' } }, actions),
           isOrbit() && canRate(item) ? ratingControl(item) : null,
           data.markers !== undefined ? introLine(item, data.markers, { edit: !isOrbit() }) : null,
         ),
@@ -591,4 +601,5 @@ export async function render(el, params, query) {
     body.append(part);
   }
   if (data.similar?.length) body.append(row({ id: 'similar', title: 'More like this', items: data.similar, style: 'poster' }));
+  body.firstElementChild?.setAttribute('data-rise', '3'); // the first row (or the episodes, or the details)
 }

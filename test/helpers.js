@@ -96,7 +96,8 @@ export async function startAtomix(env = {}, overrides = {}) {
   const dataDir = path.join(tempDir(), 'data');
   // Each test file runs in its own process, so it's fine to leave these set
   // (plugins enabled later in a test read them too).
-  for (const [k, v] of Object.entries({ ATOMIX_DATA_DIR: dataDir, ...env })) process.env[k] = v;
+  // TheIntroDB (v0.28) is never asked from tests: a closed local port answers at once.
+  for (const [k, v] of Object.entries({ ATOMIX_DATA_DIR: dataDir, ATOMIX_INTRODB_BASE: 'http://127.0.0.1:9/v4', ...env })) process.env[k] = v;
   const { createApp } = await import('../src/app.js');
   const app = await createApp({ port: 0, host: '127.0.0.1', skipStartupScan: true, logLevel: 'error', ...overrides });
   const addr = await app.start();

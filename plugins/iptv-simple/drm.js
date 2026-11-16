@@ -3,10 +3,10 @@
 // given inline. Pure, so it's tested on its own. Nothing here decrypts anything: the browser's own key system does.
 
 // v0.27: FairPlay (com.apple.fps) is an Atomix extension of the same properties, with an HLS manifest; Safari plays it.
-const SYSTEMS = { 'com.widevine.alpha': 'widevine', widevine: 'widevine', 'org.w3.clearkey': 'clearkey', clearkey: 'clearkey', 'com.apple.fps': 'fairplay', fairplay: 'fairplay' };
+const SYSTEMS = { 'com.widevine.alpha': 'widevine', widevine: 'widevine', 'org.w3.clearkey': 'clearkey', clearkey: 'clearkey', 'com.apple.fps': 'fairplay', 'com.apple.fps.1_0': 'fairplay', fairplay: 'fairplay', 'com.microsoft.playready': 'playready', 'com.microsoft.playready.recommendation': 'playready', playready: 'playready' };
 const HEX32 = /^[0-9a-f]{32}$/;
 
-/** 'com.widevine.alpha' → 'widevine'; ClearKey → 'clearkey'; 'com.apple.fps' → 'fairplay'; anything else (PlayReady, …) → null. */
+/** 'com.widevine.alpha' → 'widevine'; ClearKey → 'clearkey'; 'com.apple.fps' → 'fairplay'; PlayReady → 'playready'; anything else → null. */
 export function systemName(value) {
   return SYSTEMS[String(value || '').trim().toLowerCase()] || null;
 }
@@ -93,4 +93,47 @@ export function parseDrmLegacy(text) {
   if (!system) return null;
   const licence = parseLicenceKey(system, rest.join('|'));
   return licence ? { system, licence } : null;
+}
+
+const UNWRAP = { base64: 'B', json: 'J', 'json,base64': 'JB', 'base64,json': 'BJ' };
+const isHttp = (u) => /^https?:\/\/[^/]/i.test(String(u || '').trim());
+
+/**
+ * Kodi's inputstream.adaptive.drm value (a JSON object, one entry per key system, in order of preference) →
+ * [{ system, licence, serverCertificate?, initData?, url? }]. Systems Atomix doesn't play and entries without a usable
+ * licence are left out; bad JSON gives [].
+ */
+export function parseDrmJson(text) {
+  let json;
+  try {
+    json = JSON.parse(String(text || ''));
+  } catch {
+    return [];
+  }
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return [];
+  const out = [];
+  for (const [name, entry] of Object.entries(json)) {
+    const system = systemName(name);
+    if (!system || out.some((o) => o.system === system) || !entry || typeof entry !== 'object') continue;
+    const lic = entry.license && typeof entry.license === 'object' ? entry.license : {};
+    let licence = null;
+    if (system === 'clearkey' && lic.keyids && typeof lic.keyids === 'object') licence = inlineKeys(JSON.stringify(lic.keyids));
+    if (!licence && isHttp(lic.server_url)) {
+      const unwrap = UNWRAP[String(lic.unwrapper || '').replace(/\s/g, '').toLowerCase()];
+      const path = unwrap && unwrap !== 'B' ? String(lic.unwrapper_params?.path_data || '') : '';
+      licence = {
+        url: String(lic.server_url).trim(),
+        headers: parseHeaderList(lic.req_headers),
+        body: bodyOf(lic.req_data),
+        response: responseOf(unwrap ? unwrap + path : ''),
+      };
+    }
+    if (!licence) continue;
+    const item = { system, licence };
+    if (lic.server_certificate) item.serverCertificate = String(lic.server_certificate);
+    if (entry.init_data) item.initData = String(entry.init_data);
+    if (isHttp(entry.atomix_url)) item.url = String(entry.atomix_url).trim();
+    out.push(item);
+  }
+  return out;
 }

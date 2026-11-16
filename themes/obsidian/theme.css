@@ -1,15 +1,9 @@
 /* Obsidian — pure black background for OLED screens. */
 :root {
+  --focus-ring: #ffffff; /* A4: a white ring with a dark halo (tokens.css) on every dark theme */
   color-scheme: dark;
-  --bg: #000000;
-  --bg-2: #070708;
-  --surface: #111114;
-  --surface-2: #1c1c22;
   --border: rgba(255, 255, 255, 0.09);
-  --text: #f4f4f6;
-  --text-dim: #a1a1ad;
-  --accent: #a78bfa;
-  --accent-text: #120a24;
+  --accent-text: #000000; /* black or white, whichever reads on the accent (APCA Lc >= 60) */
   --danger: #ff6680;
   --success: #4ade80;
   --radius: 14px;
@@ -19,4 +13,63 @@
   --shadow: 0 12px 30px rgba(0, 0, 0, 0.8);
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-display: var(--font);
+  --accent: var(--a-10); /* one step up from a-9 (today's accent): black ink on it reaches Lc 60 */
+  --accent-solid: var(--a-10);
+  --accent-hover: var(--a-11);
+}
+/* Ramps (devtools/ramp.mjs): --n-* neutrals, --a-* accent. Hex for every browser; the same colours in oklch() where
+   it is understood. --bg, --bg-2, --surface, --surface-2, --text and --accent come from these (public/css/tokens.css). */
+:root {
+  --n-1: #000000;
+  --n-2: #070708;
+  --n-3: #111114;
+  --n-4: #1c1c22;
+  --n-5: #2f2f36;
+  --n-6: #44444b;
+  --n-7: #5a5a61;
+  --n-8: #717179;
+  --n-9: #888891;
+  --n-10: #a1a1aa;
+  --n-11: #babac3;
+  --n-12: #f4f4f6;
+  --a-1: #000001;
+  --a-2: #05020f;
+  --a-3: #140d27;
+  --a-4: #261d40;
+  --a-5: #3a2e5c;
+  --a-6: #4f4179;
+  --a-7: #645497;
+  --a-8: #7b68b6;
+  --a-9: #a78bfa;
+  --a-10: #b8a3ff;
+  --a-11: #c7b8ff;
+  --a-12: #efecff;
+}
+@supports (color: oklch(0% 0 0)) {
+  :root {
+    --n-1: oklch(0.00% 0.0000 0);
+    --n-2: oklch(12.91% 0.0026 286.03);
+    --n-3: oklch(17.90% 0.0061 285.77);
+    --n-4: oklch(22.91% 0.0115 285.46);
+    --n-5: oklch(30.80% 0.0125 285.65);
+    --n-6: oklch(38.93% 0.0117 285.84);
+    --n-7: oklch(47.01% 0.0112 285.96);
+    --n-8: oklch(55.13% 0.0123 285.99);
+    --n-9: oklch(62.97% 0.0133 286.01);
+    --n-10: oklch(71.18% 0.0129 286.07);
+    --n-11: oklch(79.17% 0.0126 286.11);
+    --n-12: oklch(96.77% 0.0027 286.35);
+    --a-1: oklch(3.04% 0.0210 264.05);
+    --a-2: oklch(10.72% 0.0371 295.13);
+    --a-3: oklch(18.48% 0.0514 293.11);
+    --a-4: oklch(26.09% 0.0641 293.29);
+    --a-5: oklch(33.80% 0.0792 293.74);
+    --a-6: oklch(41.66% 0.0918 293.52);
+    --a-7: oklch(49.22% 0.1054 293.11);
+    --a-8: oklch(56.93% 0.1186 293.48);
+    --a-9: oklch(70.90% 0.1592 293.54);
+    --a-10: oklch(76.89% 0.1306 293.58);
+    --a-11: oklch(82.01% 0.0997 293.78);
+    --a-12: oklch(95.10% 0.0256 293.16);
+  }
 }

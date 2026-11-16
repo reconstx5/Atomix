@@ -5,7 +5,7 @@
 import { parseMpd } from './mpd.js';
 import { segmentsAt, liveEdge, clockOffset } from './timeline.js';
 import { pickRepresentation } from './abr.js';
-import { setupKeys, WONT_PLAY, NO_WIDEVINE, NO_WIDEVINE_IPHONE, NO_FAIRPLAY, REFUSED, NOT_ANSWERING, UNREADABLE, EXPIRED, NEED_SECURE, mseType } from './eme.js';
+import { setupKeys, WONT_PLAY, NO_WIDEVINE, NO_WIDEVINE_IPHONE, NO_FAIRPLAY, REFUSED, NOT_ANSWERING, UNREADABLE, EXPIRED, NEED_SECURE, NO_COMMON_SYSTEM, NO_PROTECTION_IOS, mseType } from './eme.js';
 
 export { mseType, UNREADABLE };
 const AHEAD = 30; // seconds buffered ahead at most
@@ -34,7 +34,7 @@ const EPS = 1e-3;
 const START_MS = 20_000; // nothing decodable this long after starting: say why instead of spinning
 const STARVED_MS = 30_000; // playing, out of data, and nothing new for this long: the channel has stopped
 const NO_KEY = "The playlist doesn't have the key for this channel";
-const SENTENCES = new Set([UNREADABLE, WONT_PLAY, NO_WIDEVINE, REFUSED, NOT_ANSWERING, NO_KEY, EXPIRED, NEED_SECURE, LOWER_QUALITY, NO_WIDEVINE_IPHONE, NO_FAIRPLAY]);
+const SENTENCES = new Set([UNREADABLE, WONT_PLAY, NO_WIDEVINE, REFUSED, NOT_ANSWERING, NO_KEY, EXPIRED, NEED_SECURE, LOWER_QUALITY, NO_WIDEVINE_IPHONE, NO_FAIRPLAY, NO_COMMON_SYSTEM, NO_PROTECTION_IOS]);
 
 /** What the person is told for an error: one of the spec's sentences, never a browser's own message. */
 export function sentenceOf(err) {

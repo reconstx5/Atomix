@@ -7,6 +7,8 @@ import { sendFile } from '../http/static.js';
 import { QUALITIES } from '../stream/playback.js';
 import { parseCaps } from './playback.js';
 import { KEY_SYSTEMS } from '../live/drm.js';
+import { withLink } from '../cast/tokens.js';
+import { providerLink, isHttpsUrl } from '../live/applinks.js';
 
 const DAY = 24 * 3600_000;
 const SIX_HOURS = 6 * 3600_000;
@@ -72,7 +74,17 @@ export function registerLiveRoutes(r, core) {
       recording: marks?.get(`${p.channelId}\0${p.start}`) || null, // 'scheduled' | 'recording' | null
     };
 
-  const shapeChannel = (c, { favourites, nn, marks = null } = {}) => ({
+  /** Provider-app links are for grown-ups only: a Kids profile (and any caller that doesn't say) gets none. */
+  const showLinks = (ctx) => !ctx.viewer?.kids && !ctx.profile?.kids;
+
+  const linkOf = (c, links) => {
+    const l = links ? providerLink(c) : null;
+    return { appUrl: l?.url || null, appName: l?.name || null };
+  };
+
+  // admin (v0.28): an admin's own view also says whether the link is the admin's setting (the "Provider app link…"
+  // dialog saves only what the admin changed, never the playlist's or built-in link as an override).
+  const shapeChannel = (c, { favourites, nn, marks = null, links = false, admin = false } = {}) => ({
     id: c.id,
     number: c.number,
     name: c.name,
@@ -81,7 +93,9 @@ export function registerLiveRoutes(r, core) {
     radio: c.radio,
     catchup: Boolean(c.catchup) && !c.drm, // encrypted channels play live only
     catchupDays: c.drm ? 0 : Number(c.catchup?.days) || 0,
-    drm: c.drm || null, // 'widevine' | 'clearkey' | 'fairplay': played in the browser, not cast
+    drm: c.drmSystems?.length ? c.drmSystems : null, // ['widevine', 'playready', ...] in the playlist's order: played in the browser, not cast
+    ...linkOf(c, links),
+    ...(admin ? { appLinkAdmin: Boolean(c.adminAppUrl) } : {}),
     favourite: favourites ? favourites.has(c.id) : false,
     ...(nn ? { now: shapeProgramme(nn.now, marks), next: shapeProgramme(nn.next, marks) } : {}),
   });
@@ -134,7 +148,8 @@ export function registerLiveRoutes(r, core) {
     const favourites = new Set(store().favourites(ctx.profile.id));
     const nn = store().nowNext(list.map((c) => c.id), Date.now());
     const marks = recordingMarks(ctx);
-    return list.map((c) => shapeChannel(c, { favourites, nn: nn.get(c.id), marks }));
+    const admin = isAdmin(ctx) && showLinks(ctx);
+    return list.map((c) => shapeChannel(c, { favourites, nn: nn.get(c.id), marks, links: showLinks(ctx), admin }));
   });
 
   r.get('/api/live/guide', (ctx) => {
@@ -154,7 +169,7 @@ export function registerLiveRoutes(r, core) {
     const programmes = {};
     const marks = recordingMarks(ctx);
     for (const c of list) programmes[c.id] = (g.get(c.id) || []).map((p) => shapeProgramme(p, marks));
-    return { from, to, channels: list.map((c) => shapeChannel(c, { favourites })), programmes };
+    return { from, to, channels: list.map((c) => shapeChannel(c, { favourites, links: showLinks(ctx) })), programmes };
   });
 
   r.get('/api/live/programmes/:id', (ctx) => {
@@ -179,7 +194,7 @@ export function registerLiveRoutes(r, core) {
       // The rule the airing came from; else the first rule this programme matches.
       ruleId = (airing?.ruleId && core.live.recordings.rule(airing.ruleId)?.id) || (core.live.recordings.rules().find((r) => r.source === channel.source && (!r.channelKey || r.channelKey === channel.key) && norm(r.title) === norm(p.title))?.id ?? null);
     }
-    return { ...shapeProgramme(p, recordingMarks(ctx)), channel: shapeChannel(channel), ...abilities(channel, p), canRecord, recordingId, ruleId };
+    return { ...shapeProgramme(p, recordingMarks(ctx)), channel: shapeChannel(channel, { links: showLinks(ctx) }), ...abilities(channel, p), canRecord, recordingId, ruleId };
   });
 
   r.get('/api/live/search', (ctx) => {
@@ -192,7 +207,7 @@ export function registerLiveRoutes(r, core) {
     const programmes = store()
       .searchProgrammes(q, { channelIds: list.map((c) => c.id), from: now, to: now + DAY, limit: 20 })
       .map((p) => ({ ...shapeProgramme(p, marks), channel: { id: p.channelId, name: byId.get(p.channelId)?.name, number: byId.get(p.channelId)?.number } }));
-    return { channels: list.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 20).map((c) => shapeChannel(c)), programmes };
+    return { channels: list.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 20).map((c) => shapeChannel(c, { links: showLinks(ctx) })), programmes };
   });
 
   /**
@@ -224,6 +239,23 @@ export function registerLiveRoutes(r, core) {
     const ok = await sendFile(ctx.req, ctx.res, file, { cacheControl: 'private, max-age=604800' });
     if (!ok) throw new HttpError(404, 'No image');
   }
+
+  // An admin's link to the provider's app for a channel; {} clears it (back to the playlist's or built-in link).
+  r.put(
+    '/api/live/channels/:id/app-link',
+    async (ctx) => {
+      const c = store().channel(ctx.params.id);
+      if (!c) throw new HttpError(404, 'This channel no longer exists.');
+      const b = (await ctx.body()) || {};
+      if (b.url == null || b.url === '') store().setAppLink(c.id, null);
+      else {
+        if (typeof b.url !== 'string' || !isHttpsUrl(b.url)) throw new HttpError(400, 'The app link must be an https:// address.');
+        store().setAppLink(c.id, { url: b.url, name: typeof b.name === 'string' ? b.name.trim().slice(0, 80) : '' });
+      }
+      return shapeChannel(store().channel(c.id), { links: true, admin: true });
+    },
+    admin,
+  );
 
   r.get('/api/live/channels/:id/logo', (ctx) => {
     const c = visibleChannel(ctx, ctx.params.id);
@@ -271,6 +303,8 @@ export function registerLiveRoutes(r, core) {
     if (!(q in QUALITIES)) throw new HttpError(400, 'Unknown quality');
     return q;
   };
+  // v0.28: a player that asks (Safari on iPhone may fetch without its cookie) gets a private link in the address.
+  const linked = (ctx, body, session, url) => (body.mediaLink ? withLink(url, core.cast.links.issue({ sessionId: session.id, userId: ctx.user.id, profileId: ctx.profile?.id ?? null })) : url);
   const sessionReply = (session, url, extra) => ({
     sessionId: session.id,
     mode: session.mode,
@@ -298,13 +332,13 @@ export function registerLiveRoutes(r, core) {
       behind: Math.max(0, Math.min(1800, Number(body.behind) || 0)),
     });
     const nn = store().nowNext([channel.id], Date.now()).get(channel.id);
-    const extra = { live: true, duration: null, start: 0, channel: shapeChannel(channel), programme: shapeProgramme(nn.now), next: shapeProgramme(nn.next) };
+    const extra = { live: true, duration: null, start: 0, channel: shapeChannel(channel, { links: showLinks(ctx) }), programme: shapeProgramme(nn.now), next: shapeProgramme(nn.next) };
     if (delivery === 'dash') {
       // The tuner's buffer, played by the browser itself: Atomix's own manifest and pieces (no provider address).
       const base = `/api/live/tuner/${session.id}`;
       return { sessionId: session.id, delivery: 'dash', mode: 'remux', manifest: `${base}/manifest.mpd`, timeUrl: `${base}/time`, rewind: true, quality: 'original', reasons: [], ...extra };
     }
-    return sessionReply(session, url, { ...extra, rewind: Boolean(session.live?.tunerKey), behind: session.behind || 0 });
+    return sessionReply(session, linked(ctx, body, session, url), { ...extra, rewind: Boolean(session.live?.tunerKey), behind: session.behind || 0 });
   });
 
   // ---- Watching through a tuner (v0.19): the 30-minute buffer, served to the viewer it belongs to ----
@@ -352,6 +386,7 @@ export function registerLiveRoutes(r, core) {
       replaces: body.replaces ? String(body.replaces) : null,
       isAdmin: isAdmin(ctx),
       clientIp: core.auth.clientIp(ctx.req),
+      keySystems: body.keySystems, // v0.28: what the browser has, best first (drm.js keeps known names only)
     });
     const nn = store().nowNext([channel.id], Date.now()).get(channel.id);
     const fairplay = s.system === 'fairplay'; // v0.27: HLS, and the certificate through Atomix (it may be an address)
@@ -360,6 +395,7 @@ export function registerLiveRoutes(r, core) {
       delivery: 'drm',
       mode: 'encrypted',
       keySystem: KEY_SYSTEMS[s.system],
+      system: s.system, // v0.28: the chosen one of the channel's systems
       manifest: fairplay ? `/api/live/drm/${s.id}/master.m3u8` : `/api/live/drm/${s.id}/manifest.mpd`,
       licence: `/api/live/drm/${s.id}/licence`,
       ...(fairplay ? { certificate: `/api/live/drm/${s.id}/certificate` } : {}),
@@ -370,7 +406,7 @@ export function registerLiveRoutes(r, core) {
       start: 0,
       quality: 'original',
       reasons: [],
-      channel: shapeChannel(channel),
+      channel: shapeChannel(channel, { links: showLinks(ctx) }),
       programme: shapeProgramme(nn.now),
       next: shapeProgramme(nn.next),
     };
@@ -411,7 +447,7 @@ export function registerLiveRoutes(r, core) {
       clientIp: core.auth.clientIp(ctx.req),
       isAdmin: isAdmin(ctx),
     });
-    return sessionReply(session, url, { live: false, duration, start, channel: shapeChannel(channel), programme: shapeProgramme(p) });
+    return sessionReply(session, linked(ctx, body, session, url), { live: false, duration, start, channel: shapeChannel(channel, { links: showLinks(ctx) }), programme: shapeProgramme(p) });
   });
 
   // ---- Admin ----
@@ -460,6 +496,7 @@ export function registerLiveRoutes(r, core) {
     const list = (favs.length ? favs : visibleChannels(ctx)).slice(0, favs.length ? 50 : 12);
     if (!list.length) return [];
     const nn = store().nowNext(list.map((c) => c.id), now);
+    const links = showLinks(ctx);
     return list.map((c) => {
       const p = nn.get(c.id)?.now || null;
       const logo = c.logo ? `/api/live/channels/${c.id}/logo` : null;
@@ -475,6 +512,8 @@ export function registerLiveRoutes(r, core) {
         progress: p ? Math.max(0, Math.min(1, (now - p.start) / (p.end - p.start))) : 0,
         end: p?.end || null,
         radio: c.radio,
+        drm: c.drmSystems?.length ? c.drmSystems : null,
+        ...linkOf(c, links),
       };
     });
   }

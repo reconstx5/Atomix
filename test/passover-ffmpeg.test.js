@@ -125,7 +125,7 @@ test('progressive mp4 fragments every half second; HLS uses 2 s segments and rea
   assert.match(hls, /-readrate 1\.5 .*-i a\.mkv/);
   assert.match(hls, /-hls_time 2 /);
   assert.match(hls, /-hls_init_time 1/);
-  assert.match(hls, /expr:gte\(t,n_forced\*2\)/);
+  assert.match(hls, /expr:gte\(t,n_forced\*2-1\)/); // v0.28: a 1 s first piece
   const old = joined({ ...plan, tools: tools({}, 4) }, settings, { type: 'hls', dir: '/tmp/s' });
   assert.doesNotMatch(old, /-readrate/);
   assert.doesNotMatch(joined(plan), /-readrate/, 'the progressive pipe is backpressured by the socket');
@@ -157,4 +157,15 @@ test('a conversion from the buffer reads the local playlist, rewound, with file-
   assert.ok(!/-user_agent|-reconnect|-ss /.test(j), j);
   const live = buildFfmpegArgs({ ...plan, media, file: '/x/index.m3u8', start: 0, quality: 'original', live: { kind: 'buffer' }, behind: 0 }, settings, { type: 'progressive' }).join(' ');
   assert.match(live, /-live_start_index -2/, 'live: a couple of pieces back, as a live HLS player starts');
+});
+
+test('v0.28 faster HLS start: the first seconds are read at full speed, and the first piece is 1 s', () => {
+  const withBurst = { ffmpeg: { available: true, major: 6, burst: true }, filters: tools().filters };
+  const plan = { ...decide({ ...base, media: sdrMedia('dts'), caps: chrome }), media: sdrMedia('dts'), tools: withBurst };
+  const hls = joined({ ...plan, target: 'mp4' }, settings, { type: 'hls', dir: '/tmp/s' });
+  assert.match(hls, /-readrate 1\.5 -readrate_initial_burst 10 .*-i a\.mkv/, 'the paced read starts with 10 s at full speed');
+  assert.match(hls, /expr:gte\(t,n_forced\*2-1\)/, 'keyframes at 0, 1, 3, 5…: a first piece of 1 s, then 2 s pieces');
+  const noBurst = joined({ ...plan, target: 'mp4', tools: tools({}, 6) }, settings, { type: 'hls', dir: '/tmp/s' });
+  assert.doesNotMatch(noBurst, /readrate_initial_burst/, 'an ffmpeg before 6.1 has no initial burst');
+  assert.match(joined(plan), /expr:gte\(t,n_forced\*2\)/, 'the progressive stream keeps its 2 s keyframes');
 });

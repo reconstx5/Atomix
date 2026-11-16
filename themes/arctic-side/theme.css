@@ -3,10 +3,41 @@
 @import url("../arctic/theme.css");
 
 :root {
-  --accent: #e8e8e8;
-  --accent-text: #111213;
+  --accent: var(--a-9);
+  --accent-text: #000000; /* black or white, whichever reads on the accent (APCA Lc >= 60) */
   --side-w: 248px;
   --backdrop-dim: 18%;
+}
+/* Accent ramp (devtools/ramp.mjs): the white of the pills; the neutrals come with Arctic. */
+:root {
+  --a-1: #202020;
+  --a-2: #333333;
+  --a-3: #474747;
+  --a-4: #5d5d5d;
+  --a-5: #737373;
+  --a-6: #8a8a8a;
+  --a-7: #a2a2a2;
+  --a-8: #bbbbbb;
+  --a-9: #e8e8e8;
+  --a-10: #fafafa;
+  --a-11: #fcfcfc;
+  --a-12: #fcfcfc;
+}
+@supports (color: oklch(0% 0 0)) {
+  :root {
+    --a-1: oklch(24.35% 0.0000 0);
+    --a-2: oklch(32.11% 0.0000 0);
+    --a-3: oklch(39.79% 0.0000 0);
+    --a-4: oklch(47.84% 0.0000 0);
+    --a-5: oklch(55.55% 0.0000 0);
+    --a-6: oklch(63.34% 0.0000 0);
+    --a-7: oklch(71.22% 0.0000 0);
+    --a-8: oklch(79.21% 0.0000 0);
+    --a-9: oklch(93.10% 0.0000 0);
+    --a-10: oklch(98.51% 0.0000 0);
+    --a-11: oklch(99.11% 0.0000 0);
+    --a-12: oklch(99.11% 0.0000 0);
+  }
 }
 
 body[data-layout="side"] .app-header {
@@ -22,7 +53,8 @@ body[data-layout="side"] .nav-link:focus-visible { background: var(--focus); col
 /* Monochrome: the main buttons are white pills; the title's colour only lights the glow and focus halo. */
 .btn-primary { --btn-bg: var(--accent); }
 .btn-primary:hover { background: #ffffff; }
-.btn-primary:focus-visible { box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px var(--focus); }
+/* Already white at rest: focus grows it (Arctic's scale) and the ring (tokens.css, A4) sits outside a dark halo. */
+.btn-primary:focus-visible { box-shadow: var(--focus-halo-ring); }
 .track-row.is-current .track-title, .queue-row.is-current strong { color: var(--text); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
 
 @media (max-width: 1100px) and (min-width: 721px) {

@@ -735,6 +735,50 @@ export const MIGRATIONS = [
   );
   CREATE INDEX search_history_profile ON search_history(profile_id, created_at DESC);
   `,
+  // 30 — skipping more (v0.28): markers can be recaps too, and come from TheIntroDB's shared timestamps.
+  `
+  CREATE TABLE markers_new (
+    item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('intro', 'credits', 'recap')),
+    start_time REAL,
+    end_time REAL,
+    source TEXT NOT NULL CHECK (source IN ('chapter', 'audio', 'manual', 'community')),
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (item_id, kind)
+  );
+  INSERT INTO markers_new SELECT item_id, kind, start_time, end_time, source, updated_at FROM markers;
+  DROP TABLE markers;
+  ALTER TABLE markers_new RENAME TO markers;
+  `,
+  // 31 — several key systems and provider-app links (v0.28): live_channels.drm now holds a comma list; app_url/app_name
+  // are the playlist's link (rewritten by every refresh); admin_app_url/admin_app_name are an admin's (set only by the PUT).
+  `
+  ALTER TABLE live_channels ADD COLUMN app_url TEXT;
+  ALTER TABLE live_channels ADD COLUMN app_name TEXT;
+  ALTER TABLE live_channels ADD COLUMN admin_app_url TEXT;
+  ALTER TABLE live_channels ADD COLUMN admin_app_name TEXT;
+  `,
+  // 32 — card motion v2 (v0.28): media_jobs is rebuilt so it can also record the 'clip' job (a 5 s preview clip per title).
+  `
+  CREATE TABLE media_jobs_new (
+    item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    job TEXT NOT NULL CHECK (job IN ('previews', 'intros', 'thumb', 'clip')),
+    status TEXT NOT NULL CHECK (status IN ('done', 'none', 'failed')),
+    data TEXT,
+    error TEXT,
+    source_size INTEGER,
+    source_mtime INTEGER,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (item_id, job)
+  );
+  INSERT INTO media_jobs_new SELECT item_id, job, status, data, error, source_size, source_mtime, updated_at FROM media_jobs;
+  DROP TABLE media_jobs;
+  ALTER TABLE media_jobs_new RENAME TO media_jobs;
+  `,
+  // 33 — card motion v2 (v0.28): the dominant colours of a title's artwork, JSON { poster, backdrop } (src/library/colors.js).
+  `
+  ALTER TABLE items ADD COLUMN colors TEXT;
+  `,
 ];
 
 /**

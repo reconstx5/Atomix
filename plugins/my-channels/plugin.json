@@ -1,0 +1,28 @@
+{
+  "id": "my-channels",
+  "name": "Your own channels",
+  "version": "1.0.0",
+  "description": "24/7 Live TV channels made from your own films and shows, in the Live TV guide beside your other channels. Watching one joins whatever is on, part-way through, like real TV.",
+  "author": "Atomix",
+  "main": "index.js",
+  "settings": [
+    {
+      "key": "channels",
+      "label": "Channels, one per line: Name = library, genre, show, collection or playlist and its name (add “, in order” to play in order instead of shuffled)",
+      "type": "textarea",
+      "default": "Movie Night = library Movies\nComedy Channel = genre Comedy"
+    },
+    { "key": "startNumber", "label": "First channel number", "type": "number", "default": 900 },
+    {
+      "key": "quality",
+      "label": "Picture size",
+      "type": "select",
+      "default": "720",
+      "options": [
+        { "value": "480", "label": "480p (lightest on the computer)" },
+        { "value": "720", "label": "720p" },
+        { "value": "1080", "label": "1080p" }
+      ]
+    }
+  ]
+}

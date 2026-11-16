@@ -98,7 +98,7 @@ export class HttpsManager {
     } catch (err) {
       this.server = null;
       this.listenPort = null;
-      this.current = { ...base, name: creds.name || null, sentence: err.code === 'EADDRINUSE' || err.code === 'EACCES' ? `Port ${port} is in use; pick another port` : err.message };
+      this.current = { ...base, name: creds.name || null, sentence: portSentence(err, port) };
       return;
     }
     const actual = this.server.address().port;
@@ -227,4 +227,12 @@ function validTo(pem) {
   } catch {
     return null;
   }
+}
+
+/** What a failed listen means, in a sentence for the Secure address card. */
+export function portSentence(err, port) {
+  if (err.code === 'EADDRINUSE') return `Port ${port} is in use; pick another port`;
+  // v0.28: a port below 1024 (or one Windows keeps for itself) is refused, not busy.
+  if (err.code === 'EACCES') return `Atomix isn't allowed to use port ${port}; pick another port (above 1024 usually works)`;
+  return err.message;
 }

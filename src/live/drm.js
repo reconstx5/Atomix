@@ -13,7 +13,10 @@ import { parseMpd } from '../../public/js/dash/mpd.js';
 import { parseXml, serializeXml, localName } from '../../public/js/dash/xml.js';
 import { rewritePlaylist, isPlaylist } from './hls-relay.js';
 
-export const KEY_SYSTEMS = { widevine: 'com.widevine.alpha', clearkey: 'org.w3.clearkey', fairplay: 'com.apple.fps' };
+// PlayReady (v0.28): the server names the recommendation form as a hint; the browser falls back to plain
+// com.microsoft.playready itself.
+export const KEY_SYSTEMS = { widevine: 'com.widevine.alpha', clearkey: 'org.w3.clearkey', fairplay: 'com.apple.fps', playready: 'com.microsoft.playready.recommendation' };
+export const NO_COMMON_SYSTEM = "This browser can't play any of this channel's protections.";
 export const UNREADABLE = "This channel's stream couldn't be read";
 const IDLE_MS = 2 * 60_000;
 const MANIFEST_MAX = 2_000_000;
@@ -35,6 +38,7 @@ const OUTPUT_NODES_MAX = 200_000; // a rewritten manifest repeats inherited time
 const MP4PROTECTION = 'urn:mpeg:dash:mp4protection:2011';
 const SYSTEM_IDS = {
   widevine: ['urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed'],
+  playready: ['urn:uuid:9a04f079-9840-4286-ab92-e65be0885f95'],
   clearkey: ['urn:uuid:e2719d58-a985-b3c9-781a-b030af78d30e', 'urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b'],
 };
 // Parts of a manifest the player doesn't need that would lead the browser to the provider (or another licence server).
@@ -45,6 +49,199 @@ const refused = () => Object.assign(new Error('refused address'), { code: 'EPRIV
 const CREDENTIALS = new Set(['authorization', 'cookie', 'proxy-authorization']);
 const keepLicenceHeader = (name) => !CREDENTIALS.has(name);
 const lowerKeys = (h) => Object.fromEntries(Object.entries(h || {}).map(([k, v]) => [k.toLowerCase(), v]));
+
+/**
+ * The key system to play a channel with (v0.28): the first of the device's list (its own order of preference) that the
+ * channel offers; null when none is. No device list (an older page) → the channel's first system.
+ * @param {string[]} offered the channel's systems, in the playlist's order
+ * @param {string[]} [device] what the browser has, best first
+ */
+export function chooseSystem(offered, device) {
+  const list = Array.isArray(offered) ? offered : [];
+  if (!Array.isArray(device)) return list[0] ?? null;
+  return device.find((d) => list.includes(d)) ?? null;
+}
+
+// A PlayReady Object (mspr:pro, or the data of a PlayReady pssh box): length (u32 LE), record count (u16), records of
+// type (u16), size (u16), data. Type 1 is the WRMHEADER XML (UTF-16LE), where the provider's LA_URL (and LUI_URL) are.
+function proWithLicence(pro, url) {
+  try {
+    if (pro.length < 10 || pro.readUInt32LE(0) !== pro.length) return null;
+    const count = pro.readUInt16LE(4);
+    let at = 6;
+    const out = [];
+    for (let i = 0; i < count; i++) {
+      if (at + 4 > pro.length) return null;
+      const type = pro.readUInt16LE(at);
+      const size = pro.readUInt16LE(at + 2);
+      if (at + 4 + size > pro.length) return null;
+      let data = pro.subarray(at + 4, at + 4 + size);
+      if (type === 1) {
+        let xml = data.toString('utf16le');
+        if (!/<LA_URL>/.test(xml)) return null; // nothing to point at Atomix: not safe to pass on
+        xml = xml.replace(/<LA_URL>[^<]*<\/LA_URL>/g, () => `<LA_URL>${url.replace(/&/g, '&amp;')}</LA_URL>`).replace(/<LUI_URL>[^<]*<\/LUI_URL>/g, '');
+        data = Buffer.from(xml, 'utf16le');
+        if (data.length > 0xffff) return null;
+      }
+      const rec = Buffer.alloc(4);
+      rec.writeUInt16LE(type, 0);
+      rec.writeUInt16LE(data.length, 2);
+      out.push(rec, data);
+      at += 4 + size;
+    }
+    const body = Buffer.concat(out);
+    const head = Buffer.alloc(6);
+    head.writeUInt32LE(6 + body.length, 0);
+    head.writeUInt16LE(count, 4);
+    return Buffer.concat([head, body]);
+  } catch {
+    return null;
+  }
+}
+/** The base64 of a PlayReady Object (mspr:pro) with Atomix's licence address in it; null when it can't be read. */
+export function rewritePro(b64, url) {
+  const out = proWithLicence(Buffer.from(String(b64 || '').trim(), 'base64'), url);
+  return out ? out.toString('base64') : null;
+}
+/** The base64 of a PlayReady pssh box with Atomix's licence address in its object; null when it can't be read. */
+export function rewritePssh(b64, url) {
+  try {
+    const box = Buffer.from(String(b64 || '').trim(), 'base64');
+    if (box.length < 32 || box.readUInt32BE(0) !== box.length || box.toString('latin1', 4, 8) !== 'pssh') return null;
+    const at = box[8] === 1 ? 32 + box.readUInt32BE(28) * 16 : 28; // version 1 lists key ids first
+    if (box.length < at + 4 || box.readUInt32BE(at) !== box.length - at - 4) return null;
+    const pro = proWithLicence(box.subarray(at + 4), url);
+    if (!pro) return null;
+    const head = Buffer.from(box.subarray(0, at + 4));
+    head.writeUInt32BE(at + 4 + pro.length, 0);
+    head.writeUInt32BE(pro.length, at);
+    return Buffer.concat([head, pro]).toString('base64');
+  } catch {
+    return null;
+  }
+}
+
+const PLAYREADY_ID = '9a04f07998404286ab92e65be0885f95';
+/** A PlayReady pssh box (version 0) around a PlayReady Object. */
+function playReadyPssh(pro) {
+  const head = Buffer.alloc(32);
+  head.writeUInt32BE(32 + pro.length, 0);
+  head.write('pssh', 4, 'latin1');
+  Buffer.from(PLAYREADY_ID, 'hex').copy(head, 12);
+  head.writeUInt32BE(pro.length, 28);
+  return Buffer.concat([head, pro]);
+}
+/**
+ * The playlist's init_data for a PlayReady session, as the browser gets it: a pssh box naming Atomix's licence address
+ * (from a pssh, or a bare PlayReady Object wrapped as one, since the browser asks with 'cenc'); null when it's neither.
+ */
+export function playReadyInitData(b64, url) {
+  const pssh = rewritePssh(b64, url);
+  if (pssh) return pssh;
+  const pro = rewritePro(b64, url);
+  return pro ? playReadyPssh(Buffer.from(pro, 'base64')).toString('base64') : null;
+}
+
+// ISO BMFF boxes: [{ type, start, end, head }] over buf[from, to), or null when a size doesn't fit.
+function readBoxes(buf, from, to) {
+  const out = [];
+  let at = from;
+  while (at < to) {
+    if (at + 8 > to) return null;
+    let size = buf.readUInt32BE(at);
+    let head = 8;
+    if (size === 1) {
+      if (at + 16 > to) return null;
+      const big = buf.readBigUInt64BE(at + 8);
+      if (big > BigInt(to - at)) return null;
+      size = Number(big);
+      head = 16;
+    } else if (size === 0) size = to - at;
+    if (size < head || at + size > to) return null;
+    out.push({ type: buf.toString('latin1', at + 4, at + 8), start: at, end: at + size, head });
+    at += size;
+  }
+  return out;
+}
+const INIT_SEGMENT_MAX = 1024 * 1024; // init segments are a few KB; anything bigger is streamed as it came
+/**
+ * v0.28: a PlayReady session's relayed init segment (ftyp and/or a top-level moov) with every PlayReady pssh in moov
+ * naming Atomix's licence address (the provider's LA_URL stays on the server). Widevine's pssh, media segments and
+ * every other box pass byte for byte. { bytes, unreadable }: unreadable is true for an init segment that couldn't be
+ * read (its bytes are then the original ones).
+ */
+export function rewriteInitSegment(buf, url) {
+  const asIs = (unreadable = false) => ({ bytes: buf, unreadable });
+  const first = buf.length >= 8 ? buf.toString('latin1', 4, 8) : '';
+  const top = readBoxes(buf, 0, buf.length);
+  if (!top) return asIs(first === 'ftyp' || first === 'moov');
+  const moovs = top.filter((b) => b.type === 'moov');
+  if (!moovs.length) return asIs(); // a media segment (styp/moof/mdat), or an ftyp alone: nothing names a licence server
+  if (moovs.length > 1) return asIs(true);
+  const moov = moovs[0];
+  const kids = readBoxes(buf, moov.start + moov.head, moov.end);
+  if (!kids) return asIs(true);
+  let changed = false;
+  const parts = [];
+  for (const k of kids) {
+    let bytes = buf.subarray(k.start, k.end);
+    if (k.type === 'pssh' && k.head === 8 && bytes.length >= 28 && bytes.toString('hex', 12, 28) === PLAYREADY_ID) {
+      const done = rewritePssh(bytes.toString('base64'), url);
+      if (!done) return asIs(true);
+      bytes = Buffer.from(done, 'base64');
+      changed = true;
+    }
+    parts.push(bytes);
+  }
+  if (!changed) return asIs();
+  const body = Buffer.concat(parts);
+  const head = Buffer.from(buf.subarray(moov.start, moov.start + moov.head));
+  if (moov.head === 16) head.writeBigUInt64BE(BigInt(16 + body.length), 8);
+  else if (8 + body.length > 0xffffffff) return asIs(true);
+  else head.writeUInt32BE(8 + body.length, 0);
+  return { bytes: Buffer.concat([buf.subarray(0, moov.start), head, body, buf.subarray(moov.end)]), unreadable: false };
+}
+
+/** The play request's keySystems: known names only (no repeats, at most 4); undefined when it isn't a list. */
+export function deviceSystems(v) {
+  if (!Array.isArray(v)) return undefined;
+  return [...new Set(v.filter((x) => typeof x === 'string' && Object.hasOwn(KEY_SYSTEMS, x)))].slice(0, 4);
+}
+
+const PR_MESSAGE_MAX_HEADERS = 16;
+/**
+ * Edge's and Chromium's PlayReady licence request: a UTF-16 PlayReadyKeyMessage holding the challenge (base64) and
+ * the HTTP headers to send it with. The challenge and those headers, or null when the bytes aren't such a message
+ * (a raw challenge, or a broken one: sent as it is).
+ * @returns {{ challenge: Buffer, headers: Record<string, string> } | null}
+ */
+export function unwrapPlayReady(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length < 4 || buf.length % 2) return null;
+  let text = buf.toString('utf16le');
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  if (!/^\s*(<\?xml[^>]*\?>\s*)?<PlayReadyKeyMessage[\s>]/.test(text)) return null;
+  let root;
+  try {
+    root = parseXml(text, { maxBytes: LICENCE_MAX, maxNodes: 200 });
+  } catch {
+    return null;
+  }
+  if (localName(root.name) !== 'PlayReadyKeyMessage') return null;
+  const acq = els(root, 'LicenseAcquisition')[0];
+  const b64 = String(acq && els(acq, 'Challenge')[0]?.text || '').replace(/\s+/g, '');
+  if (!b64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return null;
+  const headers = {};
+  for (const h of (acq && els(acq, 'HttpHeaders')[0]?.children.filter((c) => localName(c.name) === 'HttpHeader')) || []) {
+    if (Object.keys(headers).length >= PR_MESSAGE_MAX_HEADERS) break;
+    const name = els(h, 'name')[0]?.text?.trim();
+    const value = els(h, 'value')[0]?.text?.trim();
+    if (name && value != null && /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) && !/[\r\n]/.test(value)) headers[name] = value;
+  }
+  return { challenge: Buffer.from(b64, 'base64'), headers };
+}
+
+// From the unwrapped message, only these describe the request; anything else (a cookie, say) isn't the browser's to set.
+const PR_MESSAGE_HEADERS = new Set(['content-type', 'soapaction']);
 
 /** An IPv4 address as four numbers, also when written inside IPv6 ("::ffff:7f00:1"); null otherwise. */
 function v4Of(h) {
@@ -251,12 +448,32 @@ export function rewriteManifest(text, manifestUrl, session, { cast = null } = {}
     if (!was || was.scheme !== scheme || was.value !== value) session.utc = { scheme, value, readAt: Date.now() };
   } else session.utc = null;
   for (const u of els(root, 'UTCTiming')) u.attrs = { schemeIdUri: 'urn:mpeg:dash:utc:http-iso:2014', value: `${own}/time${withLink('')}` };
+  // PlayReady's header objects (mspr:pro, the pssh) name the provider's licence server, inside base64: for any device the
+  // address inside them becomes Atomix's own licence address for this session (the cast link's for a TV), LUI_URL goes,
+  // and an object that can't be read is left out (a TV still has dashif:Laurl, a browser its player's own address).
+  if (session.system === 'playready') {
+    const address = `${own}/licence${withLink('')}`;
+    const protect = (el) => {
+      el.children = el.children.filter((x) => {
+        const n = localName(x.name);
+        if (n === 'pro' || n === 'pssh') {
+          const done = (n === 'pro' ? rewritePro : rewritePssh)(x.text, address);
+          if (done) x.text = done;
+          return Boolean(done);
+        }
+        protect(x);
+        return true;
+      });
+    };
+    protect(root);
+  }
   // v0.27: a TV's receiver (Shaka) asks the licence address the manifest names: Atomix's, inside each protection entry
   // of the session's system (one is added beside the common cenc entry when the manifest has none).
   if (cast && SYSTEM_IDS[session.system]) {
     root.attrs['xmlns:dashif'] = 'https://dashif.org/CPS';
     const laurl = () => ({ name: 'dashif:Laurl', attrs: {}, children: [], text: `${own}/licence${withLink('')}` });
     const ids = SYSTEM_IDS[session.system];
+    const protectionValue = { widevine: 'Widevine', playready: 'MSPR 2.0', clearkey: 'ClearKey1.0' }[session.system];
     const visit = (el) => {
       const cps = el.children.filter((c) => localName(c.name) === 'ContentProtection');
       if (cps.length) {
@@ -264,7 +481,7 @@ export function rewriteManifest(text, manifestUrl, session, { cast = null } = {}
         if (mine.length) for (const c of mine) c.children.push(laurl());
         else {
           const at = el.children.indexOf(cps.at(-1)) + 1;
-          el.children.splice(at, 0, { name: 'ContentProtection', attrs: { schemeIdUri: ids[0], value: session.system === 'widevine' ? 'Widevine' : 'ClearKey1.0' }, children: [laurl()], text: '' });
+          el.children.splice(at, 0, { name: 'ContentProtection', attrs: { schemeIdUri: ids[0], value: protectionValue }, children: [laurl()], text: '' });
         }
       }
       for (const c of el.children) if (localName(c.name) !== 'ContentProtection') visit(c);
@@ -456,14 +673,20 @@ export class LiveDrm {
    * Start an encrypted session for a channel the caller already checked this viewer may see.
    * @returns {Promise<object>} the session
    */
-  async start({ user, profile, channel, source, replaces = null, isAdmin = false, clientIp = null, castId = null }) {
+  async start({ user, profile, channel, source, replaces = null, isAdmin = false, clientIp = null, castId = null, keySystems }) {
+    // v0.28: the system the device can play, chosen before anything is reserved or asked of the provider.
+    // A channel that names no system (a caller with only a key) leaves the choice to the source, as before.
+    const offered = channel.drmSystems?.length ? channel.drmSystems : channel.drm ? [channel.drm] : [];
+    const chosen = offered.length ? chooseSystem(offered, deviceSystems(keySystems)) : undefined;
+    if (chosen === null) throw new HttpError(409, NO_COMMON_SYSTEM);
     const release = this.streams.reserve(source, { user, profile, isAdmin, replaces });
     try {
       this.streams.stopReplaced(user, replaces);
       if (this.playback.sessionsOf(user.id).length >= 4) throw new HttpError(429, 'Too many streams open on this account.');
-      const out = (await this.streams.addressOf(source, channel)) || {};
+      const out = (await this.streams.addressOf(source, channel, { system: chosen })) || {};
       const system = out.drm?.system;
-      if (!KEY_SYSTEMS[system] || !out.drm.licence || !isNetworkUrl(out.url)) throw new HttpError(502, UNREADABLE);
+      // A source answers its first system for one it doesn't know: that isn't the one the device can play.
+      if ((chosen && system !== chosen) || !KEY_SYSTEMS[system] || !out.drm.licence || !isNetworkUrl(out.url)) throw new HttpError(502, UNREADABLE);
       const manifestHeaders = { ...(out.headers || {}), ...(out.manifestHeaders || {}) };
       // FairPlay (v0.27) plays only with its certificate: without one there's nothing for Safari to ask a key with.
       if (system === 'fairplay' && !out.drm.serverCertificate) throw new HttpError(502, UNREADABLE);
@@ -482,8 +705,12 @@ export class LiveDrm {
       // The account cap again: another start may have finished while this one waited on the provider.
       if (this.playback.sessionsOf(user.id).length >= 4) throw new HttpError(429, 'Too many streams open on this account.');
       const now = this.now();
+      const id = crypto.randomBytes(16).toString('hex');
+      // The playlist's init_data goes to the browser: PlayReady's names the provider's licence server (WRMHEADER
+      // LA_URL), so it becomes Atomix's own for this session; one that can't be read isn't sent at all.
+      const initData = out.drm.initData ? (system === 'playready' ? playReadyInitData(out.drm.initData, `/api/live/drm/${id}/licence`) : out.drm.initData) : null;
       const s = {
-        id: crypto.randomBytes(16).toString('hex'),
+        id,
         userId: user.id,
         username: user.username,
         profileId: profile?.id ?? null,
@@ -495,7 +722,7 @@ export class LiveDrm {
         manifestParams: out.manifestParams || null,
         streamParams: out.streamParams || null,
         serverCertificate: out.drm.serverCertificate || null,
-        initData: out.drm.initData || null,
+        initData,
         channelKey: channel.key,
         manifestHeaders,
         streamHeaders: { ...(out.headers || {}), ...(out.streamHeaders || {}) },
@@ -675,6 +902,44 @@ export class LiveDrm {
       ctx.res.writeHead(up.status, { 'Content-Type': upType || 'application/octet-stream', 'Content-Length': bytes.length, 'Cache-Control': 'no-store', ...(range ? { 'Content-Range': range } : {}) });
       return ctx.res.end(ctx.req.method === 'HEAD' ? undefined : bytes);
     }
+    // v0.28: a PlayReady init segment's moov/pssh names the provider's licence server: read whole (they're small),
+    // rewritten to Atomix's licence address. Anything bigger than INIT_SEGMENT_MAX, a range or a HEAD passes as it came.
+    let prefix = null;
+    let reader = null;
+    if (s.system === 'playready' && up.status === 200 && up.body && ctx.req.method !== 'HEAD' && !(Number(up.headers.get('content-length')) > INIT_SEGMENT_MAX)) {
+      reader = up.body.getReader();
+      const chunks = [];
+      let total = 0;
+      let ended = false;
+      try {
+        while (total <= INIT_SEGMENT_MAX) {
+          const { value, done } = await reader.read();
+          if (done) {
+            ended = true;
+            break;
+          }
+          chunks.push(Buffer.from(value));
+          total += value.length;
+        }
+      } catch {
+        await reader.cancel().catch(() => {});
+        finish();
+        throw new HttpError(502, UNREADABLE);
+      }
+      const bytes = Buffer.concat(chunks);
+      if (ended) {
+        finish();
+        const licence = ctx.castLink ? `${castBase(ctx)}/api/live/drm/${s.id}/licence?cast=${encodeURIComponent(ctx.url.searchParams.get('cast') || '')}` : `/api/live/drm/${s.id}/licence`;
+        const { bytes: body, unreadable } = rewriteInitSegment(bytes, licence);
+        if (unreadable && !s.initWarned) {
+          s.initWarned = true;
+          this.log?.warn?.(`Live TV: an init segment of "${s.channelName}" (PlayReady) couldn't be read; it was passed on as it came.`);
+        }
+        ctx.res.writeHead(200, { 'Content-Type': up.headers.get('content-type') || 'application/octet-stream', 'Content-Length': body.length, 'Cache-Control': 'no-store' });
+        return ctx.res.end(body);
+      }
+      prefix = bytes;
+    }
     const out = { 'Cache-Control': 'no-store' };
     const encoded = up.headers.get('content-encoding');
     for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
@@ -694,7 +959,24 @@ export class LiveDrm {
       return ctx.res.end();
     }
     let sent = 0;
-    const body = Readable.fromWeb(up.body);
+    // What was already read of a big PlayReady segment, then the rest as it comes.
+    const body = reader
+      ? Readable.from(
+          (async function* () {
+            try {
+              yield prefix;
+              for (;;) {
+                const { value, done } = await reader.read();
+                if (done) return;
+                yield Buffer.from(value);
+              }
+            } finally {
+              reader.cancel().catch(() => {});
+            }
+          })(),
+          { objectMode: false },
+        )
+      : Readable.fromWeb(up.body);
     body.on('data', (c) => {
       sent += c.length;
       if (sent > SEGMENT_MAX) body.destroy(new Error('too big'));
@@ -733,12 +1015,16 @@ export class LiveDrm {
       return answer;
     }
     const contentId = String(ctx.url.searchParams.get('contentId') || '').slice(0, CONTENT_ID_MAX);
-    const { body, contentType } = buildLicenceRequest(s.licence, challenge, { contentId });
+    // PlayReady (v0.28): the challenge inside the browser's message, with the message's Content-Type and SOAPAction
+    // (the playlist's headers on top). Not a message → the bytes as they came.
+    const wrapped = s.system === 'playready' ? unwrapPlayReady(challenge) : null;
+    const { body, contentType } = buildLicenceRequest(s.licence, wrapped ? wrapped.challenge : challenge, { contentId });
+    const fromMessage = wrapped && (s.licence.body?.kind || 'raw') === 'raw' ? Object.fromEntries(Object.entries(lowerKeys(wrapped.headers)).filter(([k]) => PR_MESSAGE_HEADERS.has(k))) : {};
     let res;
     const r = this.relay(s, ctx);
     const signal = AbortSignal.any([r.signal, AbortSignal.timeout(LICENCE_TIMEOUT_MS)]);
     try {
-      res = await fetchFollowing(s.licence.url, { method: 'POST', headers: { 'content-type': contentType, ...lowerKeys(s.licence.headers) }, body, signal, check: this.checkFor(s), keepHeader: keepLicenceHeader });
+      res = await fetchFollowing(s.licence.url, { method: 'POST', headers: { 'content-type': contentType, ...fromMessage, ...lowerKeys(s.licence.headers) }, body, signal, check: this.checkFor(s), keepHeader: keepLicenceHeader });
     } catch {
       r.done();
       throw new HttpError(502, NOT_ANSWERING);
@@ -756,7 +1042,7 @@ export class LiveDrm {
     let bytes;
     try {
       // The 2-byte "send me your certificate" request is Widevine's: a FairPlay SPC is never that short.
-      bytes = readLicenceResponse(s.licence, await readCapped(res, LICENCE_ANSWER_MAX), s.system === 'fairplay' ? null : challenge);
+      bytes = readLicenceResponse(s.licence, await readCapped(res, LICENCE_ANSWER_MAX), s.system === 'fairplay' || s.system === 'playready' ? null : challenge);
     } catch {
       throw new HttpError(502, NOT_ANSWERING);
     } finally {
@@ -800,11 +1086,11 @@ export class LiveDrm {
   async renew(s) {
     let out;
     try {
-      out = (await withTimeout(s.source.stream(s.channelKey, { log: this.log }), this.streams.resolveTimeoutMs)) || {};
+      out = (await withTimeout(s.source.stream(s.channelKey, { log: this.log, system: s.system }), this.streams.resolveTimeoutMs)) || {};
     } catch {
       throw new HttpError(502, UNREADABLE);
     }
-    if (!isNetworkUrl(out.url)) throw new HttpError(502, UNREADABLE);
+    if (!isNetworkUrl(out.url) || (out.drm && out.drm.system !== s.system)) throw new HttpError(502, UNREADABLE);
     s.manifestUrl = out.url;
     s.manifestHeaders = { ...(out.headers || {}), ...(out.manifestHeaders || {}) };
     s.streamHeaders = { ...(out.headers || {}), ...(out.streamHeaders || {}) };
@@ -860,7 +1146,7 @@ export class LiveDrm {
       quality: 'original',
       position: 0,
       paused: false,
-      reasons: [`Encrypted (${{ widevine: 'Widevine', fairplay: 'FairPlay' }[s.system] || 'ClearKey'}): played in the browser`],
+      reasons: [`Encrypted (${{ widevine: 'Widevine', fairplay: 'FairPlay', playready: 'PlayReady' }[s.system] || 'ClearKey'}): played in the browser`],
       startedAt: s.createdAt,
       clientIp: s.clientIp,
       castDevice: null,

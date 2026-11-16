@@ -70,3 +70,10 @@ export function coverRect(sw, sh, dw, dh, focusX = 0.5, focusY = 0.25) {
   const h = wider ? sh : (sw * dh) / dw;
   return { sx: (sw - w) * focusX, sy: (sh - h) * focusY, sw: w, sh: h };
 }
+
+/** How far a wheel turn moves a list, in pixels (deltaMode 0 pixels, 1 lines of 40 px, 2 pages of `pageHeight`). */
+export function wheelPixels({ deltaY, deltaMode }, pageHeight) {
+  if (deltaMode === 1) return deltaY * 40;
+  if (deltaMode === 2) return deltaY * pageHeight;
+  return deltaY;
+}

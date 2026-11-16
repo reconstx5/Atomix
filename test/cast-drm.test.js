@@ -320,3 +320,17 @@ test("the provider gets its segment query exactly as written (no re-encoding whe
   assert.ok(providerUrls.includes('/dash/five/hd/init.mp4?hdnts=exp=1~acl=/*~hmac=ab&flag'), JSON.stringify(providerUrls));
   await stopCast(admin);
 });
+
+test("v0.28: a zap ends the old channel's cast link at once", { skip }, async () => {
+  const r = await castChannel('Six');
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const links = nf.app.core.cast.links;
+  const oldDrm = nf.app.core.cast.manager.sessions.get(r.data.id)?.drmSessionId;
+  assert.ok(oldDrm, 'the TV has an encrypted session');
+  const oldLinks = () => [...links.links.values()].filter((l) => l.drmSessionId === oldDrm).length;
+  assert.equal(oldLinks(), 1);
+  const z = await cmd(admin, r.data.id, 'channelDown');
+  assert.equal(z.status, 200, JSON.stringify(z.data));
+  assert.equal(oldLinks(), 0, 'the old channel\'s link no longer works');
+  await stopCast(admin);
+});

@@ -67,6 +67,61 @@ readable). It changes smoothly between titles. Arctic uses it for the glow behin
 bars and the main button. Set `--tint-default` for pages or artwork without a colour of their own; a person's
 chosen accent colour replaces that default. Artwork served from another site can't be read, so it keeps the default.
 
+## Token layers (v0.29)
+
+Colours come in three layers, all defined in `public/css/tokens.css` (loaded before `app.css`, `orbit.css` and your theme):
+
+1. **Ramps** (yours): `--n-1` … `--n-12` for neutrals and `--a-1` … `--a-12` for the accent. Steps follow Radix: 1-2 page,
+   3-5 component backgrounds, 6-8 borders, 9-10 solid fills, 11 low-contrast text, 12 high-contrast text. Dark themes run
+   dark to light, Daylight runs light to dark.
+2. **Old names** (`--bg`, `--bg-2`, `--surface`, `--surface-2`, `--border`, `--text`, `--text-dim`, `--accent`): taken from the
+   ramps when you define them (`--bg` = n-1, `--surface` = n-3, `--text` = n-12, `--accent` = a-9 ...).
+3. **Semantic names** (`--app-bg`, `--surface-1/2/3`, `--border-subtle/-strong`, `--text-high`, `--text-low`, `--accent-solid`,
+   `--accent-hover`, `--on-accent`, `--focus-ring`): from the ramps, falling back to the old names. Use these in new CSS.
+
+Old names never point at semantic names, so nothing can loop.
+
+### Making a theme
+
+Pick one of two routes.
+
+- **Old names only** (simplest): set `--bg`, `--bg-2`, `--surface`, `--surface-2`, `--border`, `--text`, `--text-dim`,
+  `--accent`, `--accent-text` as in the table below and no ramps. The semantic names follow your values, and the focus
+  ring stays your accent colour. Atomix does not check the contrast of these themes, so check it yourself.
+- **Ramps** (what the built-in themes do): define `--n-1..12` and `--a-1..12` in hex in `:root`, then the same colours
+  as `oklch()` inside `@supports (color: oklch(0% 0 0)) { :root { ... } }` (browsers without oklch, such as older TVs,
+  keep the hex; never put oklch next to the hex, a custom property does not fall back). Print both blocks with
+  `node devtools/ramp.mjs <theme>` after adding your anchors to its `THEMES` table (`n` anchors for steps 1-4, 11, 12 and the
+  accent for a-9; the steps between are interpolated in OKLCH), or `node devtools/ramp.mjs --table` to see every theme.
+
+What `test/theme-tokens.test.js` needs from a built-in theme (add it to the test's `THEMES` list): every semantic token
+resolves (in modern and legacy browsers), an oklch value for every hex step, no var() cycle, and APCA contrast (Lc) on
+`--app-bg` and the surfaces of at least 75 for `--text-high`, 60 for body text (`--text-low`) and 60 for `--on-accent` on
+`--accent-solid`, and 3:1 (WCAG) for `--focus-ring` on `--app-bg`. Run it with `node --test test/theme-tokens.test.js`.
+With the dev server up, `devtools/type-floor.mjs`, `focus-check.mjs`, `scrim-check.mjs` and `accent-check.mjs` check
+type sizes, focus rings, text on artwork and the accent picker in every theme.
+
+Other tokens a theme can set: `--scrim-colour` (the colour of the page scrim over artwork; black unless the page is light),
+`--focus-ring` (pin `#fff` on a dark theme). Type sizes on TVs (1600 px and wider, landscape) have a floor of 20 px for
+captions and 24 px for body, metadata and card titles; Orbit's `--t-*` scale is floored in the same block.
+
+A person's accent (Settings → Appearance: 10 swatches, Theme default or a custom hex) is moved into your theme's band in
+OKLCH (dark L 70-80 %, light L 45-55 %, C 0.10-0.15), its `--a-*` ramp is regenerated, and the text on it is black or white by APCA.
+So a theme's own `--a-*` only matters for the default.
+
+### Modes and choices over any theme (v0.29)
+Profiles can turn these on in Settings → Appearance; they work through tokens, so a theme gets them for free:
+- `html[data-glass="clear"|"tinted"|"solid"]` and `--glass-alpha` / `--glass-blur` (.12 / 16 px, .58 / 34 px, .92 / 0).
+  Paragraph panels never go below `--glass-panel-floor` (.66).
+- `:root[data-oled]` (dark themes only): `--n-1`, `--n-2`, `--app-bg`, `--bg`, `--bg-2` are #000; panels, dialogs and card
+  art get a 1 px `--border-subtle` edge; the environment layer is hidden.
+- `:root[data-contrast="more"]`: `--text-low` = `--text-high`, `--text-dim` = `--text`, a 4 px focus ring, 2 px
+  `currentColor` edges on buttons, pills, chips, fields and card art, Solid glass.
+- `--text-scale` (1, 1.15, 1.3): the root font size on rem-based themes; Orbit multiplies its `--t-*` tokens.
+- Forced colours (Windows High Contrast): the backdrop, scrim and environment are hidden.
+A theme that sets colours outside the ramps should check them with `node --test test/theme-tokens.test.js` (it runs
+every theme with More contrast and, for dark themes, OLED).
+
 ## The orbit layout
 
 Themes with `"layout": "orbit"` get Orbit's structure from `public/css/orbit.css`; their `theme.css` only gives the
@@ -87,7 +142,10 @@ look. What the structure provides:
 - **The cluster** (`.orbit-cluster`): the clock and the profile picture, at the screen's top-right.
 - **Sizes** are written as `calc(N * var(--px))`, where `--px` is 1px at 1920 px wide, 0.72px at least, and 0.4px on phones.
   The rail's width is `--win-l` (168 × `--px` on TVs, 112px on laptops, 0 on phones).
-- **Reduce effects** (a profile setting) sets `html.reduce-effects`, and every `backdrop-filter` is switched off.
+- **Glass** (Settings → Appearance: Clear, Tinted or Solid; v0.29) sets `html[data-glass]`. Solid switches every
+  `backdrop-filter` off; it is the default on TV-size screens, in browsers without blur and with the system's "reduce
+  transparency" or More contrast. `html.reduce-effects` is set only when the profile chose Solid (or had the old Reduce
+  effects switch on): card motion stops its sheen and preview clips then.
   `themes/orbit` also turns its glass solid; use the same `--glass-*` names if you want that for free.
 
 `themes/orbit/theme.css` documents its tokens:
@@ -126,5 +184,5 @@ You can also override any selector from `public/css/app.css`, for example:
 .art { border-radius: 0; }
 ```
 
-Keep text contrast at least 4.5:1 against `--bg` and `--surface` so everything stays readable.
-People can override your `--accent` with their own colour in their profile.
+Keep text contrast at least 4.5:1 against `--bg` and `--surface` so everything stays readable (the built-in themes are held to APCA, see above).
+People can override your accent with their own colour in their profile.

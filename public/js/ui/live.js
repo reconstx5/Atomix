@@ -5,7 +5,7 @@
 import { html, useState, useRef, useLayoutEffect } from '../ui.js';
 import { Icon, MoreButton } from './basics.js';
 import { initials, rowName } from '../live-bits.js';
-import { clockTime, programmeProgress } from '../live.js';
+import { clockTime, programmeProgress, castableDrm } from '../live.js';
 import { channelTint, nextLine, minutesLeft } from '../live-rules.js';
 import { setBackdrop } from '../backdrop.js';
 
@@ -28,26 +28,32 @@ export function RecDot({ p, silent = false }) {
 
 const Bar = ({ p, now }) => (p ? html`<span class="live-bar" aria-hidden="true"><span style=${`--p:${programmeProgress(p, now)}`} /></span>` : null);
 const Radio = ({ c }) => (c.radio ? html`<span class="chip live-radio">Radio</span>` : null);
+// v0.28: a channel this device can't play, listed with the switch on: dimmed (the item's class) with this tag.
+const CantTag = ({ c }) => (c.unplayable ? html`<span class="chip live-cant">Can't play here</span>` : null);
+const itemClass = (c) => (c.unplayable ? 'live-item is-unplayable' : 'live-item');
+const spoken = (c) => (c.unplayable ? `${rowName(c)}, can't play here` : rowName(c));
 
-// v0.27: Widevine and ClearKey channels can go to a Chromecast; on a phone (which may not play them) that's "Watch on TV".
-const castable = (c) => !c.radio && (!c.drm || c.drm === 'widevine' || c.drm === 'clearkey');
+// Channels with Widevine, PlayReady or ClearKey can go to a Chromecast (v0.28; FairPlay-only ones can't); on a phone
+// (which may not play them) that's "Watch on TV".
+const castable = (c) => !c.radio && (!c.drm || castableDrm(c.drm));
 const touch = () => Boolean(globalThis.matchMedia?.('(pointer: coarse)').matches);
 const castLabel = (c) => (c?.drm && touch() ? 'Watch on TV' : 'Cast to…');
 
 /** The older themes' row: logo, number, name, what's on (with its bar) and what's next, then "…". */
-export function ChannelRow({ c, onPlay, onFavourite, onGuide, onCast, castOk }) {
+export function ChannelRow({ c, onPlay, onFavourite, onGuide, onCast, castOk, onAppLink = null }) {
   const now = Date.now();
   const more = [
     c.favourite ? { label: 'Remove from favourites', icon: 'check', onSelect: () => onFavourite(c, false) } : { label: 'Add to favourites', icon: 'plus', onSelect: () => onFavourite(c, true) },
     { label: 'Guide for this channel', icon: 'guide', onSelect: () => onGuide(c) },
     castOk && castable(c) ? { label: castLabel(c), icon: 'cast', onSelect: () => onCast(c) } : null,
+    onAppLink ? { label: 'Provider app link…', icon: 'edit', onSelect: () => onAppLink(c) } : null, // admins (v0.28)
   ].filter(Boolean);
-  return html`<li class="live-item" data-id=${c.id}>
-    <button type="button" class="live-row" aria-label=${rowName(c)} data-id=${c.id} onClick=${() => onPlay(c)}>
+  return html`<li class=${itemClass(c)} data-id=${c.id}>
+    <button type="button" class="live-row" aria-label=${spoken(c)} data-id=${c.id} onClick=${() => onPlay(c)}>
       <${ChannelLogo} c=${c} />
       <span class="live-num">${c.number != null ? String(c.number) : ''}</span>
       <span class="live-main">
-        <span class="live-name">${c.name}<${Radio} c=${c} /><${LockBadge} c=${c} /></span>
+        <span class="live-name">${c.name}<${Radio} c=${c} /><${LockBadge} c=${c} /><${CantTag} c=${c} /></span>
         ${c.now ? html`<span class="live-now"><span class="live-title">${c.now.title}</span><${RecDot} p=${c.now} /><span class="muted small">${`until ${clockTime(c.now.end)}`}</span></span>` : html`<span class="live-now muted">No guide information</span>`}
         <${Bar} p=${c.now} now=${now} />
       </span>
@@ -66,14 +72,14 @@ export function ChannelCard({ c, onPlay }) {
     picture && failed !== picture
       ? html`<span class="live-card-art"><img key=${picture} class="is-programme" src=${picture} alt="" loading="lazy" decoding="async" onError=${() => setFailed(picture)} /></span>`
       : html`<span class="live-card-art is-logo"><${ChannelLogo} c=${c} size="xl" /></span>`;
-  return html`<li class="live-item" data-id=${c.id}>
-    <button type="button" class=${`live-card${c.radio ? ' is-radio' : ''}`} style=${`--tint:${channelTint(c.name)}`} aria-label=${rowName(c)} data-id=${c.id} onClick=${() => onPlay(c)}>
+  return html`<li class=${itemClass(c)} data-id=${c.id}>
+    <button type="button" class=${`live-card${c.radio ? ' is-radio' : ''}`} style=${`--tint:${channelTint(c.name)}`} aria-label=${spoken(c)} data-id=${c.id} onClick=${() => onPlay(c)}>
       ${art}
       <span class="live-card-shade" aria-hidden="true" />
       ${picture ? html`<span class="live-card-logo"><${ChannelLogo} c=${c} size="sm" /></span>` : null}
       <span class="live-card-num">${c.number != null ? String(c.number) : ''}</span>
       <span class="live-card-text">
-        <span class="live-card-name">${c.name}<${Radio} c=${c} /><${LockBadge} c=${c} /></span>
+        <span class="live-card-name">${c.name}<${Radio} c=${c} /><${LockBadge} c=${c} /><${CantTag} c=${c} /></span>
         <span class="live-card-title">${c.now ? c.now.title : 'No guide information'}<${RecDot} p=${c.now} /></span>
         <${Bar} p=${c.now} now=${now} />
         ${c.next ? html`<span class="live-card-next">${nextLine(c.next, clockTime)}<${RecDot} p=${c.next} /></span>` : null}
@@ -89,7 +95,7 @@ const SpotBtn = ({ cls, icon, label, onClick, hidden = false, btnRef }) => html`
  * Its buttons keep their elements between channels, so the one holding focus is never replaced; one about to hide
  * while it holds focus hands focus to Watch live.
  */
-export function LiveSpotlight({ c, onWatch, onRecord, onFavourite, onGuide, onCast, castOff = false, kids = false, view }) {
+export function LiveSpotlight({ c, onWatch, onRecord, onFavourite, onGuide, onCast, castOff = false, kids = false, view, onAppLink = null }) {
   const watch = useRef(null);
   const record = useRef(null);
   const guide = useRef(null);
@@ -134,6 +140,7 @@ export function LiveSpotlight({ c, onWatch, onRecord, onFavourite, onGuide, onCa
         <button type="button" class="btn btn-secondary btn-icon live-spot-fav" aria-label="Favourite" aria-pressed=${String(Boolean(c?.favourite))} onClick=${act(onFavourite)}><${Icon} name="star" /></button>
         <${SpotBtn} btnRef=${guide} cls="btn-ghost live-spot-guide" icon="guide" label="Guide" onClick=${act(onGuide)} hidden=${noGuide} />
         <${SpotBtn} cls="btn-ghost live-spot-cast" icon="cast" label=${castLabel(c)} onClick=${act(onCast)} hidden=${Boolean(c) && (!castable(c) || castOff)} />
+        ${onAppLink && c ? html`<${MoreButton} title=${c.name} items=${[{ label: 'Provider app link…', icon: 'edit', onSelect: () => onAppLink(c) }]} />` : null}
       </div>
     </div>
   </section>`;

@@ -270,3 +270,10 @@ test('names given in ATOMIX_HTTPS_NAMES join the home certificate', async () => 
     delete process.env.ATOMIX_HTTPS_NAMES;
   }
 });
+
+test('v0.28: a port Atomix may not use says so, not "in use"', async () => {
+  const { portSentence } = await import('../src/tls/server.js');
+  assert.equal(portSentence({ code: 'EADDRINUSE' }, 8443), 'Port 8443 is in use; pick another port');
+  assert.equal(portSentence({ code: 'EACCES' }, 443), "Atomix isn't allowed to use port 443; pick another port (above 1024 usually works)");
+  assert.equal(portSentence({ code: 'EOTHER', message: 'Something else' }, 1), 'Something else');
+});

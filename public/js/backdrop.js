@@ -14,8 +14,21 @@ let front = 0;
 let current = null;
 let token = 0;
 let setThisRoute = false;
+let ready = Promise.resolve(false); // the picture for `current`: true once it is loaded, decoded and shown
+let settleReady = null;
 
 export const backdropLayer = layer;
+/** The scrim for words over the artwork (visual refresh A5): its own layer just above the backdrop, never inside it
+ * (the backdrop is what the card-to-page morph names), shown by CSS while the backdrop has a picture
+ * (`.backdrop.has-art + .scrim`). */
+export const scrimLayer = h('div', { class: 'scrim', 'aria-hidden': 'true' });
+/** Whether a picture is (or is about to be) behind the page. */
+export const backdropShowing = () => current !== null;
+/**
+ * Resolves true once the picture set last is loaded, decoded and shown behind the page; false when there is none, it
+ * fails, or another picture replaces it first (screen changes use it: art never travels into an empty backdrop).
+ */
+export const backdropReady = () => ready;
 
 // Orbit's "environment": the same artwork behind the sign-in, picker and music pages, drawn tiny (64 × 36) and stretched to
 // the whole screen, so it looks blurred without a full-screen blur filter. Two canvases cross-fade.
@@ -83,13 +96,19 @@ export function setBackdrop(url) {
   if (url === current) return;
   current = url;
   const my = ++token;
+  settleReady?.(false); // the picture before this one will never be the one showing
+  settleReady = null;
   if (!url) {
+    ready = Promise.resolve(false);
     for (const img of imgs) img.classList.remove('is-on');
     layer.classList.remove('has-art');
     setTint(null);
     clearEnvironment();
     return;
   }
+  let settle;
+  ready = new Promise((resolve) => (settle = resolve));
+  settleReady = settle;
   const next = imgs[1 - front];
   next.onload = () => {
     if (my !== token) return;
@@ -99,8 +118,11 @@ export function setBackdrop(url) {
     imgs[front].classList.remove('is-on');
     front = 1 - front;
     layer.classList.add('has-art');
+    // Loaded is not yet decoded: ready once the picture can be painted (a failed decode still has the loaded one).
+    (next.decode ? next.decode() : Promise.resolve()).catch(() => {}).then(() => settle(my === token));
   };
   next.onerror = () => {
+    settle(false);
     if (my === token && current === url) current = null;
   };
   // v0.24 (Orbit): a copy the size of the screen; the hero's picture comes first.

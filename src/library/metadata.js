@@ -570,7 +570,7 @@ export class MetadataManager {
     const current = this.db.get('SELECT * FROM items WHERE id = ?', item.id) || item;
     this.db.run(
       `UPDATE items SET title = ?, original_title = ?, year = ?, overview = ?, tagline = ?, genres = ?, rating = ?,
-         runtime = ?, air_date = ?, poster = ?, backdrop = ?, logo = ?, tmdb_id = ?, imdb_id = ?, metadata_at = ?, updated_at = ?,
+         runtime = ?, air_date = ?, poster = ?, backdrop = ?, logo = ?, colors = NULL, tmdb_id = ?, imdb_id = ?, metadata_at = ?, updated_at = ?,
          metadata_locked = ?, certification = ?, min_age = ?, trailer = ?, scores = ?
        WHERE id = ?`,
       fillOnly ? item.title : m.title || item.title,

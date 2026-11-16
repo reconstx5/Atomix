@@ -18,7 +18,9 @@ export const SETTING_DEFAULTS = {
   maxTranscodes: 3,
   defaultQuality: 'original', // original | 1080 | 720 | 480
   previewsEnabled: true, // background job: seek-bar preview pictures
+  cardClips: true, // v0.28 card motion: a 5 s silent preview clip per title for cards (needs previews on)
   introDetection: true, // background job: find TV intros (and credits chapters)
+  communityTimestamps: true, // v0.28: TheIntroDB's shared intro/recap/credits times fill what the files can't tell
   loginMessage: '',
   thumbCacheMB: 2048, // v0.24: the smaller copies of artwork (least used go first when full)
   remoteSyncHours: 6, // connected servers are re-read this often (0 = only on demand)
@@ -46,6 +48,8 @@ export const SETTING_DEFAULTS = {
   metadataProvidersSeen: null, // v0.23: plugin metadata providers already offered the existing titles (ids)
   httpsMode: 'off', // v0.27: the secure address — off | tailscale | own (Atomix's own home certificate)
   httpsPort: 8443,
+  arrKey: null, // v0.28: the key in the download apps' webhook address (made once; a new one only from its own route)
+  requestUrl: '', // v0.28: where "Request it" sends people (Seerr, Overseerr, Jellyseerr, Ombi…); '' = no button
 };
 
 /** Whole numbers kept inside their range. */

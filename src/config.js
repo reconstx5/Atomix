@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { settleDatabase } from './db.js';
+import { findTool as findToolOnDisk } from './windows-tools.js';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -107,10 +108,11 @@ function databaseIn(dataDir, notices) {
 }
 
 /**
- * @param {{env?: object, root?: string}} [opts] env: the environment variables to read;
- *   root: the folder the config file and relative paths are in (both for tests).
+ * @param {{env?: object, root?: string, findTool?: (name: string) => string}} [opts] env: the environment
+ *   variables to read; root: the folder the config file and relative paths are in; findTool: where
+ *   ffmpeg/ffprobe are when not named (all for tests).
  */
-export function loadConfig({ env = process.env, root = ROOT } = {}) {
+export function loadConfig({ env = process.env, root = ROOT, findTool = (name) => findToolOnDisk(name, { env }) } = {}) {
   const renamed = [];
   const notices = [];
   const fromFile = readJson(configFileIn(root, env, renamed, notices));
@@ -121,6 +123,11 @@ export function loadConfig({ env = process.env, root = ROOT } = {}) {
     const [name, plain] = ENV_MAP[key];
     const value = fromEnv(env, name, plain, renamed);
     if (value !== undefined) cfg[key] = coerce(key, value);
+  }
+
+  // Windows: winget's PATH change reaches only windows opened afterwards, so look in its folders too.
+  for (const key of ['ffmpegPath', 'ffprobePath']) {
+    if (cfg[key] === DEFAULTS[key]) cfg[key] = findTool(DEFAULTS[key]);
   }
 
   for (const key of ['dataDir', 'pluginsDir', 'themesDir']) {

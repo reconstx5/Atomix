@@ -89,7 +89,7 @@ export function setup(api) {
       const days = catchupWindowDays(ch, parsed.header, settingDays);
       const mode = ch.catchup?.mode || parsed.header.catchup || (ch.catchup?.source || parsed.header.catchupSource ? 'default' : null);
       const catchup = days > 0 && mode ? { mode, days } : null;
-      next.set(ch.key, { url: ch.url, headers: ch.headers || {}, mime: ch.mime || null, catchup: { ...(ch.catchup || {}), mode: mode || undefined }, name: ch.name, drm: ch.drm || null, manifestHeaders: ch.manifestHeaders || null, streamHeaders: ch.streamHeaders || null, manifestParams: ch.manifestParams || null, streamParams: ch.streamParams || null });
+      next.set(ch.key, { url: ch.url, headers: ch.headers || {}, mime: ch.mime || null, catchup: { ...(ch.catchup || {}), mode: mode || undefined }, name: ch.name, drm: ch.drm || null, appUrl: ch.appUrl || null, appName: ch.appName || null, manifestHeaders: ch.manifestHeaders || null, streamHeaders: ch.streamHeaders || null, manifestParams: ch.manifestParams || null, streamParams: ch.streamParams || null });
       if (guideId && !shiftFor.has(guideId)) shiftFor.set(guideId, guideShift(c.guideShift) + (ch.shift ?? parsed.header.shift ?? 0));
       return {
         key: ch.key,
@@ -100,7 +100,9 @@ export function setup(api) {
         radio: ch.radio,
         guideId,
         catchup,
-        drm: ch.drm?.system || null, // only the name: the licence details stay in the plugin
+        // Only the names: the licence details stay in the plugin. Core still takes one name (Task 2 switches it to the list).
+        drm: systemsOf(ch.drm)[0]?.system || null,
+        drmSystems: systemsOf(ch.drm).map((s) => s.system),
       };
     });
     const programmes = guide.programmes ? [] : null;
@@ -130,13 +132,25 @@ export function setup(api) {
     return ch;
   };
 
-  async function stream(key) {
+  /** A channel's systems as a list: the stored { systems } form, or the older single { system, licence } as one entry. */
+  function systemsOf(drm) {
+    if (!drm) return [];
+    if (Array.isArray(drm.systems)) return drm.systems;
+    return drm.system ? [drm] : [];
+  }
+
+  async function stream(key, opts = {}) {
     const ch = known(key);
+    const list = systemsOf(ch.drm);
+    const pick = (opts && opts.system && list.find((s) => s.system === opts.system)) || list[0] || null;
+    const { url: own, ...drm } = pick || {};
     return {
-      url: ch.url,
+      url: own || ch.url,
       headers: { 'User-Agent': userAgent(), ...ch.headers, ...(ch.streamHeaders || {}) },
       mime: ch.mime || null,
-      drm: ch.drm || null,
+      drm: pick ? drm : null,
+      appUrl: ch.appUrl || null,
+      appName: ch.appName || null,
       manifestHeaders: ch.manifestHeaders || null,
       streamHeaders: ch.streamHeaders || null,
       manifestParams: ch.manifestParams || null,

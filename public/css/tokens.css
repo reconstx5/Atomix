@@ -1,0 +1,141 @@
+/* Atomix design tokens (visual refresh, Plan A). Loaded first: app.css, orbit.css and the theme come after it.
+
+   Three layers:
+   1. Primitives, per theme (themes/<name>/theme.css): --n-1..12 (neutrals) and --a-1..12 (accent), hex in :root and
+      the same colours in oklch() inside @supports (browsers without oklch() keep the hex). Step roles follow Radix:
+      1-2 page, 3-5 component backgrounds, 6-8 borders, 9-10 solid fills, 11 low-contrast text, 12 high-contrast text.
+   2. Semantic tokens (below), from the ramps; with no ramp they fall back to the old names.
+   3. Component tokens (radius scale, focus ring, card shapes, glass).
+
+   The old names (--bg, --text, --accent ...) come from the ramps too, with today's Midnight colours as the default.
+   They never refer to a semantic name, so the two layers can't form a var() cycle: a theme that sets only old names
+   (an older user theme) leaves --n-* undefined, the semantic tokens fall back to its values, and its own --bg wins
+   over the one here. Contrast rules for Atomix's own themes: test/theme-tokens.test.js. */
+:root {
+  /* Old names (kept working for every theme; the defaults were app.css's) */
+  --bg: var(--n-1, #0c0e13);
+  --bg-2: var(--n-2, #12151c);
+  --surface: var(--n-3, #191d27);
+  --surface-2: var(--n-4, #232937);
+  --border: var(--n-6, rgba(255, 255, 255, 0.08));
+  --text: var(--n-12, #eef1f6);
+  --text-dim: var(--n-11, #a3abba);
+  --accent: var(--a-9, #ff6b3d);
+  --accent-text: #160b06;
+  --danger: #ff5c6c;
+  --success: #3ecf8e;
+  --radius: 10px;
+  --radius-lg: 16px;
+  --nav-bg: rgba(12, 14, 19, 0.78);
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: var(--font);
+
+  /* Semantic. --surface-1/2/3 are steps 3/4/5 (Radix's component backgrounds), so --surface-2 is the same colour
+     under its old name and its new one. */
+  --app-bg: var(--n-1, var(--bg));
+  --surface-1: var(--n-3, var(--surface));
+  --surface-3: var(--n-5, var(--surface-2));
+  --border-subtle: var(--n-6, var(--border));
+  --border-strong: var(--n-8, var(--border));
+  --text-high: var(--n-12, var(--text));
+  --text-low: var(--n-11, var(--text-dim));
+  --accent-solid: var(--a-9, var(--accent));
+  --accent-hover: var(--a-10, var(--accent));
+  --on-accent: var(--accent-text);
+  /* The focus ring (A4): high-contrast text colour (n-12: near-white on the dark themes, near-black on Daylight; the
+     dark themes pin it to #fff), with a 1 px halo of the opposite colour so it reads on any artwork. A theme with only
+     the old names (no ramp) keeps its accent ring, as before. */
+  --focus-ring: var(--n-12, var(--accent));
+  --focus-halo: rgba(0, 0, 0, 0.7);
+
+  /* Component */
+  --r-xs: 4px; --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 24px; --r-full: 999px;
+  --focus-width: 3px;
+  --focus-offset: 2px;
+  /* Glass (visual refresh B1): how see-through menus and bars are, from Settings → Appearance (html[data-glass]).
+     Paragraph panels never go below --glass-panel-floor. */
+  --glass-panel-floor: 0.66;
+  --shimmer: rgba(255, 255, 255, 0.06); /* the skeletons' passing light (B4) */
+  /* The halo: a box-shadow spread to just outside the outline (offset + width + 1 px); it also darkens the gap between
+     the element and its ring. Inside rows that clip (lists, the guide) the ring is drawn inward (outline-offset
+     -width) and the halo 1 px inside it. Neither ever transitions. */
+  --focus-halo-ring: 0 0 0 calc(var(--focus-offset) + var(--focus-width) + 1px) var(--focus-halo);
+  --focus-halo-inset: inset 0 0 0 calc(var(--focus-width) + 1px) var(--focus-halo);
+  --card-radius: var(--radius);
+  --poster-aspect: 2 / 3;
+  --wide-aspect: 16 / 9;
+  --row-gap: 26px;
+  --glass-alpha: 0.58;
+  --glass-blur: 34px;
+
+  /* Scrim for text on artwork (A5). The eased curve is written once, in --scrim-stops: Andreas Larsen's "easing
+     gradients" (ease-in-out; at 0 8.1 15.5 ... 100 % of the run the alpha is 1 .987 .951 ... 0), after a flat part
+     of --scrim-plateau. The stops are black at full strength; whatever paints them sets the strength with
+     --scrim-max (opacity), so no alpha needs calc() and old TVs get the same curve. --scrim-left runs from the left,
+     --scrim-bottom from the bottom, --scrim-edge is the same curve as a radial falloff from the bottom-left corner.
+     Each is sized where it is used (background-size / mask-size): the layer's size is the run. The scrim behind a
+     page's artwork is the layer just above the backdrop (app.css, "Scrim"); cards size --scrim-bottom to themselves. */
+  --scrim-max: 0.85;
+  --scrim-plateau: 40%;
+  --scrim-stops:
+    rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 1) var(--scrim-plateau),
+    rgba(0, 0, 0, 0.987) calc(var(--scrim-plateau) + (100% - var(--scrim-plateau)) * 0.081),
+    rgba(0, 0, 0, 0.951) calc(var(--scrim-plateau) + (100% - var(--scrim-plateau)) * 0.155),
+    rgba(0, 0, 0, 0.896) calc(var(--scrim-plateau) + (100% - var(--scrim-plateau)) * 0.225),
+    rgba(0, 0, 0, 0.825) calc(var(--scrim-plateau) + (100% - var(--scrim-plateau)) * 0.29),
+    rgba(0, 0, 0, 0.741) calc(var(--scrim-plateau) + (100% - var(--scrim-plateau)) * 0.353),
+    rgba(0, 0, 0, 0.648) calc(var(--scrim-plateau) + (100% - var(--scrim-plateau)) * 0.412),
+    rgba(0, 0, 0, 0.55) calc(var(--scrim-plateau) + (100% - var(--scrim-plateau)) * 0.471),
+    rgba(0, 0, 0, 0.45) calc(var(--scrim-plateau) + (100% - var(--scrim-plateau)) * 0.529),
+    rgba(0, 0, 0, 0.352) calc(var(--scrim-plateau) + (100% - var(--scrim-plateau)) * 0.588),
+    rgba(0, 0, 0, 0.259) calc(var(--scrim-plateau) + (100% - var(--scrim-plateau)) * 0.647),
+    rgba(0, 0, 0, 0.175) calc(var(--scrim-plateau) + (100% - var(--scrim-plateau)) * 0.71),
+    rgba(0, 0, 0, 0.104) calc(var(--scrim-plateau) + (100% - var(--scrim-plateau)) * 0.775),
+    rgba(0, 0, 0, 0.049) calc(var(--scrim-plateau) + (100% - var(--scrim-plateau)) * 0.845),
+    rgba(0, 0, 0, 0.013) calc(var(--scrim-plateau) + (100% - var(--scrim-plateau)) * 0.919),
+    rgba(0, 0, 0, 0) 100%;
+  --scrim-left: linear-gradient(to right, var(--scrim-stops));
+  --scrim-bottom: linear-gradient(to top, var(--scrim-stops));
+  --scrim-edge: radial-gradient(farthest-side at 0% 100%, var(--scrim-stops));
+  /* The page scrim's colour: black, except Daylight's (its canvas, so its dark words stay). Card scrims are black. */
+  --scrim-colour: #000;
+}
+
+/* TV type floor (visual refresh A3): wide landscape screens (a TV at 1080p, a big monitor) read from 3 m away.
+   Caption (badges, chips, the clock, hints) 20 px, metadata and card titles 24 px, body 24 px, metadata weight 500.
+   Laptops and phones keep their sizes. Orbit has its own --t-* scale (themes/orbit/theme.css) and ignores these. */
+@media (min-width: 1600px) and (orientation: landscape) {
+  :root {
+    --fs-caption: calc(20px * var(--text-scale, 1));
+    --fs-meta: calc(24px * var(--text-scale, 1));
+    --fs-card: calc(24px * var(--text-scale, 1));
+    --fs-body: calc(24px * var(--text-scale, 1));
+    --fw-meta: 500;
+    --focus-width: 4px;
+  }
+}
+
+/* Glass choice (visual refresh B1). Tinted is the default above. */
+html[data-glass="clear"] { --glass-alpha: 0.12; --glass-blur: 16px; }
+html[data-glass="solid"] { --glass-alpha: 0.92; --glass-blur: 0px; }
+
+/* Modes over any theme (visual refresh B2), set on <html> by app.js from the profile's choices. :root[...] outranks a
+   theme's :root and Orbit's html[data-layout] blocks, so the mode wins in every theme. */
+/* True black, for OLED screens (dark themes only): the page is #000; panels and dialogs get a hairline edge instead. */
+:root[data-oled] { --n-1: #000; --n-2: #000; --app-bg: #000; --bg: #000; --bg-2: #000; }
+:root[data-oled] :is(.panel, .details-panel, .dialog, .player-menu, .card-art)::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px var(--border-subtle); pointer-events: none;
+}
+:root[data-oled] :is(.panel, .details-panel) { position: relative; } /* not dialogs: a modal dialog is already placed, and relative would make it scroll the page */
+:root[data-oled] .environment { display: none !important; }
+/* More contrast: secondary text as strong as main text, 2 px edges on controls and cards, a 4 px focus ring. */
+:root[data-contrast="more"] { --text-low: var(--text-high); --text-dim: var(--text); --focus-width: 4px; --border-subtle: var(--border-strong); }
+:root[data-contrast="more"] :is(.btn, .pill, .chip, input, select, textarea) { border: 2px solid currentColor; }
+:root[data-contrast="more"] .card-art::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 2px currentColor; pointer-events: none;
+}
+/* Large text: the rem-based themes scale the root size; Orbit scales its --t-* type tokens (theme.css). */
+html:not([data-layout="orbit"]) { font-size: calc(100% * var(--text-scale, 1)); }
+/* Windows High Contrast and other forced colours: no pictures behind text. */
+@media (forced-colors: active) { .backdrop, .scrim, .environment { display: none !important; } }

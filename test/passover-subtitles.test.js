@@ -78,6 +78,7 @@ test('the subtitles job extracts every text track and marks the title; the runne
   const runner = nf.app.core.tasks;
   const store = runner.store;
   assert.equal(store.pendingCounts().subtitles, 1, 'one title waiting');
+  nf.app.core.settings.set({ cardClips: false }); // a clip would come first otherwise (test/clips.test.js)
   const task = runner.next();
   assert.equal(task?.job, 'subtitles');
   assert.equal(task.itemId, film.id);
@@ -88,7 +89,7 @@ test('the subtitles job extracts every text track and marks the title; the runne
   const cached = fs.readdirSync(path.join(nf.app.core.config.cacheDir, 'subs')).filter((f) => f.startsWith(`${film.id}-`));
   assert.equal(cached.length, 2);
   const q = runner.status().queued;
-  assert.deepEqual(Object.keys(q).sort(), ['intros', 'lyrics', 'previews', 'subtitles', 'thumbs']);
+  assert.deepEqual(Object.keys(q).sort(), ['clips', 'intros', 'loudness', 'lyrics', 'previews', 'subtitles', 'thumbs']);
   assert.equal(q.subtitles, 0);
 });
 

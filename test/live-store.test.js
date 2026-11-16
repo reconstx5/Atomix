@@ -188,11 +188,11 @@ test('a big guide (1 000 channels × 7 days) stays responsive: nowNext under 300
   assert.ok(ms < 300, `nowNext ${ms.toFixed(0)} ms`);
 });
 
-test('replaceChannels keeps a channel\'s encryption system (widevine/clearkey) and drops anything else', async () => {
+test('replaceChannels keeps a channel\'s encryption system (widevine/clearkey/playready) and drops anything else', async () => {
   const { store } = fresh();
   store.replaceChannels(SRC, [ch('wv', 'WV', { drm: 'widevine' }), ch('ck', 'CK', { drm: 'clearkey' }), ch('pr', 'PR', { drm: 'playready' }), ch('pl', 'Plain')]);
   const by = Object.fromEntries(store.channels({ sources: [SRC] }).map((c) => [c.key, c.drm]));
-  assert.deepEqual(by, { wv: 'widevine', ck: 'clearkey', pr: null, pl: null });
+  assert.deepEqual(by, { wv: 'widevine', ck: 'clearkey', pr: 'playready', pl: null });
   store.replaceChannels(SRC, [ch('wv', 'WV')]);
   assert.equal(store.channel(idOf(store, 'wv')).drm, null, 'a refresh that drops the encryption clears it');
 });

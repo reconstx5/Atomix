@@ -107,3 +107,15 @@ test('album art is copied as-is when the embedded picture is already a JPEG', ()
   assert.ok(re.includes('mjpeg') && re.includes('-q:v'));
   assert.ok(copy.includes('-an') && copy.includes('-sn'));
 });
+
+test('v0.28: which ffmpegs can read the first seconds at full speed (-readrate_initial_burst, ffmpeg 6.1+)', async () => {
+  const { supportsInitialBurst } = await import('../src/library/probe.js');
+  assert.equal(supportsInitialBurst('6.1.1-3ubuntu5'), true);
+  assert.equal(supportsInitialBurst('n6.1'), true);
+  assert.equal(supportsInitialBurst('7.1'), true);
+  assert.equal(supportsInitialBurst('6.0'), false);
+  assert.equal(supportsInitialBurst('5.1.2'), false);
+  assert.equal(supportsInitialBurst('2024-05-01-git-abc'), true);
+  assert.equal(supportsInitialBurst('2023-05-01-git-abc'), false);
+  assert.equal(supportsInitialBurst('unknown'), false);
+});

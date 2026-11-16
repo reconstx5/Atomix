@@ -12,8 +12,10 @@ export function phoneLive(video, { touch = globalThis.matchMedia?.('(pointer: co
   let wanted = false; // playing: the lock should be held (it's dropped by the browser when the page is hidden)
   let gone = false;
 
+  let asking = false; // a request is on its way (v0.28: two quick "playing" events no longer take two locks)
   const take = async () => {
-    if (gone || lock || !navigator.wakeLock?.request || document.visibilityState === 'hidden') return;
+    if (gone || lock || asking || !navigator.wakeLock?.request || document.visibilityState === 'hidden') return;
+    asking = true;
     try {
       const l = await navigator.wakeLock.request('screen');
       if (gone || !wanted) return l.release().catch(() => {});
@@ -23,6 +25,8 @@ export function phoneLive(video, { touch = globalThis.matchMedia?.('(pointer: co
       });
     } catch {
       /* refused: the screen may dim, nothing else changes */
+    } finally {
+      asking = false;
     }
   };
   const drop = () => {
@@ -53,6 +57,7 @@ export function phoneLive(video, { touch = globalThis.matchMedia?.('(pointer: co
   video.addEventListener('playing', onPlaying);
   video.addEventListener('pause', onStop);
   video.addEventListener('ended', onStop);
+  video.addEventListener('error', onStop); // v0.28: a failed channel lets the screen sleep
   document.addEventListener('visibilitychange', onVisible);
   document.addEventListener('fullscreenchange', onFullscreen);
   return {
@@ -63,6 +68,7 @@ export function phoneLive(video, { touch = globalThis.matchMedia?.('(pointer: co
       video.removeEventListener('playing', onPlaying);
       video.removeEventListener('pause', onStop);
       video.removeEventListener('ended', onStop);
+      video.removeEventListener('error', onStop);
       document.removeEventListener('visibilitychange', onVisible);
       document.removeEventListener('fullscreenchange', onFullscreen);
       drop();

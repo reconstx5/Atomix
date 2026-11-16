@@ -127,7 +127,7 @@ test('markers: set by hand beats chapters beats audio, and "no intro" sticks', (
   assert.equal(store.setMarker(ep, 'intro', { start: null, end: null, source: 'manual' }), true);
   assert.equal(store.setMarker(ep, 'intro', { start: 5, end: 20, source: 'chapter' }), false);
   assert.deepEqual(store.markers(ep).intro, { none: true, source: 'manual' });
-  assert.deepEqual(store.playbackMarkers(ep), { intro: null, credits: null });
+  assert.deepEqual(store.playbackMarkers(ep), { intro: null, recap: null, credits: null });
 
   store.setMarker(ep, 'credits', { start: 1300, end: 1390, source: 'chapter' });
   assert.deepEqual(store.playbackMarkers(ep).credits, { start: 1300, end: 1390 });

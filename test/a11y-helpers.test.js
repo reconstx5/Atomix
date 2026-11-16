@@ -41,3 +41,22 @@ test('browseTarget picks the movies library for video lists, a music library for
   assert.equal(browseTarget([{ id: 7, type: 'shows' }], 'watchlist'), null, 'no movies library: no button');
   assert.equal(browseTarget([{ id: 9, type: 'movies' }], 'music'), null, 'no music library: no button');
 });
+
+// v0.28: a sheet item that is a switch ("Show channels this … can't play") tells a screen reader whether it's on.
+import { sheetItemAttrs } from '../public/js/components.js';
+test('sheet items: `checked` is a toggle button (aria-pressed, tick when on); other items render as before', () => {
+  const on = sheetItemAttrs({ label: 'Show', icon: 'eye', checked: true }, 0);
+  assert.equal(on.icon, 'check');
+  assert.equal(on.attrs['aria-pressed'], 'true');
+  assert.equal(on.attrs['aria-current'], null);
+  assert.equal(on.attrs.class, 'sheet-item is-current', 'looks as the ticked item always has');
+  const off = sheetItemAttrs({ label: 'Show', icon: 'eye', checked: false }, 1);
+  assert.equal(off.icon, 'eye');
+  assert.equal(off.attrs['aria-pressed'], 'false');
+  assert.equal(off.attrs.class, 'sheet-item');
+  // A choice in force (a sort) keeps aria-current; a plain item has neither.
+  const sort = sheetItemAttrs({ label: 'Name', icon: 'sort', current: true }, 0);
+  assert.deepEqual(sort, { icon: 'check', attrs: { type: 'button', class: 'sheet-item is-current', 'aria-current': 'true', 'aria-pressed': null, 'data-autofocus': true } });
+  const plain = sheetItemAttrs({ label: 'Delete', icon: 'trash', danger: true }, 2);
+  assert.deepEqual(plain, { icon: 'trash', attrs: { type: 'button', class: 'sheet-item danger', 'aria-current': null, 'aria-pressed': null, 'data-autofocus': null } });
+});

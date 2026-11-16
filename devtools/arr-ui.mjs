@@ -1,0 +1,16 @@
+import { open, go, check, failed, BASE } from './lib.mjs';
+const { browser, context, page, errors } = await open();
+await context.request.put(`${BASE}/api/admin/settings`, { data: { requestUrl: 'http://192.168.1.20:5055' } });
+await go(page, '#/settings/server');
+await page.waitForSelector('.arr-card', { timeout: 15000 });
+await page.waitForTimeout(500);
+const addr = await page.textContent('.arr-address');
+check('Settings shows the webhook address', /\/api\/hooks\/arr\?key=[\w-]{24,}/.test(addr), addr);
+await go(page, '#/search?q=zzqqxx');
+await page.waitForTimeout(1500);
+const req = await page.getAttribute('.empty-state a.btn-primary', 'href').catch(() => null);
+check('Search offers Request it when nothing is found', req === 'http://192.168.1.20:5055/search?query=zzqqxx', String(req));
+await context.request.put(`${BASE}/api/admin/settings`, { data: { requestUrl: '' } });
+check('no page errors', !errors.length, errors.join(' | '));
+await browser.close();
+process.exit(failed() ? 1 : 0);

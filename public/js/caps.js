@@ -46,3 +46,9 @@ export function detectCaps() {
   cached = { video, audio, containers, hls, hdr, mse };
   return cached;
 }
+
+/**
+ * v0.28: whether the player should ask for a media link (a private link in the video's address). Safari on iPhone and
+ * iPad hands a video to Apple's own media player, which may fetch it without the sign-in cookie.
+ */
+export const needsMediaLink = () => Boolean(detectCaps().hls);

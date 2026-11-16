@@ -6,12 +6,14 @@ import { canAdmin } from '../app.js';
 import { cardItems } from '../components.js';
 import { setBackdrop, artFor, followFocus } from '../backdrop.js';
 import { Shelf } from './library-shelf.js';
+import { rippleOnArrival } from '../transitions.js';
 import { VIEWS, sortsFor, useLibrary, useTypedText, Results, countText, newEpisodes, NewEpisodes, Tools, subscribeDialog, collectionsFor, CollectionsResults, collectionsCount } from './library-parts.js';
 
 export { load } from './library-data.js';
 
 export function Screen({ data, query, view }) {
   const admin = canAdmin();
+  rippleOnArrival(view); // card motion v2: the first screenful of cards ripples in when the library is first drawn
   if (data.orbitShelf) return html`<${Shelf} data=${data} query=${query} view=${view} admin=${admin} />`;
   return html`<${Classic} data=${data} view=${view} admin=${admin} />`;
 }

@@ -1,15 +1,9 @@
 /* Midnight — the first Atomix theme. Copy this folder to make your own. */
 :root {
+  --focus-ring: #ffffff; /* A4: a white ring with a dark halo (tokens.css) on every dark theme */
   color-scheme: dark;
-  --bg: #0c0e13;
-  --bg-2: #12151c;
-  --surface: #191d27;
-  --surface-2: #232937;
   --border: rgba(255, 255, 255, 0.08);
-  --text: #eef1f6;
-  --text-dim: #a3abba;
-  --accent: #ff6b3d;
-  --accent-text: #160b06;
+  --accent-text: #000000; /* black or white, whichever reads on the accent (APCA Lc >= 60) */
   --danger: #ff5c6c;
   --success: #3ecf8e;
   --radius: 10px;
@@ -19,4 +13,63 @@
   --shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-display: var(--font);
+  --accent: var(--a-10); /* one step up from a-9 (today's accent): black ink on it reaches Lc 60 */
+  --accent-solid: var(--a-10);
+  --accent-hover: var(--a-11);
+}
+/* Ramps (devtools/ramp.mjs): --n-* neutrals, --a-* accent. Hex for every browser; the same colours in oklch() where
+   it is understood. --bg, --bg-2, --surface, --surface-2, --text and --accent come from these (public/css/tokens.css). */
+:root {
+  --n-1: #0c0e13;
+  --n-2: #12151c;
+  --n-3: #191d27;
+  --n-4: #232937;
+  --n-5: #363c4a;
+  --n-6: #4a515e;
+  --n-7: #5f6673;
+  --n-8: #757c89;
+  --n-9: #8c939f;
+  --n-10: #a3aab6;
+  --n-11: #bbc2cd;
+  --n-12: #eef1f6;
+  --a-1: #20100b;
+  --a-2: #331911;
+  --a-3: #472216;
+  --a-4: #5d2b1c;
+  --a-5: #733421;
+  --a-6: #8a3e27;
+  --a-7: #a2482c;
+  --a-8: #ba5232;
+  --a-9: #ff6b3d;
+  --a-10: #ff906e;
+  --a-11: #ffac94;
+  --a-12: #ffe9e2;
+}
+@supports (color: oklch(0% 0 0)) {
+  :root {
+    --n-1: oklch(16.40% 0.0111 268.01);
+    --n-2: oklch(19.59% 0.0149 266.81);
+    --n-3: oklch(23.13% 0.0203 267.78);
+    --n-4: oklch(28.15% 0.0273 266.60);
+    --n-5: oklch(35.63% 0.0257 266.85);
+    --n-6: oklch(43.36% 0.0233 262.87);
+    --n-7: oklch(50.89% 0.0224 262.92);
+    --n-8: oklch(58.49% 0.0216 262.95);
+    --n-9: oklch(66.14% 0.0196 261.32);
+    --n-10: oklch(73.62% 0.0190 261.33);
+    --n-11: oklch(81.19% 0.0173 259.42);
+    --n-12: oklch(95.73% 0.0074 260.73);
+    --a-1: oklch(19.44% 0.0290 38.11);
+    --a-2: oklch(24.78% 0.0443 37.88);
+    --a-3: oklch(30.02% 0.0604 38.63);
+    --a-4: oklch(35.40% 0.0775 37.46);
+    --a-5: oklch(40.59% 0.0942 37.48);
+    --a-6: oklch(45.97% 0.1100 37.48);
+    --a-7: oklch(51.34% 0.1267 37.77);
+    --a-8: oklch(56.59% 0.1425 37.58);
+    --a-9: oklch(70.52% 0.1907 37.47);
+    --a-10: oklch(76.55% 0.1427 37.81);
+    --a-11: oklch(81.92% 0.1040 36.83);
+    --a-12: oklch(94.98% 0.0259 38.46);
+  }
 }

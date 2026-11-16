@@ -185,3 +185,15 @@ test('a radio station sent as HLS in 10-s bursts (behind a redirect) keeps playi
   assert.ok(bytes > 40000, `${bytes} bytes in 15 s`);
   await admin.post(`/api/playback/${r.data.sessionId}/stop`, {});
 });
+
+test('v0.28: an iPhone asking for a media link gets one on its channel\'s playlist (no cookie needed)', { skip }, async () => {
+  const caps = { video: ['vp9'], audio: ['aac'], containers: ['mp4'], hls: true, mse: false };
+  const r = await admin.post(`/api/live/channels/${ids.Two}/play`, { caps, mediaLink: true });
+  assert.equal(r.data.delivery, 'hls', JSON.stringify(r.data));
+  const u = new URL(r.data.url, nf.base);
+  assert.ok(u.searchParams.get('cast'), r.data.url);
+  const list = await fetch(`${nf.base}${u.pathname}${u.search}`);
+  assert.equal(list.status, 200, 'no cookie, still plays');
+  await list.text();
+  await admin.post(`/api/playback/${r.data.sessionId}/stop`, {});
+});

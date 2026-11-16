@@ -2,7 +2,7 @@
 // #EXTM3U header, #EXTINF attributes, #EXTGRP, #EXTVLCOPT and #KODIPROP lines, and "url|Header=Value" suffixes.
 // Written from the format; pure, so it's tested on fixtures.
 import crypto from 'node:crypto';
-import { systemName, parseLicenceKey, parseDrmLegacy, parseHeaderList } from './drm.js';
+import { systemName, parseLicenceKey, parseDrmLegacy, parseDrmJson, parseHeaderList } from './drm.js';
 
 const ATTR = /([A-Za-z][\w-]*)=("([^"]*)"|'([^']*)'|([^\s,]+))/g;
 
@@ -72,8 +72,8 @@ function splitUrl(line) {
   return { url: line.slice(0, bar).trim(), headers };
 }
 
-/** An entry's encryption from its #KODIPROP lines: { system, licence } or null (plain, or a system Atomix can't play). */
-function drmOf(d) {
+/** One system from the older #KODIPROP lines (license_type + license_key, or drm_legacy), or null. */
+function legacyOf(d) {
   if (d.legacy) return parseDrmLegacy(d.legacy);
   const system = systemName(d.type);
   if (!system) return null;
@@ -81,6 +81,14 @@ function drmOf(d) {
   if (!licence) return null;
   // The browser's key system takes these straight from the playlist (base64); neither is an address.
   return { system, licence, ...(d.serverCertificate ? { serverCertificate: d.serverCertificate } : {}), ...(d.initData ? { initData: d.initData } : {}) };
+}
+
+/** An entry's encryption from its #KODIPROP lines: { systems: [...] } in the playlist's order, or null. The JSON form comes first; an older form only adds a system it didn't name. */
+function drmOf(d) {
+  const systems = d.json ? parseDrmJson(d.json) : [];
+  const old = legacyOf(d);
+  if (old && !systems.some((s) => s.system === old.system)) systems.push(old);
+  return systems.length ? { systems } : null;
 }
 
 const urlHash = (url) => crypto.createHash('sha1').update(url).digest('hex').slice(0, 16);
@@ -143,6 +151,9 @@ export function parseM3u(text, { startNumber = 1, numbering = 'playlist' } = {})
       const value = prop.slice(eq + 1).trim();
       if (key === 'mimetype') mime = value;
       else if (key === 'inputstream.adaptive.manifest_type' && MIME_FOR_MANIFEST[value.toLowerCase()]) mime = MIME_FOR_MANIFEST[value.toLowerCase()];
+      else if (key === 'inputstream.adaptive.drm') drm.json = value;
+      else if (key === 'atomix.app_url') drm.appUrl = /^https:\/\/[^/\s]/i.test(value) ? value : undefined;
+      else if (key === 'atomix.app_name') drm.appName = value;
       else if (key === 'inputstream.adaptive.license_type') drm.type = value;
       else if (key === 'inputstream.adaptive.license_key') drm.key = value;
       else if (key === 'inputstream.adaptive.drm_legacy') drm.legacy = value;
@@ -183,8 +194,10 @@ export function parseM3u(text, { startNumber = 1, numbering = 'playlist' } = {})
         streamHeaders: drm.streamHeaders,
         manifestParams: drm.manifestParams,
         streamParams: drm.streamParams,
+        appUrl: drm.appUrl,
+        appName: drm.appName,
       };
-      for (const k of ['tvgId', 'tvgName', 'logo', 'shift', 'mime', 'catchup', 'manifestHeaders', 'streamHeaders', 'manifestParams', 'streamParams']) if (ch[k] === undefined) delete ch[k];
+      for (const k of ['tvgId', 'tvgName', 'logo', 'shift', 'mime', 'catchup', 'manifestHeaders', 'streamHeaders', 'manifestParams', 'streamParams', 'appUrl', 'appName']) if (ch[k] === undefined) delete ch[k];
       raw.push(ch);
     }
     pending = null;

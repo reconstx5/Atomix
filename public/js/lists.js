@@ -77,7 +77,7 @@ export function addToPlaylistItems(what, { kind = 'video', label = 'Add to playl
 
 /** A playlist card for a Home row or the Lists page: the name over a 2 × 2 mosaic of its first posters. */
 // A mosaic tile is a quarter of the card (v0.24, Orbit: a small copy).
-const mosaic = (url) => {
+export const mosaic = (url) => {
   const a = sizedAttrs(url, 'poster', { orbit: document.body?.dataset.layout === 'orbit' });
   return a.sizes ? { sizes: 'auto, 100px', srcset: a.srcset, src: a.src } : { src: a.src };
 };

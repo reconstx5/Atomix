@@ -100,11 +100,18 @@ export function decide({ file, media, caps, audioIndex, quality, burnSubtitle, f
   if (forceTranscode) reasons.push('Transcode requested');
 
   // The track is kept as-is when the container can carry it and the sink plays it (in transcode mode too).
-  const audioCopy = !audio || (COPYABLE_AUDIO[target].has(audio.codec) && audioOk);
+  // v0.28: Apple devices (HLS) get stereo AAC whenever the sound is surround: an iPhone failed to decode a converted
+  // stream carrying the film's 5.1 AAC, and a phone plays two channels anyway.
+  const appleSurround = Boolean(caps.hls && audio && Number(audio.channels) > 2);
+  const audioCopy = !audio || (COPYABLE_AUDIO[target].has(audio.codec) && audioOk && !appleSurround);
+  // v0.28: Safari plays HEVC only when the file labels it hvc1; hev1 (common in downloads) or an unknown label is
+  // repackaged with the right label instead — the picture is copied, nothing is converted.
+  const appleHevcLabel = Boolean(caps.hls && v?.codec === 'hevc' && v.tag !== 'hvc1');
+  if (appleHevcLabel) reasons.push('Relabelling HEVC for Apple devices');
   const canRemux = videoOk && (target === 'mp4' || WEBM_VIDEO.has(v.codec));
 
   if (!forceTranscode && burnSubtitle == null && !tooBig) {
-    if (containerOk && videoOk && audioOk && !nonDefaultAudio) return { mode: 'direct', target, audio, reasons: ['Browser can play the original file'] };
+    if (containerOk && videoOk && audioOk && !nonDefaultAudio && !appleHevcLabel) return { mode: 'direct', target, audio, reasons: ['Browser can play the original file'] };
     if (canRemux) return { mode: 'remux', target, audio, audioCopy, reasons };
   }
   if (!transcodingEnabled) throw new HttpError(422, `This file needs converting (${reasons.join(', ')}), but transcoding is turned off.`);
@@ -150,7 +157,14 @@ export function buildFfmpegArgs(plan, settings, output) {
     // whole film at full speed (and three Safari viewers from starving each other). The progressive pipe is paced by
     // the socket. A live channel arrives in real time already.
     // Played faster than 1× (v0.21), the read-ahead keeps half a second per second ahead of it (2× → 2.5).
-    if (!endless && output.type === 'hls' && (plan.tools?.ffmpeg?.major || 0) >= 5) args.push('-readrate', String(Math.max(1.5, (Number(plan.speed) || 1) + 0.5)));
+    if (!endless && output.type === 'hls' && (plan.tools?.ffmpeg?.major || 0) >= 5) {
+      // A repackaged stream (the picture copied, not converted) costs almost nothing to make: it reads 4× ahead after
+      // its first minute at full speed, so Safari (which wants several pieces before it starts) isn't kept waiting.
+      const copy = plan.mode === 'remux';
+      args.push('-readrate', String(Math.max(copy ? 4 : 1.5, (Number(plan.speed) || 1) + 0.5)));
+      // v0.28: the first 10 s at full speed, so the first pieces are ready at once (the pacing starts after them).
+      if (plan.tools?.ffmpeg?.burst) args.push('-readrate_initial_burst', copy ? '60' : '10');
+    }
     if (!endless && plan.start > 0) args.push('-ss', plan.start.toFixed(3));
   }
   args.push('-i', plan.file);
@@ -238,7 +252,8 @@ export function buildFfmpegArgs(plan, settings, output) {
         );
     }
     // Regular keyframes so HLS segments and seeking line up.
-    args.push('-force_key_frames', `expr:gte(t,n_forced*${SEG})`);
+    // v0.28: for HLS, 0, 1, 3, 5…: the first piece is cut at 1 s (-hls_init_time 1), so a phone starts sooner.
+    args.push('-force_key_frames', output.type === 'hls' ? `expr:gte(t,n_forced*${SEG}-1)` : `expr:gte(t,n_forced*${SEG})`);
     // Players read the colour tags: after a tone map the picture is plain BT.709, whatever the source said.
     if (tonemap) args.push('-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709');
   } else {
@@ -350,6 +365,32 @@ function buildAudioArgs(plan, output) {
 }
 
 /** A video's height on screen: a 90°/270° rotation (a phone video) shows its coded width as its height. */
+/**
+ * Read an HLS header (init.mp4) once it is whole: its top-level boxes add up to the file's length and a moov is among
+ * them. Kept on the session (the file may be rewritten later). False while it is missing or still being written.
+ */
+function takeHeader(session, file) {
+  let buf;
+  try {
+    buf = fs.readFileSync(file);
+  } catch {
+    return false;
+  }
+  let at = 0;
+  let moov = false;
+  while (at + 8 <= buf.length) {
+    let size = buf.readUInt32BE(at);
+    const type = buf.toString('latin1', at + 4, at + 8);
+    if (size === 1 && at + 16 <= buf.length) size = Number(buf.readBigUInt64BE(at + 8));
+    if (size < 8) return false;
+    if (type === 'moov') moov = true;
+    at += size;
+  }
+  if (at !== buf.length || !moov) return false;
+  session.initHeader = buf;
+  return true;
+}
+
 const shownHeight = (v) => (v?.rotation === 90 || v?.rotation === 270 ? v.width || v.height || 1080 : v?.height || 1080);
 
 /** The height a software conversion is held to (a PC can't keep up with 4K at veryfast); Infinity for hardware. */
@@ -424,6 +465,7 @@ export class PlaybackManager {
    * the caps meanwhile.
    */
   async create({ user, profile, item, source = null, caps, start = 0, audioIndex = null, quality = 'original', burnSubtitle = null, audioDelay = 0, subtitleDelay = 0, burnTextFile = null, forceTranscode = false, replaces, keepUntilLoaded = null, clientIp, castDevice = null, extraHeaders = null, live = null, audioOnly = false, behind = 0, behindPieces = null, speed = 1 }) {
+    const began = Date.now();
     if (replaces) {
       const old = this.sessions.get(replaces);
       if (old && old.userId === user.id) this.stop(old.id, 'replaced');
@@ -529,6 +571,8 @@ export class PlaybackManager {
     else if (delivery === 'hls') url = `/api/hls/${id}/index.m3u8`;
     else url = `/api/stream/${id}`;
     this.hooks.emit('playback:start', { session: this.publicSession(session), user, item });
+    // v0.28: how a title is played and how long getting it ready took (an iPhone start felt slow).
+    if (!live) log.info(`Playing "${item.title}" ${plan.mode} (${delivery})${from > 0 ? ` from ${Math.round(from)} s` : ''}: ready in ${Date.now() - began} ms${plan.reasons?.length ? ` — ${plan.reasons.join(', ')}` : ''}`);
     return { session, url };
   }
 
@@ -550,7 +594,22 @@ export class PlaybackManager {
   spawn(session, output) {
     const args = buildFfmpegArgs(session, this.settings.all(), output);
     log.debug(`ffmpeg ${redactArgs(args).join(' ')}`);
-    const cwd = session.burnTextFile ? path.dirname(session.burnTextFile) : undefined;
+    session.ffmpegCommand = redactArgs(args).join(' ');
+    if (output.type === 'hls') session.initHeader = null; // a new run writes a new header (respawn, restart)
+    // ffmpeg runs in a folder of its own choosing: an HLS stream's own folder — ffmpeg 9 writes the header named by
+    // -hls_fmp4_init_filename into its working folder, not beside the playlist (Dallas's iPhone, v0.28) — or the
+    // folder of a subtitle it draws on (the filter gets a bare file name; for HLS the subtitle is copied in).
+    let cwd = session.burnTextFile ? path.dirname(session.burnTextFile) : undefined;
+    if (output.type === 'hls') {
+      if (session.burnTextFile && path.dirname(session.burnTextFile) !== output.dir) {
+        try {
+          fs.copyFileSync(session.burnTextFile, path.join(output.dir, path.basename(session.burnTextFile)));
+        } catch (err) {
+          log.warn(`Couldn't copy the subtitle for drawing on: ${err.message}`);
+        }
+      }
+      cwd = output.dir;
+    }
     const proc = spawn(this.config.ffmpegPath, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], cwd });
     const errors = [];
     proc.stderr.on('data', (c) => {
@@ -559,7 +618,12 @@ export class PlaybackManager {
     });
     proc.on('error', (err) => log.error(`ffmpeg failed to start: ${err.message}`));
     proc.on('close', (code, signal) => {
-      if (code && !signal && code !== 255) log.warn(`ffmpeg exited with ${code}: ${redactText(Buffer.concat(errors).toString().trim().slice(-800))}`);
+      // Stopped by Atomix (proc.killed) or by a signal: expected. Anything else — 255 included, which ffmpeg 7+ also
+      // uses for errors — is logged with ffmpeg's last words and the command, so a failed conversion can be explained.
+      if (code && !signal && !proc.killed) {
+        log.warn(`ffmpeg exited with ${code}: ${redactText(Buffer.concat(errors).toString().trim().slice(-800)) || '(it printed nothing)'}`);
+        log.warn(`ffmpeg command: ${redactArgs(args).join(' ')}`);
+      }
       if (session.proc === proc) session.proc = null;
       // A live channel never ends on its own: an exit we didn't cause is a dropped stream.
       if ((session.live?.kind === 'live' || session.live?.kind === 'buffer') && !signal && this.sessions.get(session.id) === session) this.liveDropped(session, output);
@@ -608,32 +672,71 @@ export class PlaybackManager {
     proc.on('close', () => res.end());
   }
 
+  /** Start an HLS session's conversion (once). v0.28: called as the playback is made, so the first piece is on its
+   * way while the phone is still setting up its player. */
+  startHls(session) {
+    if (session.dir) return;
+    this.checkCapacity(session);
+    session.dir = path.join(this.config.transcodeDir, session.id);
+    fs.mkdirSync(session.dir, { recursive: true });
+    this.spawn(session, { type: 'hls', dir: session.dir });
+  }
+
+  /**
+   * v0.28 (iPhone diagnosis, temporary): the latest converted stream's first piece, its header and the ffmpeg command
+   * are copied to data/logs/hls-sample, so what an iPhone was sent can be checked afterwards. Never fails a request.
+   */
+  keepSample(session) {
+    if (!this.config.dataDir || !session.dir) return;
+    try {
+      const dir = path.join(this.config.dataDir, 'logs', 'hls-sample');
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.mkdirSync(dir, { recursive: true });
+      if (!session.initHeader) takeHeader(session, path.join(session.dir, 'init.mp4'));
+      if (session.initHeader) fs.writeFileSync(path.join(dir, 'init.mp4'), session.initHeader);
+      for (const f of ['seg00000.m4s', 'index.m3u8']) if (fs.existsSync(path.join(session.dir, f))) fs.copyFileSync(path.join(session.dir, f), path.join(dir, f));
+      fs.writeFileSync(path.join(dir, 'command.txt'), `${new Date().toISOString()} item ${session.itemId ?? '?'} ${session.mode}\nffmpeg ${session.ffmpegCommand || '?'}\n`);
+    } catch (err) {
+      log.warn(`Couldn't keep the stream sample: ${err.message}`);
+    }
+  }
+
   /** HLS playlist and segments (Safari / iOS). */
   async serveHls(ctx, id, name) {
     const session = this.get(id, ctx.user);
     if (session.delivery !== 'hls') throw new HttpError(400, 'Wrong delivery type');
-    if (!session.dir) {
-      this.checkCapacity(session);
-      session.dir = path.join(this.config.transcodeDir, session.id);
-      fs.mkdirSync(session.dir, { recursive: true });
-      this.spawn(session, { type: 'hls', dir: session.dir });
-    }
+    this.startHls(session);
     const file = safeJoin(session.dir, name);
     if (!file || !/^(index\.m3u8|init\.mp4|seg\d+\.m4s)$/.test(name)) throw new HttpError(404, 'Not found');
-    // Wait for ffmpeg to produce the file (the playlist needs at least one segment).
+    // Wait for ffmpeg to produce the file (the playlist needs at least one segment). v0.28 (iPhone): a piece is only
+    // sent once the playlist lists it (so it is whole), and the header (init.mp4) once the first piece is listed —
+    // then it is kept in memory: ffmpeg 9 on Windows rewrites init.mp4 as it goes, and an iPhone that got it
+    // missing or half-written failed every stream with "Media failed to decode".
     const deadline = Date.now() + 30000;
-    for (;;) {
-      if (fs.existsSync(file)) {
-        if (name !== 'index.m3u8') break;
-        const text = fs.readFileSync(file, 'utf8');
-        if (/#EXTINF/.test(text)) break;
+    const listPath = path.join(session.dir, 'index.m3u8');
+    const listed = (want) => {
+      try {
+        const text = fs.readFileSync(listPath, 'utf8');
+        return want === 'init.mp4' ? /#EXTINF/.test(text) : text.split(/\r?\n/).includes(want);
+      } catch {
+        return false;
       }
+    };
+    for (;;) {
+      if (name === 'init.mp4' && session.initHeader) break;
+      if (name === 'index.m3u8' ? listed('init.mp4') : name === 'init.mp4' ? listed('init.mp4') && takeHeader(session, file) : fs.existsSync(file) && listed(name)) break;
       if (Date.now() > deadline) throw new HttpError(504, 'Transcoder is taking too long to start');
       // Still waiting and no encoder running (it died, or was stopped): say so now, not after 30 s — the playlist
       // without a segment yet included.
       if (!session.proc) throw new HttpError(500, 'Transcoder stopped unexpectedly');
-      await sleep(250);
+      await sleep(100); // v0.28: checked often, so the first piece goes out as soon as it is written
     }
+    if (name === 'init.mp4') {
+      ctx.res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': session.initHeader.length, 'Cache-Control': 'no-cache' });
+      ctx.res.end(ctx.req.method === 'HEAD' ? undefined : session.initHeader);
+      return;
+    }
+    if (name === 'seg00000.m4s') this.keepSample(session);
     // Fetched with a cast link (AirPlay: the Apple TV has no cookie): every playlist entry carries the link too,
     // since relative URLs drop the query string.
     const token = ctx.castLink && ctx.query?.cast;

@@ -4,6 +4,11 @@
 // (what to ask for, the init data, the sentences) are tested in Node; setupKeys runs in the browser.
 
 const WIDEVINE = 'com.widevine.alpha';
+// v0.28: PlayReady (Edge on Windows, some Chromium builds). The newer name first; the plain one if it's refused.
+export const PLAYREADY = 'com.microsoft.playready.recommendation';
+export const PLAYREADY_PLAIN = 'com.microsoft.playready';
+export const isPlayReady = (keySystem) => keySystem === PLAYREADY || keySystem === PLAYREADY_PLAIN;
+const PLAYREADY_ID = [0x9a, 0x04, 0xf0, 0x79, 0x98, 0x40, 0x42, 0x86, 0xab, 0x92, 0xe6, 0x5b, 0xe0, 0x88, 0x5f, 0x95];
 export const NO_WIDEVINE = "This browser can't play this channel's protection.";
 // v0.27: said before the channel starts (dash/support.js). iPhones have no Widevine; FairPlay plays only in Safari.
 export const NO_WIDEVINE_IPHONE = "This channel is encrypted with Widevine, which iPhones can't play.";
@@ -16,6 +21,9 @@ export const EXPIRED = 'Your sign-in has expired — sign in again';
 // v0.27: browsers only decrypt on a secure page (https://, or this computer's own localhost) — a phone on the plain
 // home-network address gets this, with the secure address to open (views/player.js).
 export const NEED_SECURE = "Encrypted channels need Atomix's secure address on this device";
+// v0.28: a channel offering several systems, none of which this device has (said before the channel starts).
+export const NO_COMMON_SYSTEM = "This browser can't play any of this channel's protections.";
+export const NO_PROTECTION_IOS = "This channel's protection doesn't play on iPhone or iPad.";
 
 const LOWER_CODECS = new Set(['opus', 'flac']); // browsers match these by their lowercase names
 
@@ -32,6 +40,19 @@ const unique = (list) => [...new Set(list)];
 
 /** The configurations to ask requestMediaKeySystemAccess for, from the tracks the player will play. */
 export function keySystemConfigs(keySystem, { video = [], audio = [] } = {}) {
+  if (isPlayReady(keySystem)) {
+    // Hardware (3000) video first, then software (2000): two configurations, the browser takes the first it can give.
+    // Audio is software (2000) in both: PlayReady devices refuse 3000 for audio.
+    return ['3000', '2000'].map((robustness) => {
+      const caps = (tracks, r) => unique(tracks.filter((t) => t.mimeType && t.codecs).map(contentType)).map((c) => ({ contentType: c, robustness: r }));
+      const config = { initDataTypes: ['cenc'] };
+      const v = caps(video, robustness);
+      const a = caps(audio, '2000');
+      if (v.length) config.videoCapabilities = v;
+      if (a.length) config.audioCapabilities = a;
+      return { ...config, persistentState: 'optional', distinctiveIdentifier: 'optional', sessionTypes: ['temporary'] };
+    });
+  }
   const wv = keySystem === WIDEVINE;
   const caps = (tracks) => unique(tracks.filter((t) => t.mimeType && t.codecs).map(contentType)).map((c) => (wv ? { contentType: c, robustness: 'SW_SECURE_CRYPTO' } : { contentType: c }));
   const config = { initDataTypes: wv ? ['cenc'] : ['keyids', 'cenc'] };
@@ -49,14 +70,43 @@ const hexToBase64Url = (hex) => {
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 };
 
+/** A version-0 PSSH box for PlayReady around the manifest's PlayReady Header Object (mspr:pro). */
+function playReadyPssh(pro) {
+  const data = fromBase64(pro);
+  const out = new Uint8Array(32 + data.length);
+  const view = new DataView(out.buffer);
+  view.setUint32(0, out.length);
+  out.set([0x70, 0x73, 0x73, 0x68], 4); // 'pssh'; version 0, no flags
+  out.set(PLAYREADY_ID, 12);
+  view.setUint32(28, data.length);
+  out.set(data, 32);
+  return out;
+}
+
 /**
- * The init data for the manifest's protection entries: Widevine's pssh boxes (each once), or for ClearKey the key ids.
+ * The init data for the manifest's protection entries: Widevine's pssh boxes (each once); PlayReady's own pssh boxes,
+ * else PSSH boxes built from its mspr:pro headers; or for ClearKey the key ids.
  * Empty when the manifest has none (the init segment's `encrypted` event supplies it then).
  */
 export function initDataFor(keySystem, contentProtection = []) {
   if (keySystem === WIDEVINE) {
     const pssh = unique(contentProtection.filter((c) => c.system === 'widevine' && c.pssh).map((c) => c.pssh));
     return pssh.map((p) => ({ initDataType: 'cenc', initData: fromBase64(p) }));
+  }
+  if (isPlayReady(keySystem)) {
+    const pr = contentProtection.filter((c) => c.system === 'playready');
+    const pssh = unique(pr.filter((c) => c.pssh).map((c) => c.pssh));
+    if (pssh.length) return pssh.map((p) => ({ initDataType: 'cenc', initData: fromBase64(p) }));
+    const pros = unique(pr.filter((c) => c.pro).map((c) => c.pro));
+    const out = [];
+    for (const p of pros) {
+      try {
+        out.push({ initDataType: 'cenc', initData: playReadyPssh(p) });
+      } catch {
+        /* not base64: the init segment's own data is used */
+      }
+    }
+    return out;
   }
   const kids = unique(contentProtection.map((c) => c.kid).filter(Boolean));
   if (!kids.length) return [];
@@ -105,11 +155,18 @@ export async function setupKeys(video, { keySystem, licenceUrl, contentProtectio
   await releasing.catch(() => {});
   if (globalThis.isSecureContext === false) throw new Error(NEED_SECURE);
   let access;
-  try {
-    access = await navigator.requestMediaKeySystemAccess(keySystem, keySystemConfigs(keySystem, tracks));
-  } catch {
-    throw new Error(keySystem === WIDEVINE ? NO_WIDEVINE : WONT_PLAY);
+  // PlayReady: the server's name is a hint; the browser asks for the newer name first, then the plain one.
+  const names = isPlayReady(keySystem) ? [PLAYREADY, PLAYREADY_PLAIN] : [keySystem];
+  for (const name of names) {
+    try {
+      access = await navigator.requestMediaKeySystemAccess(name, keySystemConfigs(name, tracks));
+      keySystem = name;
+      break;
+    } catch {
+      /* the next name, or the sentence below */
+    }
   }
+  if (!access) throw new Error(keySystem === WIDEVINE ? NO_WIDEVINE : WONT_PLAY);
   let keys;
   try {
     keys = await access.createMediaKeys();

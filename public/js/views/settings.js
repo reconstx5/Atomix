@@ -2,14 +2,17 @@
 import { api } from '../api.js';
 import { addDeviceDialog } from '../cast.js';
 import { h, icon, clear, timeAgo, formatClock } from '../dom.js';
-import { button, toast, openDialog, confirmDialog, field, toggle, spinner, avatar, AVATAR_NAMES, rovingRadios, rowActions, moreButton, emptyState, TOASTS } from '../components.js';
+import { orderLibraries, movePinned } from '../appearance-rules.js';
+import { button, toast, openDialog, confirmDialog, field, toggle, pillChoice, spinner, avatar, AVATAR_NAMES, rovingRadios, rowActions, moreButton, emptyState, TOASTS } from '../components.js';
 import { musicAppsCard, scrobblingCard, lastfmFields, quickConnectCard } from './settings-music.js';
 import { installCard } from './settings-install.js';
+import { ACCENT_SWATCHES, clampAccent, onAccent } from '../tint.js';
 import { httpsCard } from './settings-https.js';
+import { downloadAppsCard } from './settings-arr.js';
 import { homeCard, householdHomeSection } from './settings-home.js';
 import { activityTab } from './settings-activity.js';
 import { statsCard, householdSection } from './settings-stats.js';
-import { state, setTitle, applyTheme, updatePrefs, signOut, refreshLibraries, navigate, refreshView, canAdmin, isKidsProfile, renderNav, isOrbit, liveAllowed } from '../app.js';
+import { state, setTitle, applyTheme, updatePrefs, signOut, refreshLibraries, navigate, refreshView, canAdmin, isKidsProfile, renderNav, liveAllowed } from '../app.js';
 
 const KIDS_LEVELS = [
   [5, 'Little kids — G only'],
@@ -94,6 +97,33 @@ function section(title, ...children) {
   return h('section', { class: 'panel' }, title ? h('h2', {}, title) : null, children);
 }
 
+/** v0.29 visual refresh B3: which libraries the menu shows, and in what order. The rest are under "More libraries". */
+function menuCard() {
+  const box = h('div', { class: 'menu-libraries' });
+  const draw = (focus) => {
+    clear(box);
+    const { pinned, rest } = orderLibraries(state.libraries, state.profile?.prefs?.pinnedLibraries);
+    const ids = pinned.map((l) => l.id);
+    const set = async (list, again) => {
+      await save(() => updatePrefs({ pinnedLibraries: list }), 'Menu updated');
+      draw(again);
+    };
+    for (const l of [...pinned, ...rest]) {
+      const i = ids.indexOf(l.id);
+      const up = button('Move up', { variant: 'ghost', onClick: () => set(movePinned(ids, l.id, -1), [l.id, 'Move up']), attrs: { disabled: i <= 0 } });
+      const down = button('Move down', { variant: 'ghost', onClick: () => set(movePinned(ids, l.id, 1), [l.id, 'Move down']), attrs: { disabled: i < 0 || i >= ids.length - 1 } });
+      box.append(h('div', { class: 'menu-library', 'data-library': String(l.id) }, toggle(`Pin ${l.name}`, i >= 0, (v) => set(movePinned(ids, l.id, v ? 'pin' : 'unpin'), [l.id, 'pin'])), up, down));
+    }
+    if (focus) {
+      const row = box.querySelector(`[data-library="${focus[0]}"]`);
+      const target = focus[1] === 'pin' ? row?.querySelector('input') : [...(row?.querySelectorAll('button:not([disabled])') || [])].find((b) => b.textContent.trim() === focus[1]) || row?.querySelector('input');
+      target?.focus();
+    }
+  };
+  draw();
+  return section('Menu', h('p', { class: 'hint' }, 'Pinned libraries show in the menu in this order. The rest are under More libraries.'), box);
+}
+
 async function save(fn, message = 'Saved') {
   try {
     const out = await fn();
@@ -105,12 +135,88 @@ async function save(fn, message = 'Saved') {
   }
 }
 
-/** "#abc", "#aabbcc" or "rgb(1, 2, 3)" → "#rrggbb" (colour inputs only take the last form). */
-function toHex(value) {
-  if (/^#[0-9a-f]{6}$/i.test(value)) return value;
-  if (/^#[0-9a-f]{3}$/i.test(value)) return '#' + [...value.slice(1)].map((c) => c + c).join('');
-  const m = /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i.exec(value || '');
-  return m ? '#' + m.slice(1, 4).map((n) => Number(n).toString(16).padStart(2, '0')).join('') : null;
+// ---------------- Accent colour (visual refresh A6) ----------------
+// Ten curated colours, "Theme default" and a "Custom…" hex field, in every theme. The colour is stored as chosen; each
+// theme clamps it to what reads on it (tint.js clampAccent), and each swatch shows the clamped colour for the theme in
+// use. Swatches are plain buttons with aria-pressed and the colour's name, so the arrows reach them like any control.
+const BAD_HEX = 'Enter a colour like #3a7bff.';
+function accentPicker(prefs, themes, themeId) {
+  const schemeOf = (id) => (themes.find((t) => t.id === id)?.colorScheme === 'light' ? 'light' : 'dark');
+  let chosen = prefs.accent ? prefs.accent.toLowerCase() : null;
+  let scheme = schemeOf(themeId);
+  const labelId = `accent-${Math.random().toString(36).slice(2, 9)}`;
+  const tick = () => h('span', { class: 'accent-tick', 'aria-hidden': 'true' }, icon('check', { size: 18 }));
+  const def = h('button', { type: 'button', class: 'btn btn-ghost accent-default', 'aria-pressed': 'false', onClick: () => pick(null) }, tick(), h('span', {}, 'Theme default'));
+  const swatches = ACCENT_SWATCHES.map((s) =>
+    h('button', { type: 'button', class: 'accent-swatch', 'aria-pressed': 'false', 'aria-label': s.name, title: s.name, dataset: { hex: s.hex }, onClick: () => pick(s.hex) }, tick()),
+  );
+  const hexId = `${labelId}-hex`;
+  const errorId = `${labelId}-error`;
+  const preview = h('span', { class: 'accent-preview', 'aria-hidden': 'true' });
+  const hex = h('input', { id: hexId, class: 'accent-hex', type: 'text', inputmode: 'text', autocomplete: 'off', spellcheck: 'false', maxlength: 7, size: 9, placeholder: '#3a7bff', 'aria-describedby': errorId });
+  const error = h('p', { class: 'accent-error', id: errorId, role: 'alert' });
+  const apply = button('Apply', { variant: 'primary', attrs: { class: 'btn btn-primary accent-apply' }, onClick: () => fromField() });
+  hex.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      fromField();
+    }
+  });
+  hex.addEventListener('input', () => showError(false));
+
+  function showError(on) {
+    error.textContent = on ? BAD_HEX : '';
+    hex.setAttribute('aria-invalid', String(on));
+  }
+  function fromField() {
+    const v = hex.value.trim().toLowerCase();
+    const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/.exec(v);
+    if (!m) return showError(true);
+    const full = '#' + (m[1].length === 3 ? [...m[1]].map((c) => c + c).join('') : m[1]);
+    pick(full);
+  }
+  async function pick(value) {
+    showError(false);
+    try {
+      await save(() => updatePrefs({ accent: value }), value ? 'Accent colour updated' : 'Accent colour: theme default');
+    } catch {
+      return; // save() has said what went wrong
+    }
+    chosen = value;
+    paint();
+  }
+  function paint() {
+    const custom = chosen && !ACCENT_SWATCHES.some((s) => s.hex === chosen);
+    def.setAttribute('aria-pressed', String(!chosen));
+    for (const b of swatches) {
+      b.style.setProperty('--sw', clampAccent(b.dataset.hex, scheme));
+      b.style.setProperty('--sw-ink', onAccent(clampAccent(b.dataset.hex, scheme)));
+      b.setAttribute('aria-pressed', String(b.dataset.hex === chosen));
+    }
+    if (custom && document.activeElement !== hex) hex.value = chosen;
+    preview.style.setProperty('--sw', custom ? clampAccent(chosen, scheme) : 'transparent');
+    preview.classList.toggle('is-empty', !custom);
+  }
+  const hintText = (id) => (['orbit', 'arctic'].includes(id) ? 'Used when a title has no artwork to take its colour from. ' : '') + 'Each colour is adjusted so it stays readable in this theme.';
+  const hint = h('p', { class: 'hint' }, hintText(themeId));
+  paint();
+  const el = h(
+    'div',
+    { class: 'field accent-picker' },
+    h('p', { class: 'field-label', id: labelId }, 'Accent colour'),
+    hint,
+    h('div', { class: 'accent-swatches', role: 'group', 'aria-labelledby': labelId }, def, swatches),
+    h('div', { class: 'accent-custom' }, h('label', { for: hexId, class: 'field-label' }, 'Custom…'), preview, hex, apply),
+    error,
+  );
+  return {
+    el,
+    repaint(id) {
+      scheme = schemeOf(id);
+      hint.textContent = hintText(id);
+      paint();
+    },
+  };
 }
 
 // ---------------- Profile ----------------
@@ -136,6 +242,7 @@ async function profileTab(el) {
           'aria-checked': String(selected),
           onClick: async () => {
             await save(() => updatePrefs({ theme: t.id }), `Theme: ${t.name}`);
+            accent.repaint(t.id);
             for (const c of themeGrid.children) c.setAttribute('aria-checked', String(c === themeGrid.children[themes.indexOf(t)]));
           },
         },
@@ -153,9 +260,7 @@ async function profileTab(el) {
     );
   }
 
-  const accent = h('input', { type: 'color', value: prefs.accent || toHex(getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()) || '#ff6b3d', 'aria-label': 'Accent colour' });
-  accent.addEventListener('change', () => save(() => updatePrefs({ accent: accent.value }), 'Accent colour updated'));
-  const resetAccent = button('Use theme colour', { variant: 'ghost', onClick: () => save(() => updatePrefs({ accent: null }), 'Accent reset').then(() => refreshView()) });
+  const accent = accentPicker(prefs, themes, current);
 
   const quality = select(
     [
@@ -204,9 +309,13 @@ async function profileTab(el) {
     section(
       'Appearance',
       themeGrid,
-      h('div', { class: 'inline-fields' }, field('Accent colour', accent, isOrbit() ? 'Used when a title has no artwork to take its colour from.' : undefined), resetAccent),
+      accent.el,
       toggle('Reduce motion', prefs.reduceMotion, (v) => save(() => updatePrefs({ reduceMotion: v })), { hint: 'Nothing grows, slides or zooms. Fades stay, so you can still see what changed.' }),
-      toggle('Reduce effects', prefs.reduceEffects, (v) => save(() => updatePrefs({ reduceEffects: v })), { hint: 'Solid panels instead of glass and blur. Try this if your TV feels slow.' }),
+      pillChoice('Glass', [['clear', 'Clear'], ['tinted', 'Tinted'], ['solid', 'Solid']], document.documentElement.dataset.glass || 'tinted', (v) => save(() => updatePrefs({ glass: v, reduceEffects: null })), { hint: 'How see-through menus and panels are. Solid is easiest to read and fastest on TVs.' }),
+      document.documentElement.style.colorScheme === 'light' ? null : toggle('True black (for OLED screens)', prefs.oled === true, (v) => save(() => updatePrefs({ oled: v })), { hint: 'A black page with thin edges on panels. Saves power on OLED TVs and phones.' }),
+      toggle('More contrast', document.documentElement.dataset.contrast === 'more', (v) => save(() => updatePrefs({ contrast: v ? 'more' : 'normal' })), { hint: 'Stronger text, solid panels and clear edges on buttons and cards.' }),
+      pillChoice('Text size', [[1, 'Normal'], [1.15, 'Large'], [1.3, 'Largest']], prefs.textScale || 1, (v) => save(() => updatePrefs({ textScale: v })), { hint: 'Makes the words bigger everywhere in Atomix.' }),
+      toggle('Play previews on cards', prefs.cardPreviews !== false, (v) => save(() => updatePrefs({ cardPreviews: v })), { hint: 'After a moment on a title, a few silent seconds of it play on the card. Never on kids profiles or with Reduce motion on.' }),
     ),
     section(
       'Playback',
@@ -214,6 +323,7 @@ async function profileTab(el) {
       toggle('Play the next episode automatically', prefs.autoplayNext !== false, (v) => save(() => updatePrefs({ autoplayNext: v }))),
       toggle('Skip intros automatically', prefs.skipIntros === true, (v) => save(() => updatePrefs({ skipIntros: v })), { hint: 'You can still choose Watch it when it skips.' }),
     ),
+    menuCard(),
     homeCard(),
     listeningCard(prefs),
     statsCard(),
@@ -243,6 +353,8 @@ function listeningCard(prefs) {
     'Listening',
     h('p', { class: 'muted' }, 'For audiobooks and podcasts: the skip buttons, J and L, and Left and Right on the player bar.'),
     h('div', { class: 'form-grid' }, pick([5, 10, 15, 30, 45, 60], prefs.spokenBack ?? 15, 'spokenBack', 'Skip back'), pick([10, 15, 30, 45, 60, 90, 120], prefs.spokenForward ?? 30, 'spokenForward', 'Skip forward')),
+    // v0.28: even volume for music.
+    toggle('Even out volume between songs', prefs.levelVolume !== false, (v) => save(() => updatePrefs({ levelVolume: v })), { hint: 'Quiet and loud songs play at about the same volume. Not on iPhone or iPad.' }),
   );
 }
 
@@ -398,12 +510,13 @@ const TASK_PAUSED = {
 
 /** What the background jobs are doing, what's left, and anything that failed. */
 function backgroundSection(t, reload) {
-  const doing = { previews: 'Making seek-bar previews for', thumb: 'Making a thumbnail for', lyrics: 'Reading the lyrics in', subtitles: 'Reading the subtitles in', intros: 'Finding intros in' };
+  const doing = { previews: 'Making seek-bar previews for', thumb: 'Making a thumbnail for', clip: 'Making a preview clip for', lyrics: 'Reading the lyrics in', subtitles: 'Reading the subtitles in', intros: 'Finding intros in' };
   const now = t.running ? `${doing[t.running.job] || 'Working on'} ${t.running.title}.` : TASK_PAUSED[t.paused] || 'Nothing running right now.';
   const waiting = [
     t.queued.previews ? `${t.queued.previews} ${t.queued.previews === 1 ? 'title' : 'titles'} waiting for previews` : null,
     t.queued.intros ? `${t.queued.intros} ${t.queued.intros === 1 ? 'season' : 'seasons'} waiting for an intro check` : null,
     t.queued.thumbs ? `${t.queued.thumbs} ${t.queued.thumbs === 1 ? 'extra' : 'extras'} waiting for a thumbnail` : null,
+    t.queued.clips ? `${t.queued.clips} ${t.queued.clips === 1 ? 'title' : 'titles'} waiting for a preview clip` : null,
     t.queued.lyrics ? `${t.queued.lyrics} ${t.queued.lyrics === 1 ? 'song' : 'songs'} waiting for a lyrics check` : null,
     t.queued.subtitles ? `${t.queued.subtitles} ${t.queued.subtitles === 1 ? 'title' : 'titles'} waiting for a subtitle check` : null,
   ].filter(Boolean);
@@ -411,7 +524,7 @@ function backgroundSection(t, reload) {
     'Background tasks',
     h('p', {}, now, waiting.length ? ` ${waiting.join(', ')}.` : ''),
     t.failed.length
-      ? h('ul', { class: 'plain-list' }, t.failed.map((f) => h('li', {}, h('strong', {}, f.title), ` (${f.job === 'previews' ? 'previews' : 'intro check'}): `, h('span', { class: 'danger-text' }, f.error || 'failed'))))
+      ? h('ul', { class: 'plain-list' }, t.failed.map((f) => h('li', {}, h('strong', {}, f.title), ` (${{ previews: 'previews', clip: 'preview clip' }[f.job] || 'intro check'}): `, h('span', { class: 'danger-text' }, f.error || 'failed'))))
       : null,
     t.failed.length ? button('Try again', { icon: 'refresh', onClick: async () => (await api.post('/api/admin/tasks/retry', {}), toast('Trying again'), reload()) }) : null,
   );
@@ -1525,11 +1638,14 @@ async function serverTab(el) {
   );
   const vaapiDevice = h('input', { value: s.vaapiDevice });
   const previewsSw = toggle('Seek-bar previews', s.previewsEnabled, null, { hint: 'Small pictures above the seek bar and for extras (a few MB per movie).' });
-  const introsSw = toggle('Find TV intros', s.introDetection, null, { hint: 'So viewers can skip them.' });
+  const clipsSw = toggle('Make preview clips for cards', s.cardClips !== false, null, { hint: 'A silent 5-second clip of each title (a few hundred KB) that cards play after a moment. Needs seek-bar previews on.' });
+  const introsSw = toggle('Find TV intros, recaps and credits', s.introDetection, null, { hint: 'So viewers can skip them, and Up next comes up as the credits start.' });
+  // v0.28: TheIntroDB (sends a show's TMDB id, season and episode numbers and the file's length).
+  const communitySw = toggle('Use shared skip times from TheIntroDB', s.communityTimestamps !== false, null, { hint: 'Fills in recaps and anything the files can’t tell. Atomix sends only the show’s TMDB number, the season and episode numbers and the episode’s length.' });
   const trailersSw = toggle('Online trailers', s.onlineTrailers !== false, null, { hint: 'Play the movie’s YouTube trailer when there is no local one (never on kids profiles).' });
   const lyricsSw = toggle('Online lyrics', s.onlineLyrics !== false, null, { hint: 'Ask LRCLIB for lyrics your files don’t have (only the song’s name, artist, album and length are sent).' });
   const qcSw = toggle('Quick Connect', s.quickConnect !== false, null, { hint: 'TVs can sign in by showing a code that someone signed in approves.' });
-  const [previewsOn, introsOn, trailersOn, lyricsOn, qcOn] = [previewsSw, introsSw, trailersSw, lyricsSw, qcSw].map((sw) => sw.querySelector('input'));
+  const [previewsOn, clipsOn, introsOn, trailersOn, lyricsOn, qcOn, communityOn] = [previewsSw, clipsSw, introsSw, trailersSw, lyricsSw, qcSw, communitySw].map((sw) => sw.querySelector('input'));
   qcOn.name = 'quickConnect';
   // v0.21 downloads: phone-sized copies the Atomix app keeps on a device.
   const dlEnabledSw = toggle('Allow downloads', s.downloadsEnabled !== false, null, { hint: 'People you allow can download titles into the Atomix app to watch offline.' });
@@ -1663,7 +1779,9 @@ async function serverTab(el) {
       'Background tasks',
       h('p', { class: 'muted' }, 'These run one at a time at low priority, and wait while someone watches a video the server is converting.'),
       previewsSw,
+      clipsSw,
       introsSw,
+      communitySw,
     ),
     section(
       'Online extras',
@@ -1672,6 +1790,7 @@ async function serverTab(el) {
     ),
     section('Signing in', qcSw),
     downloadsCard,
+    downloadAppsCard(s), // v0.28: Sonarr/Radarr webhook and the request page (its own card: it saves as you go)
     lastfm.el,
     h('div', { class: 'actions sticky-actions' }, button('Save settings', { type: 'submit', variant: 'primary', icon: 'check' })),
   );
@@ -1698,7 +1817,9 @@ async function serverTab(el) {
         podcastCheckHours: Number(podcastHours.value),
         vaapiDevice: vaapiDevice.value.trim(),
         previewsEnabled: previewsOn.checked,
+        cardClips: clipsOn.checked,
         introDetection: introsOn.checked,
+        communityTimestamps: communityOn.checked,
         onlineTrailers: trailersOn.checked,
         onlineLyrics: lyricsOn.checked,
         quickConnect: qcOn.checked,

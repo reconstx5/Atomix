@@ -377,6 +377,29 @@ Extensions; Atomix never holds a Widevine key.
   - in Safari, `dash/fairplay.js` `playFairPlay` sets the certificate, then the keys, then `video.src` (giving up quietly if a zap made it stale); on `encrypted` (`skd`) it asks the relayed licence. A video error or end on a FairPlay channel restarts it like DASH (3 in 2 minutes), then "This channel's stream couldn't be read";
   - every `…URI="…"`/`X-ASSET-LIST` attribute on any tag is relayed (interstitials included), plain comment lines are dropped, and a body with a vague type (`application/octet-stream`, `text/…`) that starts with `#EXTM3U` is rewritten too.
 
+### Several systems per channel (v0.28; `src/live/drm.js`, `src/api/cast.js`, `public/js/dash/support.js`, `public/js/dash/playable.js`)
+- A channel can offer several key systems (`live_channels.drm` is a comma-separated list, the API returns an array; the
+  old single name still reads). The device probes which of FairPlay, PlayReady, Widevine and ClearKey it has
+  (`support.js` `availableKeySystems`, secure page only, in its own order: Safari FairPlay first, Edge PlayReady first)
+  and sends them with the play request as `keySystems`. The **server chooses** (`chooseSystem`): the first of the device's
+  list the channel offers. None in common is a 409 with one sentence, before any provider is asked or stream reserved. A
+  page that sends no list gets the channel's first system, as in v0.27. A single-system channel behaves as before.
+- Only the chosen system is kept: the source is asked for that system's address and licence
+  (`stream(key, { system })`), and the relay's manifest keeps only that system's ContentProtection.
+- **PlayReady** joins the DASH relay. Edge sends the licence challenge wrapped in a `PlayReadyKeyMessage` (UTF-16 XML);
+  the relay unwraps it, posts the challenge to the provider with the wrapped Content-Type and SOAPAction plus the
+  playlist's headers, and returns the answer unchanged. A raw challenge passes through; a broken message is posted as
+  it is, never a 500. Nothing is decrypted on the server.
+- **The licence address is always Atomix's.** In the manifest's `mspr:pro` header (and PlayReady pssh) the LA_URL is
+  rewritten to Atomix's licence address (the browser's relay address, or a cast link for a TV) and LUI_URL is removed;
+  an unreadable header is dropped. Chromecast manifests also get `dashif:Laurl`. Casting prefers Widevine, then
+  PlayReady, then ClearKey; FairPlay can't be cast.
+- **Hiding unplayable channels.** `playable.js` `channelPlayable(drm, device)` says whether this device has any of the
+  channel's systems (an iPhone or iPad without FairPlay/ClearKey is known without asking; elsewhere from the probe, on a
+  secure page only). Live TV, the guide, Home's On now, search and the player's list and zapping hide channels that
+  can't play, with a per-device switch to show them dimmed. Opening one shows a message card (the sentence, Watch on
+  TV, and Open <app> when the channel has a provider link; Kids profiles get no link). It starts no stream.
+
 ## Library scanning (`src/library/scanner.js`)
 
 1. Walk each library folder (skipping hidden, `Extras`, `Sample`, `-trailer` files…).
@@ -454,6 +477,13 @@ the file's size or mtime has changed. Failed jobs wait for an admin's **Try agai
   time, counted from the first picture even when the audio starts a moment earlier),
   `scale=320:<even height>`, `tile=10x10`, giving JPEG sheets in `data/previews/<item id>/`.
   Sheets are written into `<id>.tmp` and swapped in. The player picks a tile with `public/js/previews.js`.
+- **Preview clips and dominant colours** (card motion v2). The `clip` job (`extras/clips.js`, migration 32 lets
+  `media_jobs` record it) makes a 5 s silent H.264 clip per film or episode into the previews folder (`clip.mp4`,
+  kept when sheets are regenerated; HDR needs zscale/tonemap, otherwise "none"). It follows the admin switch
+  `cardClips`; the previews manifest carries `clip` and `clipUrl`, and `GET /api/items/:id/clip` is hidden from Kids.
+  Dominant colours (`library/colors.js`, migration 33 `items.colors`) are worked out lazily when `sendArtwork`
+  serves a poster or backdrop: an 8 x 8 ffmpeg downscale, saturation lifted, at most two at a time, never waited on.
+  Cards then carry `tint` and `tintWide` (null until known); editing artwork or refreshing metadata resets them.
 - **Intros** (`extras/intros.js`, `extras/fingerprint.js`): chapters named Intro/Opening/… (and Credits/End
   Credits/…) win. Otherwise the first `min(10 min, 40%)` of each episode is decoded to 8 kHz mono and turned into
   32-bit codes every 64 ms (Haitsma–Kalker band-energy differences). Two episodes are compared at every alignment,
@@ -788,7 +818,8 @@ Plain ES modules, loaded on demand per view. `app.js` owns routing (hash-based),
 Screen readers hear changes through two live regions created at boot (`announce()` in `components.js`: polite status,
 assertive alerts); seek bars write `aria-valuetext` through `sliderText()` (on focus, on a press, else at most every
 10 s) and volume sliders through `percentSlider()`. The stylesheet is written against tokens — `app.css` declares the
-classic scales (`--space-*`, `--dur-*`, `--z-*`, `--focus-ring`, `--pill`) and `themes/orbit/theme.css` Orbit's
+classic scales (`--space-*`, `--dur-*`, `--z-*`, `--pill`), `tokens.css` the colours (ramps, semantic names, the focus ring
+colour `--focus-ring` and `--focus-width`) and `themes/orbit/theme.css` Orbit's
 (`--focus-bg/--focus-fg`, glass, `--text-tinted`, radii, spaces); `orbit.css` lays out and never colours. Shared
 recipes: one slider, one round icon button, one selectable row (`.option-row` and friends), `rowActions()`,
 `spinner({ inline })`, `emptyState()`, `TOASTS`, and `moreItems()` builds the detail page's action set for every theme.
@@ -834,6 +865,12 @@ before; the gate only decides what this tab shows. The decision is a pure functi
 saturated mid-tones, then lightened or darkened into a band that shows on dark backgrounds and keeps dark text on it
 readable; tested in `test/tint.test.js`). `backdrop.js` samples each backdrop into a 48×27 canvas, sets `--tint` on
 the page, and the registered custom property animates between titles.
+
+A person's accent goes through `clampAccent()` in `tint.js` (moved into the theme's band in OKLCH, ink black or white by
+APCA), and `applyAccent()` in `app.js` writes `--a-1..12`, `--accent`, `--accent-solid`, `--accent-text` and `--tint-default`
+inline for every theme (`test/accent-clamp.test.js`). `src/themes/apca.js` and `src/themes/tokens.js` are test-side helpers
+(APCA contrast and a reader for theme custom properties; `test/theme-tokens.test.js`); the server doesn't load them.
+Colours are described in `docs/THEMES.md` (token layers) and `public/css/tokens.css`.
 
 `backdrop.js` owns the full-screen artwork layer behind every page; views call `setBackdrop(url)`, and
 `followFocus()` makes it (and the home spotlight from `components.js`) follow the focused or hovered card. The router

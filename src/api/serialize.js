@@ -9,7 +9,14 @@ export function imageUrl(item, type) {
   return `/api/items/${item.id}/image/${type}?v=${item.metadata_at || item.updated_at || 0}`;
 }
 
-function mediaSummary(media) {
+// The card's colour while its picture loads (src/library/colors.js): tint for a poster card, tintWide for a landscape
+// one (the shape doesn't know the card style). null until the picture has been asked for once.
+function tints(row) {
+  const c = parseJson(row.colors, null);
+  return { tint: (row.poster && c?.poster) || null, tintWide: (row.backdrop && c?.backdrop) || null };
+}
+
+export function mediaSummary(media) {
   if (!media || media.error) return null;
   const v = media.video;
   const res = v?.height ? (v.height >= 2000 ? '4K' : v.height >= 1000 ? '1080p' : v.height >= 700 ? '720p' : v.height >= 560 ? '576p' : 'SD') : null;
@@ -19,6 +26,9 @@ function mediaSummary(media) {
     height: v?.height || null,
     videoCodec: v?.codec || null,
     hdr: Boolean(v?.hdr),
+    // v0.29: which HDR, for the title page's chips (HDR10+ needs per-frame data the probe doesn't read).
+    hdrFormat: v?.dolbyVision ? 'Dolby Vision' : v?.colour?.transfer === 'smpte2084' ? 'HDR10' : v?.colour?.transfer === 'arib-std-b67' ? 'HLG' : v?.hdr ? 'HDR10' : null,
+    atmos: (media.audio || []).some((a) => /atmos/i.test(`${a.profile || ''} ${a.title || ''}`)),
     bitDepth: v?.bitDepth || null,
     container: media.container,
     bitrate: media.bitrate,
@@ -62,6 +72,7 @@ export function serializeItem(row, extra = {}) {
     backdrop: imageUrl(row, 'backdrop'),
     logo: imageUrl(row, 'logo'),
     addedAt: row.added_at,
+    ...tints(row),
   };
   if (isRemotePath(row.path)) out.remote = true;
   if (row.extra_kind) {

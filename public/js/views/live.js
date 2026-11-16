@@ -2,18 +2,56 @@
 // to it, as on a TV. Orbit shows the channels as a wall of glass cards under a spotlight; the older themes as rows.
 // v0.26: a Preact screen (ui/live.js has its pieces).
 import { html, useState, useRef, useLayoutEffect, useEffect, useAppState } from '../ui.js';
-import { Button, EmptyState } from '../ui/basics.js';
+import { Button, EmptyState, MoreButton } from '../ui/basics.js';
 import { ChannelRow, ChannelCard, LiveSpotlight } from '../ui/live.js';
-import { toast, announce } from '../components.js';
+import { toast, announce, openDialog, field } from '../components.js';
+import { h } from '../dom.js';
+import { api } from '../api.js';
 import { followFocus } from '../backdrop.js';
 import { canAdmin, isOrbit, isKidsProfile } from '../app.js';
 import { fetchAll, rememberGroup } from './live-data.js';
 import { spotKeep } from '../live-rules.js';
 import { setFavourite, setZapOrder, playChannel, recordProgramme } from '../live.js';
+import { hiddenFilter, hiddenCount, deviceNow, whenDeviceKnown, showAllNow, setShowAll, switchLabel } from '../dash/playable.js';
 
 export { load } from './live-data.js';
 
 const guideFor = (c) => (location.hash = `#/live/guide?channel=${c.id}`);
+/**
+ * An admin's "Provider app link…" (v0.28): the https address and button name of the provider's own app for a channel
+ * this device can't play. "Use default" goes back to the playlist's or the built-in link. Resolves true when changed;
+ * Save with the playlist's or built-in link untouched saves nothing (c.appLinkAdmin says whose link it is).
+ */
+export async function appLinkDialog(c) {
+  const url = h('input', { type: 'text', name: 'url', inputmode: 'url', autocomplete: 'off', spellcheck: 'false', placeholder: 'https://', value: c.appUrl || '', 'data-autofocus': true });
+  const name = h('input', { type: 'text', name: 'name', maxlength: '80', autocomplete: 'off', placeholder: 'TVNZ+', value: c.appName || '' });
+  let unchanged = false;
+  const v = await openDialog({
+    title: `Provider app link for ${c.name}`,
+    body: h('div', {}, field('Address (https)', url, "Opens the provider's own app or site on a device that can't play this channel."), field('Button name', name, 'Shown as "Open <name>".')),
+    actions: [
+      { label: 'Cancel', value: 'cancel' },
+      { label: 'Use default', value: 'default' },
+      { label: 'Save', value: 'save', variant: 'primary' },
+    ],
+    onSubmit: async (value) => {
+      if (value === 'default') return api.put(`/api/live/channels/${c.id}/app-link`, {});
+      const address = url.value.trim();
+      // The playlist's or built-in link, saved untouched, stays the default: it isn't made the admin's own setting.
+      if (!c.appLinkAdmin && address === (c.appUrl || '') && name.value.trim() === (c.appName || '')) {
+        unchanged = true;
+        return;
+      }
+      if (!/^https:\/\/[^/\s]/i.test(address)) throw new Error('The app link must be an https:// address.');
+      return api.put(`/api/live/channels/${c.id}/app-link`, { url: address, name: name.value.trim() });
+    },
+  });
+  if (unchanged) return false;
+  if (v === 'save') toast(`Saved the app link for ${c.name}`);
+  else if (v === 'default') toast(`${c.name} uses its default app link again`);
+  return v === 'save' || v === 'default';
+}
+
 const castFor = async (c) => (await import('../cast.js')).castLive?.({ liveChannelId: c.id }, { encrypted: Boolean(c.drm) });
 
 function scrollerOf(node) {
@@ -43,6 +81,11 @@ function Channels({ first, orbit, view }) {
   const [spotId, setSpotId] = useState(null);
   const [digits, setDigits] = useState('');
   const castOff = useAppState((s) => s.status?.castEnabled === false);
+  const admin = useAppState(() => canAdmin()); // re-read when the profile changes (Kids profiles aren't admins)
+  // v0.28: channels this device can't play are left out (or, with the switch on, dimmed). An iPhone is known at once;
+  // elsewhere the probe answers once and the lists are drawn again.
+  const [device, setDevice] = useState(deviceNow);
+  const [showAll, setShowAllState] = useState(showAllNow);
   const recordingsLink = useAppState((s) => Boolean(s.profile && !s.profile.kids));
   const list = useRef(null);
   const chips = useRef(null);
@@ -53,9 +96,23 @@ function Channels({ first, orbit, view }) {
   const after = useRef(null); // what the next drawing restores: { anchor, keep }
   const recording = useRef(false); // a Record press in flight: repeat presses wait for it
 
-  byId.current = new Map(snap.shown.map((c) => [String(c.id), c]));
+  const shown = hiddenFilter(snap.shown, { device, showAll });
+  const hidden = hiddenCount(snap.all, device);
+  byId.current = new Map(shown.map((c) => [String(c.id), c]));
   all.current = snap.all;
-  const spotC = orbit ? byId.current.get(String(spotKeep(snap.shown, spotId))) || null : null;
+  const spotC = orbit ? byId.current.get(String(spotKeep(shown, spotId))) || null : null;
+
+  useEffect(() => {
+    if (device) return;
+    whenDeviceKnown(snap.all).then((d) => d && !left.current && setDevice(d)).catch(() => {});
+  }, [snap]);
+  const flipShowAll = (on) => {
+    setShowAll(on);
+    setShowAllState(on);
+  };
+  async function appLink(c) {
+    if (await appLinkDialog(c)) await reload({ keep: c.id }).catch(() => {});
+  }
 
   // keep: the channel whose row gets focus back (from a row's "…"); a reload otherwise leaves focus where it is,
   // since the rows keep their elements.
@@ -203,16 +260,20 @@ function Channels({ first, orbit, view }) {
       return html`<button key=${label} type="button" role="radio" class="pill" aria-checked=${String(on)} tabindex=${on ? 0 : -1} onClick=${() => pick(label)}>${label}</button>`;
     })}
   </div>`;
-  const pageActions = html`<div class="actions"><${Button} label="Guide" icon="guide" variant="ghost" href="#/live/guide" />${recordingsLink ? html`<${Button} label="Recordings" icon="archive" variant="ghost" href="#/live/recordings" />` : null}</div>`;
-  const items = snap.shown.map((c) =>
+  // The switch, only when this device can't play something: Orbit's "…" sheet, a check box over the older themes' rows.
+  const label = hidden ? switchLabel() : '';
+  const orbitMore = orbit && hidden ? html`<${MoreButton} title="Live TV" items=${[{ label, icon: 'eye', checked: showAll, onSelect: () => flipShowAll(!showAll) }]} />` : null;
+  const switchEl = !orbit && hidden ? html`<label class="live-show-unplayable"><input type="checkbox" checked=${showAll} onChange=${(e) => flipShowAll(e.currentTarget.checked)} /><span>${label}</span></label>` : null;
+  const pageActions = html`<div class="actions"><${Button} label="Guide" icon="guide" variant="ghost" href="#/live/guide" />${recordingsLink ? html`<${Button} label="Recordings" icon="archive" variant="ghost" href="#/live/recordings" />` : null}${orbitMore}</div>`;
+  const items = shown.map((c) =>
     orbit
       ? html`<${ChannelCard} key=${c.id} c=${c} onPlay=${playChannel} />`
-      : html`<${ChannelRow} key=${c.id} c=${c} onPlay=${playChannel} onFavourite=${favourite} onGuide=${guideFor} onCast=${castFor} castOk=${!castOff} />`,
+      : html`<${ChannelRow} key=${c.id} c=${c} onPlay=${playChannel} onFavourite=${favourite} onGuide=${guideFor} onCast=${castFor} castOk=${!castOff} onAppLink=${admin ? appLink : null} />`,
   );
   const listEl = html`<ul ref=${list} class=${orbit ? 'live-wall' : 'live-list'} role="list">${items}</ul>`;
   const digitsEl = html`<div class="live-digits" hidden=${!digits} aria-hidden="true">${digits}</div>`;
   if (!orbit) {
-    return html`<header class="page-head live-head"><h1>Live TV</h1>${pageActions}</header>${chipsEl}${listEl}${digitsEl}`;
+    return html`<header class="page-head live-head"><h1>Live TV</h1>${pageActions}</header>${chipsEl}${switchEl}${listEl}${digitsEl}`;
   }
   return html`<h1 class="visually-hidden">Live TV</h1>
     <${LiveSpotlight}
@@ -225,6 +286,7 @@ function Channels({ first, orbit, view }) {
       onFavourite=${(c) => favourite(c, !c.favourite, { keepFocus: false })}
       onGuide=${guideFor}
       onCast=${castFor}
+      onAppLink=${admin ? appLink : null}
     />
     <div class="live-scroll"><div class="live-toolbar">${chipsEl}${pageActions}</div>${listEl}</div>
     ${digitsEl}`;

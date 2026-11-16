@@ -53,7 +53,7 @@ export async function detectTools(config, settings = null) {
     try {
       const out = (await run(bin, ['-version'], { timeout: 10000 })).toString();
       const version = /version\s+(\S+)/.exec(out)?.[1] || 'unknown';
-      return { available: true, version, major: parseVersion(version), path: bin };
+      return { available: true, version, major: parseVersion(version), burst: supportsInitialBurst(version), path: bin };
     } catch (err) {
       return { available: false, error: err.code === 'ENOENT' ? 'not found' : err.message, path: bin };
     }
@@ -114,6 +114,18 @@ export function parseVersion(version) {
   if (dated) return Number(dated[1]) >= 2022 ? 7 : 4;
   const m = /^n?(\d+)/.exec(v);
   return m ? Number(m[1]) : 0;
+}
+
+/** Whether this ffmpeg reads its first seconds at full speed under -readrate (-readrate_initial_burst, ffmpeg 6.1+). */
+export function supportsInitialBurst(version) {
+  const v = String(version || '');
+  const dated = /^(\d{4})-\d\d-\d\d/.exec(v);
+  if (dated) return Number(dated[1]) >= 2024;
+  const m = /^n?(\d+)\.(\d+)/.exec(v) || /^n?(\d+)$/.exec(v);
+  if (!m) return false;
+  const major = Number(m[1]);
+  const minor = Number(m[2] || 0);
+  return major > 6 || (major === 6 && minor >= 1);
 }
 
 /** Probe a file (streams, format and chapters in one run) and return the compact summary we store in the DB. */
@@ -199,6 +211,8 @@ export function summarise(data) {
     video: video
       ? {
           codec: video.codec_name,
+          // v0.28: the label in the file ("hvc1"/"hev1"…): Safari plays HEVC only when it is hvc1.
+          tag: video.codec_tag_string && !/^\[/.test(video.codec_tag_string) ? video.codec_tag_string : null,
           profile: video.profile || null,
           width: video.width,
           height: video.height,

@@ -17,6 +17,18 @@ export const inIntro = (range, t) => Boolean(range) && t >= range.start && t < r
 /** How much of the intro is left (1 → 0), for the thin bar on the button. */
 export const introLeft = (range, t) => (range ? Math.max(0, Math.min(1, (range.end - t) / (range.end - range.start))) : 0);
 
+/**
+ * v0.28: the part the Skip button skips at time `t`: the recap ("Previously on…") when in it, else the intro, as
+ * { kind, start, end }, or null. Both hide 2 seconds before they end, as Skip intro always has.
+ */
+export function skipSegment(markers, t, duration) {
+  for (const kind of ['recap', 'intro']) {
+    const range = introRange({ intro: markers?.[kind] }, duration);
+    if (inIntro(range, t)) return { kind, ...range };
+  }
+  return null;
+}
+
 /** When Up next should appear: when the credits start, or null (= at the very end). */
 export function upNextAt(markers, duration) {
   const c = markers?.credits;

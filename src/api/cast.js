@@ -1,7 +1,7 @@
 // Casting: the device list, adding a TV by address (admins), and the remote — start a cast, poll it, command it.
 import { HttpError } from '../http/router.js';
 import { baseUrlFor } from '../cast/devices.js';
-import { DLNA_ENCRYPTED, CANT_CAST_ENCRYPTED } from '../cast/sessions.js';
+import { DLNA_ENCRYPTED, CANT_CAST_ENCRYPTED, castableChannel } from '../cast/sessions.js';
 
 export { DLNA_ENCRYPTED };
 
@@ -87,8 +87,9 @@ export function registerCastRoutes(r, core) {
     const visible = (id) => routes.visibleChannel(who, id);
     if (body.liveChannelId != null) {
       const channel = visible(body.liveChannelId);
-      // v0.27: Widevine and ClearKey channels play on a Chromecast (checked by device when the cast starts); FairPlay never.
-      if (channel.drm && channel.drm !== 'widevine' && channel.drm !== 'clearkey') throw new HttpError(400, CANT_CAST_ENCRYPTED);
+      // Encrypted channels with Widevine, PlayReady or ClearKey play on a Chromecast (the TV's system is chosen when the
+      // cast starts, v0.28); a FairPlay-only channel never.
+      if (channel.drm && !castableChannel(channel)) throw new HttpError(400, CANT_CAST_ENCRYPTED);
       if (channel.radio) throw new HttpError(400, "Radio stations can't be cast yet");
       const order = () => routes.visibleChannels(who).filter((c) => !c.radio).map((c) => c.id);
       return { kind: 'live', channel, order, visible };

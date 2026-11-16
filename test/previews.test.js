@@ -93,3 +93,19 @@ test('tiles stay in step when the audio starts a moment before the picture', { s
   execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', RAMP, '-f', 'lavfi', '-i', 'sine=duration=60', '-c:v', 'libx264', '-g', '1', '-pix_fmt', 'yuv420p', '-c:a', 'libopus', '-ar', '48000', file]);
   await checkTileTimes(file);
 });
+
+test('v0.28 card motion: frames spread through a film, from at most two sheets, never the opening or the credits', async () => {
+  const { flipFrames } = await import('../public/js/previews.js');
+  const film = { interval: 10, width: 320, height: 180, columns: 10, rows: 10, count: 720, sheets: 8, url: '/api/items/7/previews/{n}?v=1' };
+  const frames = flipFrames(film);
+  assert.equal(frames.length, 8);
+  const sheets = new Set(frames.map((f) => f.url));
+  assert.ok(sheets.size <= 2, [...sheets].join(' '));
+  const total = film.count * film.interval;
+  for (const f of frames) assert.ok(f.t >= total * 0.05 && f.t <= total * 0.9, `t=${f.t}`);
+  assert.deepEqual(frames.map((f) => f.t), [...frames.map((f) => f.t)].sort((a, b) => a - b), 'in order');
+  const short = { ...film, count: 6, sheets: 1 };
+  assert.ok(flipFrames(short).length >= 3 && flipFrames(short).length <= 6, 'a short clip gives what it has');
+  assert.deepEqual(flipFrames({ ...film, count: 2 }), [], 'too little to animate');
+  assert.deepEqual(flipFrames(null), []);
+});

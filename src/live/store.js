@@ -17,7 +17,12 @@ function channelRow(r) {
     guideId: r.guide_id || null,
     catchup: parseJson(r.catchup, null),
     hidden: Boolean(r.hidden) || r.missing_since != null, // missing from the last refresh: not shown, not playable
-    drm: r.drm || null,
+    drm: r.drm ? r.drm.split(',')[0] : null, // the first system (what single-system code reads); drmSystems has them all
+    drmSystems: r.drm ? r.drm.split(',') : null,
+    appUrl: r.app_url || null,
+    appName: r.app_name || null,
+    adminAppUrl: r.admin_app_url || null,
+    adminAppName: r.admin_app_name || null,
   };
 }
 
@@ -39,7 +44,20 @@ function programmeRow(r) {
 
 const placeholders = (n) => Array.from({ length: n }, () => '?').join(',');
 
-const DRM_SYSTEMS = new Set(['widevine', 'clearkey', 'fairplay']); // what the browser player can play (FairPlay: Safari, v0.27)
+const DRM_SYSTEMS = new Set(['widevine', 'clearkey', 'fairplay', 'playready']); // the key systems a channel may name
+/** 'widevine,playready' (known names only, in order, no repeats) from drmSystems, else from a single drm name; NULL = plain. */
+function drmList(c) {
+  const raw = Array.isArray(c.drmSystems) ? c.drmSystems : c.drm ? [c.drm] : [];
+  const out = [...new Set(raw.filter((n) => DRM_SYSTEMS.has(n)))];
+  return out.length ? out.join(',') : null;
+}
+const httpsOrNull = (u) => {
+  try {
+    return new URL(String(u)).protocol === 'https:' ? String(u) : null;
+  } catch {
+    return null;
+  }
+};
 const MISSING_KEEP_MS = 7 * 86400_000; // a channel gone from the playlist is kept (hidden) this long
 
 export class LiveStore {
@@ -64,6 +82,7 @@ export class LiveStore {
       channels.forEach((c, i) => {
         if (seen.has(c.key)) return;
         seen.add(c.key);
+        const appUrl = httpsOrNull(c.appUrl);
         const values = [
           c.number ?? null,
           String(c.name),
@@ -72,15 +91,17 @@ export class LiveStore {
           c.radio ? 1 : 0,
           c.guideId || null,
           c.catchup ? JSON.stringify(c.catchup) : null,
-          DRM_SYSTEMS.has(c.drm) ? c.drm : null,
+          drmList(c),
+          appUrl,
+          appUrl ? String(c.appName || '').slice(0, 80) || null : null,
           i,
           now,
         ];
         if (existing.has(c.key)) {
-          db.run('UPDATE live_channels SET number = ?, name = ?, groups = ?, logo = ?, radio = ?, guide_id = ?, catchup = ?, drm = ?, sort = ?, updated_at = ?, missing_since = NULL WHERE id = ?', ...values, existing.get(c.key));
+          db.run('UPDATE live_channels SET number = ?, name = ?, groups = ?, logo = ?, radio = ?, guide_id = ?, catchup = ?, drm = ?, app_url = ?, app_name = ?, sort = ?, updated_at = ?, missing_since = NULL WHERE id = ?', ...values, existing.get(c.key));
           updated++;
         } else {
-          db.run('INSERT INTO live_channels (number, name, groups, logo, radio, guide_id, catchup, drm, sort, updated_at, source, key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', ...values, source, c.key);
+          db.run('INSERT INTO live_channels (number, name, groups, logo, radio, guide_id, catchup, drm, app_url, app_name, sort, updated_at, source, key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', ...values, source, c.key);
           added++;
         }
       });
@@ -188,6 +209,12 @@ export class LiveStore {
     if (groups) out = out.filter((c) => c.groups.some((g) => groups.has(kidsKey(c.source, g))));
     if (group) out = out.filter((c) => c.groups.includes(group));
     return out;
+  }
+
+  /** An admin's link for a channel ({} clears it: back to the playlist's or built-in link). */
+  setAppLink(id, link) {
+    if (link) this.db.run('UPDATE live_channels SET admin_app_url = ?, admin_app_name = ? WHERE id = ?', link.url, link.name || null, Number(id));
+    else this.db.run('UPDATE live_channels SET admin_app_url = NULL, admin_app_name = NULL WHERE id = ?', Number(id));
   }
 
   channel(id) {

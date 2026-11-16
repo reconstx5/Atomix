@@ -56,21 +56,21 @@ test('systemName and parseHeaderList', () => {
   assert.equal(systemName('com.widevine.alpha'), 'widevine');
   assert.equal(systemName('Widevine'), 'widevine');
   assert.equal(systemName('org.w3.clearkey'), 'clearkey');
-  assert.equal(systemName('com.microsoft.playready'), null);
+  assert.equal(systemName('com.microsoft.playready'), 'playready');
   assert.deepEqual(parseHeaderList('Referer=https%3A%2F%2Fa.example%2F&Origin=x'), { Referer: 'https://a.example/', Origin: 'x' });
 });
 
 test('parseM3u keeps each channel\'s encryption, and plain channels have none', () => {
   const { channels } = parseM3u(M3U);
   const by = Object.fromEntries(channels.map((c) => [c.name, c]));
-  assert.deepEqual(by['TVNZ 2'].drm, { system: 'widevine', licence: { url: 'https://c.mjh.nz/tvnz-2-wv', headers: {}, body: { kind: 'raw' }, response: { kind: 'raw' } } });
+  assert.deepEqual(by['TVNZ 2'].drm, { systems: [{ system: 'widevine', licence: { url: 'https://c.mjh.nz/tvnz-2-wv', headers: {}, body: { kind: 'raw' }, response: { kind: 'raw' } } }] });
   assert.equal(by['TVNZ 2'].mime, 'application/dash+xml');
-  assert.deepEqual(by['Clear Key Legacy'].drm, { system: 'clearkey', licence: { url: 'https://l.example/ck', headers: { 'X-A': '1', 'X-B': 'two words' }, body: { kind: 'raw' }, response: { kind: 'raw' } } });
+  assert.deepEqual(by['Clear Key Legacy'].drm, { systems: [{ system: 'clearkey', licence: { url: 'https://l.example/ck', headers: { 'X-A': '1', 'X-B': 'two words' }, body: { kind: 'raw' }, response: { kind: 'raw' } } }] });
   assert.equal(by['Clear Key Legacy'].mime, 'application/dash+xml', 'a .mpd address is DASH');
   assert.deepEqual(by.Headered.manifestHeaders, { Referer: 'https://a.example/' });
   assert.deepEqual(by.Headered.streamHeaders, { Referer: 'https://a.example/', Origin: 'https://a.example' });
-  assert.deepEqual(by.Headered.drm.licence.headers, { 'X-Token': 'abc' });
-  assert.deepEqual(by['Keys Inline'].drm, { system: 'clearkey', licence: { keys: [{ kid: KID, key: KEY }] } });
+  assert.deepEqual(by.Headered.drm.systems[0].licence.headers, { 'X-Token': 'abc' });
+  assert.deepEqual(by['Keys Inline'].drm, { systems: [{ system: 'clearkey', licence: { keys: [{ kid: KID, key: KEY }] } }] });
   assert.equal(by.Plain.drm, null);
   assert.equal(by.Plain.manifestHeaders, undefined);
 });
@@ -145,18 +145,18 @@ test('ClearKey keys in JWK form', () => {
 // v0.27 Plan B: FairPlay (an Atomix extension of the same properties; the manifest is HLS).
 test('FairPlay: license_type com.apple.fps with the licence grammar and a certificate address', () => {
   const fp = parseM3u(M3U).channels.find((c) => c.name === 'FP One');
-  assert.equal(fp.drm.system, 'fairplay');
-  assert.equal(fp.drm.licence.url, 'https://lic.example/fps');
-  assert.deepEqual(fp.drm.licence.headers, { 'X-Key': 'abc' });
-  assert.deepEqual(fp.drm.licence.body, { kind: 'template', text: 'spc=b{SSM}&id={CONTENTID}' });
-  assert.deepEqual(fp.drm.licence.response, { kind: 'base64' });
-  assert.equal(fp.drm.serverCertificate, 'https://lic.example/cert.der');
+  assert.equal(fp.drm.systems[0].system, 'fairplay');
+  assert.equal(fp.drm.systems[0].licence.url, 'https://lic.example/fps');
+  assert.deepEqual(fp.drm.systems[0].licence.headers, { 'X-Key': 'abc' });
+  assert.deepEqual(fp.drm.systems[0].licence.body, { kind: 'template', text: 'spc=b{SSM}&id={CONTENTID}' });
+  assert.deepEqual(fp.drm.systems[0].licence.response, { kind: 'base64' });
+  assert.equal(fp.drm.systems[0].serverCertificate, 'https://lic.example/cert.der');
 });
 
-test('systemName knows FairPlay; PlayReady is still not played', () => {
+test('systemName knows FairPlay; PlayReady is a system too', () => {
   assert.equal(systemName('com.apple.fps'), 'fairplay');
   assert.equal(systemName('fairplay'), 'fairplay');
-  assert.equal(systemName('com.microsoft.playready'), null);
+  assert.equal(systemName('com.microsoft.playready'), 'playready');
 });
 
 test('the plugin lists a FairPlay channel by name only and hands its certificate to stream()', async () => {

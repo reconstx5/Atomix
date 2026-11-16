@@ -2,6 +2,7 @@
 // channel up/down, and starting a channel (TV in the player, radio in the music player). The parts that need no
 // page are tested in Node (test/live-client.test.js).
 import { api } from './api.js';
+import { channelPlayable, deviceNow, unplayableHere, deviceSoon, mayHide, showAllNow } from './dash/playable.js';
 
 const DAY = 86400_000;
 let statusCache = null;
@@ -21,20 +22,40 @@ const qs = (o) => {
   const s = p.toString();
   return s ? `?${s}` : '';
 };
-// v0.27: each listed channel's protection, remembered so the player can check a phone can play it before asking for
-// a stream (a player opened from Live TV, the guide or search has no channel list of its own yet).
+// Each listed channel's protection (v0.28: its list of systems), remembered so the player can check this device has one
+// of them before asking for a stream (a player opened from Live TV, the guide or search has no channel list of its own yet).
 const protections = new Map();
+/** v0.28: a channel's `drm` is a list of systems (or null); code that compares one system name reads the first. */
+export const firstDrm = (drm) => (drm === undefined ? undefined : Array.isArray(drm) ? drm[0] || null : drm || null);
+/** v0.28: a TV can play Widevine, PlayReady or ClearKey; FairPlay-only channels can't be cast. Takes a list, a name or null. */
+export const castableDrm = (drm) => (Array.isArray(drm) ? drm : drm ? [drm] : []).some((d) => d === 'widevine' || d === 'playready' || d === 'clearkey');
+// v0.28: the whole list is kept (the player asks about all of a channel's systems); an older string stays as it is.
+const keepDrm = (drm) => (drm === undefined ? undefined : Array.isArray(drm) ? (drm.length ? drm : null) : drm || null);
 const remember = (list) => {
-  for (const c of Array.isArray(list) ? list : []) if (c && c.id != null) protections.set(Number(c.id), c.drm || null);
+  for (const c of Array.isArray(list) ? list : []) if (c && c.id != null) protections.set(Number(c.id), keepDrm(c.drm));
   return list;
 };
-/** A channel's protection ('widevine' | 'clearkey' | 'fairplay' | null), or undefined when no list has named it. */
+/** A channel's protection (its list of systems, an older single name, or null), or undefined when no list has named it. */
 export const protectionOf = (id) => protections.get(Number(id));
 export const channels = ({ group, favourites } = {}) => api.get(`/api/live/channels${qs({ group, favourites: favourites ? 1 : null })}`).then(remember);
 export const groups = () => api.get('/api/live/groups');
 export const guide = (from, to, channelIds) => api.get(`/api/live/guide${qs({ from: Math.round(from), to: Math.round(to), channels: channelIds?.length ? channelIds.join(',') : null })}`);
 export const programme = (id) => api.get(`/api/live/programmes/${id}`);
 export const search = (q) => api.get(`/api/live/search${qs({ q })}`);
+/**
+ * v0.28: search's On TV without the channels this device can't play (and their programmes), unless the switch is on.
+ * A programme names only its channel, so the channel list is asked once when one's protection isn't known yet.
+ */
+export async function onTvHere(tv) {
+  if (!tv) return tv;
+  remember(tv.channels);
+  if (!mayHide() || showAllNow()) return tv;
+  const progDrm = (p) => protectionOf(p.channel?.id);
+  if (tv.programmes.some((p) => p.channel?.id != null && progDrm(p) === undefined)) await channels().catch(() => null);
+  const device = await deviceSoon([...tv.channels, ...tv.programmes.map((p) => ({ drm: progDrm(p) }))]);
+  if (!device) return tv;
+  return { ...tv, channels: tv.channels.filter((c) => channelPlayable(c.drm, device)), programmes: tv.programmes.filter((p) => channelPlayable(progDrm(p), device)) };
+}
 // Recordings (v0.19)
 export const recordProgramme = (id, opts = {}) => api.post(`/api/live/programmes/${id}/record`, opts);
 export const cancelRecording = (id, { onlyActive = false } = {}) => api.del(`/api/live/recordings/${id}${onlyActive ? '?only=active' : ''}`);
@@ -89,11 +110,17 @@ export function setZapOrder(ids) {
 export function zapOrder() {
   return order;
 }
-export function neighbour(id, dir) {
+/** v0.28: channel up/down skips channels this device can't play (`ok`); when no other one plays, it stays. */
+const playsHere = (id) => channelPlayable(protectionOf(id), deviceNow());
+export function neighbour(id, dir, ok = playsHere) {
   if (!order.length) return id;
   const i = order.indexOf(Number(id));
-  if (i < 0) return order[0];
-  return order[(i + dir + order.length) % order.length];
+  if (i < 0) return order.find(ok) ?? order[0];
+  for (let step = 1; step < order.length; step++) {
+    const next = order[(((i + dir * step) % order.length) + order.length) % order.length];
+    if (ok(next)) return next;
+  }
+  return order[i];
 }
 
 /** Where a playing session is pinged and stopped: an encrypted channel's own address, else the playback session's. */
@@ -157,6 +184,8 @@ export async function playChannel(channel) {
     const { music } = await import('./music.js');
     return music.playLive(channel);
   }
-  if (channel.drm !== undefined) protections.set(Number(channel.id), channel.drm || null);
+  if (channel.drm !== undefined) protections.set(Number(channel.id), keepDrm(channel.drm));
+  // v0.28: a channel this device can't play (listed with the switch on, or typed by number) shows why instead.
+  if (unplayableHere(channel.drm ?? protectionOf(channel.id))) return (await import('./ui/cant-play.js')).openCantPlay(channel);
   location.hash = `#/live/play/${channel.id}`;
 }

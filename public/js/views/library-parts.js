@@ -35,7 +35,16 @@ export function useLibrary(id, isMusic, first, start, { requestView = (o) => o.v
     history.replaceState(null, '', `#/library/${id}${qs({ view: isMusic && next.view !== 'albums' ? next.view : '', sort: next.sort !== 'title' ? next.sort : '', genre: next.genre, unwatched: next.unwatched, q: next.q })}`);
     const my = ++seq.current;
     setBusy(true);
-    const data = await request(id, next, requestView(next));
+    let data;
+    try {
+      data = await request(id, next, requestView(next));
+    } catch (err) {
+      // v0.28: a failed answer takes the spinner down and says so; the titles shown before come back.
+      if (left.current || my !== seq.current) return undefined;
+      setBusy(false);
+      toast(err.message ? `Couldn't load these titles: ${err.message}. Try again.` : "Couldn't load these titles. Try again.", { type: 'error' });
+      return undefined;
+    }
     if (left.current || my !== seq.current) return; // a newer choice (or another page) has taken over
     setItems(data.items);
     setBusy(false);

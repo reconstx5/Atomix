@@ -127,6 +127,8 @@ test('songs probed before 0.10 get their embedded lyrics once', { skip }, async 
   delete media.tags.lyricsChecked;
   core.db.run('UPDATE items SET media = ? WHERE id = ?', JSON.stringify(media), opening.id);
   core.db.run('DELETE FROM lyrics WHERE item_id = ?', opening.id);
+  // Every song's loudness counts as measured, so the volume check (v0.28) doesn't go first.
+  core.db.run(`UPDATE items SET media = json_set(media, '$.loudness', json('{"none":true}')) WHERE kind = 'track' AND media IS NOT NULL AND json_extract(media, '$.loudness') IS NULL`);
   core.extras.scanned(); // the edit above stands in for a scan (or a start) finding a pre-0.10 song
   assert.equal(core.extras.pendingCounts().lyrics, 1);
   // Intros and previews go first; with those switched off the song is next.

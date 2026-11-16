@@ -3,9 +3,13 @@
 import { parseJson } from '../db.js';
 
 // Who wins when sources disagree: an admin, then the file's chapters, then audio matching.
-const RANK = { audio: 1, chapter: 2, manual: 3 };
+// Shared timestamps (v0.28) rank lowest: anything found in the file itself, or set by hand, wins.
+const RANK = { community: 0, audio: 1, chapter: 2, manual: 3 };
 // A job is needed when it never ran for this file, or the file changed since.
 const STALE = '(j.item_id IS NULL OR j.source_size IS NOT i.size OR j.source_mtime IS NOT i.mtime)';
+// v0.28: episodes checked before credits and recaps were looked for are checked once more.
+export const INTROS_VERSION = 2;
+const STALE_INTROS = `(${STALE} OR COALESCE(json_extract(j.data, '$.v'), 1) < ${INTROS_VERSION})`;
 const PREVIEWABLE = `i.kind IN ('movie', 'episode') AND i.path IS NOT NULL AND i.path NOT LIKE 'remote:%' AND i.duration > 0
   AND json_extract(i.media, '$.video') IS NOT NULL
   AND COALESCE(json_extract(l.options, '$.previews'), 1) != 0`;
@@ -13,9 +17,16 @@ const CHECKABLE = "i.kind = 'episode' AND i.path IS NOT NULL AND i.path NOT LIKE
 // Extras with no picture yet, in libraries that make previews (the same switch).
 const THUMBABLE = `i.kind = 'extra' AND i.path IS NOT NULL AND i.path NOT LIKE 'remote:%' AND i.duration > 0 AND i.poster IS NULL
   AND COALESCE(json_extract(l.options, '$.previews'), 1) != 0`;
+// v0.28 card motion: local films and episodes whose preview clip is missing or made from an older file.
+const CLIPPABLE = `i.kind IN ('movie', 'episode') AND i.path IS NOT NULL AND i.path NOT LIKE 'remote:%' AND i.duration > 0
+  AND json_extract(i.media, '$.video') IS NOT NULL
+  AND COALESCE(json_extract(l.options, '$.previews'), 1) != 0`;
 const ONLY = 'AND i.id IN (SELECT value FROM json_each(?))';
 const LYRICS_PENDING = `i.kind = 'track' AND i.path IS NOT NULL AND i.path NOT LIKE 'remote:%' AND i.media IS NOT NULL
   AND json_extract(i.media, '$.tags.lyrics') IS NULL AND json_extract(i.media, '$.tags.lyricsChecked') IS NULL`;
+// v0.28: local songs not yet measured for loudness (even volume).
+const LOUDNESS_PENDING = `i.kind = 'track' AND i.path IS NOT NULL AND i.path NOT LIKE 'remote:%' AND i.media IS NOT NULL
+  AND json_extract(i.media, '$.loudness') IS NULL`;
 // Local films/episodes with embedded text subtitles not yet extracted to the cache (the player's VTT).
 const SUBTITLES_PENDING = `i.kind IN ('movie', 'episode') AND i.path IS NOT NULL AND i.path NOT LIKE 'remote:%' AND i.media IS NOT NULL
   AND json_extract(i.media, '$.subtitlesExtracted') IS NULL
@@ -60,6 +71,8 @@ export class ExtrasStore {
 
   /** Record what a job did for the file `item` describes (its size/mtime at the time). */
   saveJob(item, job, { status, data = null, error = null }) {
+    // Intro checks carry the version of the check, so a newer check (recaps, credits by sound) runs again.
+    if (job === 'intros') data = { ...(data || {}), v: INTROS_VERSION };
     return unlessGone(() =>
       this.db.run(
         `INSERT INTO media_jobs (item_id, job, status, data, error, source_size, source_mtime, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -124,7 +137,7 @@ export class ExtrasStore {
     const row = this.db.get(
       `SELECT i.parent_id AS season_id FROM items i
        LEFT JOIN media_jobs j ON j.item_id = i.id AND j.job = 'intros'
-       WHERE ${CHECKABLE} AND ${STALE} ${onlyIds ? ONLY : ''}
+       WHERE ${CHECKABLE} AND ${STALE_INTROS} ${onlyIds ? ONLY : ''}
        ORDER BY i.id LIMIT 1`,
       ...(onlyIds ? [JSON.stringify(onlyIds)] : []),
     );
@@ -134,7 +147,7 @@ export class ExtrasStore {
   pendingIntroEpisodes(seasonId) {
     return this.db.all(
       `SELECT i.* FROM items i LEFT JOIN media_jobs j ON j.item_id = i.id AND j.job = 'intros'
-       WHERE i.parent_id = ? AND ${CHECKABLE} AND ${STALE} ORDER BY i.episode, i.id`,
+       WHERE i.parent_id = ? AND ${CHECKABLE} AND ${STALE_INTROS} ORDER BY i.episode, i.id`,
       seasonId,
     );
   }
@@ -189,7 +202,7 @@ export class ExtrasStore {
     ).n;
     const intros = this.db.get(
       `SELECT COUNT(DISTINCT i.parent_id) AS n FROM items i
-       LEFT JOIN media_jobs j ON j.item_id = i.id AND j.job = 'intros' WHERE ${CHECKABLE} AND ${STALE}`,
+       LEFT JOIN media_jobs j ON j.item_id = i.id AND j.job = 'intros' WHERE ${CHECKABLE} AND ${STALE_INTROS}`,
     ).n;
     const thumbs = this.db.get(
       `SELECT COUNT(*) AS n FROM items i JOIN libraries l ON l.id = i.library_id
@@ -197,7 +210,12 @@ export class ExtrasStore {
     ).n;
     const lyrics = this.lyricsPending();
     const subtitles = this.db.get(`SELECT COUNT(*) AS n FROM items i WHERE ${SUBTITLES_PENDING}`).n;
-    return { previews, intros, thumbs, lyrics, subtitles };
+    const loudness = this.db.get(`SELECT COUNT(*) AS n FROM items i WHERE ${LOUDNESS_PENDING}`).n;
+    const clips = this.db.get(
+      `SELECT COUNT(*) AS n FROM items i JOIN libraries l ON l.id = i.library_id
+       LEFT JOIN media_jobs j ON j.item_id = i.id AND j.job = 'clip' WHERE ${CLIPPABLE} AND ${STALE}`,
+    ).n;
+    return { previews, intros, thumbs, clips, lyrics, subtitles, loudness };
   }
   /** The catch-up checked one song: the cached count drops by one (no new count query). */
   lyricsChecked() {
@@ -212,6 +230,23 @@ export class ExtrasStore {
     this.lyricsCount = { n, at: t };
     return n;
   }
+  /** v0.28 card motion: the next film or episode that needs a preview clip, or null. */
+  nextClipItem(onlyIds = null) {
+    return (
+      this.db.get(
+        `SELECT i.* FROM items i JOIN libraries l ON l.id = i.library_id
+         LEFT JOIN media_jobs j ON j.item_id = i.id AND j.job = 'clip'
+         WHERE ${CLIPPABLE} AND ${STALE} ${onlyIds ? ONLY : ''} ORDER BY i.id LIMIT 1`,
+        ...(onlyIds ? [JSON.stringify(onlyIds)] : []),
+      ) || null
+    );
+  }
+
+  /** v0.28: the next song to measure for even volume, or null. */
+  nextLoudnessItem(onlyIds = null) {
+    return this.db.get(`SELECT i.* FROM items i WHERE ${LOUDNESS_PENDING} ${onlyIds ? ONLY : ''} ORDER BY i.id LIMIT 1`, ...(onlyIds ? [JSON.stringify(onlyIds)] : [])) || null;
+  }
+
   nextSubtitleItem(onlyIds = null) {
     return (
       this.db.get(`SELECT i.* FROM items i WHERE ${SUBTITLES_PENDING} ${onlyIds ? ONLY : ''} ORDER BY i.id LIMIT 1`, ...(onlyIds ? [JSON.stringify(onlyIds)] : [])) || null
@@ -220,7 +255,7 @@ export class ExtrasStore {
 
   // ---- Previews ----
   previewIds() {
-    return new Set(this.db.all("SELECT item_id FROM media_jobs WHERE job = 'previews' AND status = 'done'").map((r) => r.item_id));
+    return new Set(this.db.all("SELECT item_id FROM media_jobs WHERE job IN ('previews', 'clip') AND status = 'done'").map((r) => r.item_id));
   }
 
   /** The layout the player needs, or null (none yet, or made from a file that has since changed). */
@@ -229,7 +264,15 @@ export class ExtrasStore {
     if (!j || j.source_size !== (item.size ?? null) || j.source_mtime !== (item.mtime ?? null)) return null;
     const data = parseJson(j.data, null);
     if (!data?.sheets) return null;
-    return { ...data, url: `/api/items/${item.id}/previews/{n}?v=${j.updated_at}` };
+    const clip = this.clipVersion(item);
+    return { ...data, url: `/api/items/${item.id}/previews/{n}?v=${j.updated_at}`, clip: clip != null, ...(clip != null ? { clipUrl: `/api/items/${item.id}/clip?v=${clip}` } : {}) };
+  }
+
+  /** The clip's version (when it was made), or null when there is none or the file changed since. */
+  clipVersion(item) {
+    const j = this.db.get("SELECT source_size, source_mtime, updated_at FROM media_jobs WHERE item_id = ? AND job = 'clip' AND status = 'done'", item.id);
+    if (!j || j.source_size !== (item.size ?? null) || j.source_mtime !== (item.mtime ?? null)) return null;
+    return j.updated_at;
   }
 
   // ---- Markers ----
@@ -244,7 +287,7 @@ export class ExtrasStore {
   playbackMarkers(itemId) {
     const m = this.markers(itemId);
     const plain = (x) => (x && !x.none ? { start: x.start, end: x.end } : null);
-    return { intro: plain(m.intro), credits: plain(m.credits) };
+    return { intro: plain(m.intro), credits: plain(m.credits), recap: plain(m.recap) };
   }
 
   /** Save a marker unless a more trusted one is already there. Returns true if saved. */

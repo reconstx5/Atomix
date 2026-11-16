@@ -1,0 +1,28 @@
+# Browser checks (v0.28)
+
+Small Playwright checks against a dev Atomix with made-up media. They need Node, ffmpeg, Playwright with Chromium
+(`require('playwright')` must work) and, for picture comparisons, Python with Pillow.
+
+1. `devtools/make-dev.sh <folder>` makes 8 test films and a 4-episode show, starts Atomix on :8787 and signs up
+   `dallas` / `atomix-dev-1`.
+2. Run a check: `node devtools/home-fn.mjs` (each prints PASS/FAIL lines and exits 1 on a failure).
+
+| Check | What it covers |
+|---|---|
+| `home-fn.mjs` | Home: the spotlight follows the remote, the top area gets smaller past the first row, Enter and Back |
+| `home-scroll.mjs`, `lib-scroll.mjs` | a wheel over the spotlight scrolls the rows / the grid; phones untouched |
+| `lists-fn.mjs` | a playlist: Move down/up keeps the remote on the moved title; the playlist menu |
+| `card-motion.mjs` | a rested card with no preview clip flips through its own pictures once; reduced motion; moving away stops it |
+| `card-clip.mjs` | card motion v2, live preview: a film rested 1.2 s plays its 5 s silent clip in the art (one muted video, shown only after its first frame plays, gone with its src let go when focus moves, a key is pressed or the page hides); a held arrow asks for no clip; no clip, a 404 or a refused play() → the flip; a clip that never answers → given up after 2.5 s, the flip; a held arrow let go → the card landed on plays; Kids (a client stub: `state.profile.kids` is set in the page, not a real Kids profile; the server's Kids 404 is tested in `test/clips.test.js`) → the flip only, no video; pref off and saveData → nothing at all (no clip, no flip, no previews request); reduced motion → no video |
+| `card-select.mjs` | card motion v2, selecting a card (Orbit + Arctic, desktop + phone): the art lifts (1.06, up 4 px), the glow shows, the row's other cards dim to 0.78, Orbit's info strip shows on the art's lower edge; the sheen once per card per visit; held arrow, reduce and none tiers; hover only with a mouse; rows never gain an up-and-down scroll |
+| `card-open.mjs` | card motion v2, opening a title: the card's art travels into the title page's backdrop (or poster) and, where the card shows its title (a library grid), the title into the page title, names cleared after; the page's first blocks rise in 20 ms apart (≤ 200 ms, full motion only), the page staying above a growing backdrop; Back goes into the same card, focused, its row scrolled as before; reduce: crossfade only (no stagger); no view transitions (stubbed away): instant; a card off screen or gone (left out of Home's answer) on Back: a plain fade (vt-section), focus still restored (gone: the page's first control); a held key: no change; a backdrop held back 1 s (opened from a library grid): the art never travels into a backdrop that hasn't loaded. Artwork is stubbed (the dev media has none) |
+| `card-load.mjs` | card motion v2, rows and loading (artwork stubbed and held back 800 ms): a tinted card paints its tint before the picture, its art box already full size; decode() then a 180 ms fade; Home's CLS 0; a picture already there when drawn shows at once (no fade, no tint); the first visit to Home and a library ripples the cards on screen (0, 20, 40 ms …, ≤ 300 ms, a fade and an 8 px rise), cards off screen don't move; no ripple on Back (library, Home) or when the page is drawn again; a card focused while the ripple runs shows at once; along a row a single press scrolls smoothly, a held key at once; reduce: the fade stays, the ripple is one fade without stagger or rise; none: nothing moves |
+| `lib-fail.mjs` | a failed library filter request takes the spinner down and says so |
+| `start-time.mjs` | how long until there is something to play: direct, converted, converted for Safari (HLS) |
+| `iphone-channels.mjs` | v0.28: channels a device can't play — an iPhone (Widevine refused) doesn't list a Widevine-only channel on the wall, guide, On now or search; the switch, the message card (Watch on TV, Open TVNZ+, no stream asked for), zapping over it, a typed number; desktop Chrome unchanged; an admin's "Provider app link…" |
+| `mock-iptv.mjs` | a tiny IPTV source on :9921 (TVNZ 2 Widevine only, Both Ways Widevine + ClearKey, Plain One) set as IPTV Simple's playlist through the admin API; used by `iphone-channels.mjs`, or `node devtools/mock-iptv.mjs serve [--plain]` while running `compare.mjs` (`--plain` leaves out the Widevine-only channel, which headless Chromium can't play and would hide). Ctrl+C puts IPTV Simple's settings back and removes the mock channels from the dev database |
+| `fixed-compare.mjs` | v0.28: before/after for Live TV, the Guide and Home with recorded API answers and a fixed clock (the dev server's own channels change programme every ~40 s, so `compare.mjs` can't compare these pages): `record <before>` on the old code, `replay <after> <before>` on the new, then `diff <before> <after>` (markup and pixels, every theme, desktop and phone). Run it with `node devtools/mock-iptv.mjs serve --plain` going. `ART=1` (with `PAGES='#/,#/library/1,#/item/1'`) gives the titles on Home, a library grid and a title page stubbed artwork and tints (the title page a backdrop too) and captures once the pictures on screen and the backdrop have loaded: older themes at rest after load. Each page is loaded afresh and the app's service worker is blocked (it would answer past the stubs) |
+| `compare.mjs` | before/after for a screen moved to Preact: `capture <dir>` before the change and after, then `diff <a> <b>` (markup and pixels, every theme, desktop and phone) |
+
+The older browser suites and mock servers (mock IPTV, mock Chromecast) from earlier rounds were lost with a cloud
+workspace; these replace part of them.

@@ -5,6 +5,7 @@ import { button, openDialog, emptyState, toast, announce } from '../components.j
 import { setTitle, canAdmin } from '../app.js';
 import { channels as fetchChannels, groups as fetchGroups, guide as fetchGuide, programme as fetchProgramme, programmeTimes, programmeState, clockTime, liveStatus, playChannel, recordProgramme, cancelRecording, stopRecording, stopSeries, recordingWords } from '../live.js';
 import { channelLogo, lockBadge, recDot } from '../live-bits.js';
+import { listable, deviceSoon } from '../dash/playable.js';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -12,7 +13,8 @@ const DAY = 24 * HOUR;
 const SPAN = 2.5 * HOUR; // what's in view
 const STEP = 2 * HOUR; // Earlier / Later
 const PAGE = 50; // rows drawn at a time
-const enc = (c) => (c.drm ? ', encrypted' : ''); // spoken after an encrypted channel's name
+// Spoken after an encrypted channel's name (v0.28: and one this device can't play, listed with the switch on).
+const enc = (c) => (c.drm ? ', encrypted' : '') + (c.unplayable ? ", can't play here" : '');
 const STATE_TEXT = { now: 'on now', aired: 'aired', upcoming: 'upcoming', catchup: 'catch-up available' };
 
 const floorHalf = (t) => Math.floor(t / (30 * MIN)) * 30 * MIN;
@@ -113,7 +115,9 @@ export async function render(el, params, query = {}) {
     el.append(emptyState({ title: "Live TV isn't set up yet", text: canAdmin() ? 'Add a playlist in Settings → Plugins → IPTV Simple' : '', icon: 'live' }));
     return;
   }
-  const all = await fetchChannels();
+  // v0.28: channels this device can't play are left out (unless the Live TV switch is on).
+  const listed = await fetchChannels();
+  const all = listable(listed, { device: await deviceSoon(listed) });
   if (window.matchMedia('(max-width: 720px)').matches) return renderList(el, all, query);
   return renderGrid(el, all, query);
 }
@@ -238,8 +242,8 @@ async function renderGrid(el, all, query) {
     }
     return h(
       'div',
-      { class: 'guide-row', role: 'row', dataset: { channel: c.id } },
-      h('div', { class: 'guide-chan', role: 'rowheader' }, channelLogo(c, 'sm'), h('span', { class: 'live-num' }, c.number != null ? String(c.number) : ''), h('span', { class: 'guide-chan-name' }, c.name), lockBadge(c)),
+      { class: c.unplayable ? 'guide-row is-unplayable' : 'guide-row', role: 'row', dataset: { channel: c.id } },
+      h('div', { class: 'guide-chan', role: 'rowheader' }, channelLogo(c, 'sm'), h('span', { class: 'live-num' }, c.number != null ? String(c.number) : ''), h('span', { class: 'guide-chan-name' }, c.name), lockBadge(c), c.unplayable ? h('span', { class: 'chip live-cant', 'aria-hidden': 'true' }, "Can't play here") : null),
       h('div', { class: 'guide-track' }, cells),
     );
   }
@@ -377,6 +381,7 @@ async function renderList(el, all, query) {
 
   async function draw() {
     const c = all.find((x) => String(x.id) === chanSel.value) || all[0];
+    listEl.classList.toggle('is-unplayable', Boolean(c?.unplayable)); // v0.28: dimmed (the picker's name says why)
     const start = Number(daySel.value);
     const progs = [];
     for (let t = start; t < start + DAY; t += 6 * HOUR) {

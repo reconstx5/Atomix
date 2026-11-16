@@ -88,7 +88,7 @@ test('intros come from the shared theme tune, or from chapters', { skip }, async
   near(m2.intro.start, 17, 'E02 start');
   near(m2.intro.end, 37, 'E02 end');
   const m3 = (await play(admin, ids.e3)).data.markers;
-  assert.deepEqual(m3, { intro: { start: 5, end: 20 }, credits: { start: 80, end: 100 } });
+  assert.deepEqual(m3, { intro: { start: 5, end: 20 }, credits: { start: 80, end: 100 }, recap: { start: 0, end: 5 } }); // v0.28: its Recap chapter
 
   assert.equal((await admin.get(`/api/items/${ids.e1}`)).data.markers.intro.source, 'audio', 'admins see where it came from');
   assert.equal((await viewer.get(`/api/items/${ids.e1}`)).data.markers, undefined, 'other people do not');

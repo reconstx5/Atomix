@@ -1,15 +1,9 @@
 /* Harbour — living-room layout with a side menu and larger artwork. */
 :root {
+  --focus-ring: #ffffff; /* A4: a white ring with a dark halo (tokens.css) on every dark theme */
   color-scheme: dark;
-  --bg: #0a1624;
-  --bg-2: #0e1c2e;
-  --surface: #132338;
-  --surface-2: #1b3150;
   --border: rgba(160, 200, 255, 0.12);
-  --text: #eaf3ff;
-  --text-dim: #9fb4cc;
-  --accent: #2fb8f0;
-  --accent-text: #04121c;
+  --accent-text: #000000; /* black or white, whichever reads on the accent (APCA Lc >= 60) */
   --danger: #ff6b7a;
   --success: #45d49a;
   --radius: 6px;
@@ -19,8 +13,70 @@
   --shadow: 0 14px 36px rgba(0, 6, 16, 0.6);
   --font: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
   --font-display: var(--font);
+  --accent: var(--a-10); /* one step up from a-9 (today's accent): black ink on it reaches Lc 60 */
+  --accent-solid: var(--a-10);
+  --accent-hover: var(--a-11);
+}
+/* Ramps (devtools/ramp.mjs): --n-* neutrals, --a-* accent. Hex for every browser; the same colours in oklch() where
+   it is understood. --bg, --bg-2, --surface, --surface-2, --text and --accent come from these (public/css/tokens.css). */
+:root {
+  --n-1: #0a1624;
+  --n-2: #0e1c2e;
+  --n-3: #132338;
+  --n-4: #1b3150;
+  --n-5: #2f4563;
+  --n-6: #435976;
+  --n-7: #596e8a;
+  --n-8: #6f839e;
+  --n-9: #8699b2;
+  --n-10: #9eb0c7;
+  --n-11: #b6c7dc;
+  --n-12: #eaf3ff;
+  --a-1: #121e24;
+  --a-2: #172c36;
+  --a-3: #1c3a49;
+  --a-4: #21495c;
+  --a-5: #255971;
+  --a-6: #286886;
+  --a-7: #2c799b;
+  --a-8: #2f8ab1;
+  --a-9: #2fb8f0;
+  --a-10: #59cbff;
+  --a-11: #73d1fe;
+  --a-12: #dcf3ff;
+}
+@supports (color: oklch(0% 0 0)) {
+  :root {
+    --n-1: oklch(19.69% 0.0333 253.21);
+    --n-2: oklch(22.39% 0.0404 255.30);
+    --n-3: oklch(25.35% 0.0456 255.70);
+    --n-4: oklch(31.16% 0.0627 257.15);
+    --n-5: oklch(38.63% 0.0585 256.36);
+    --n-6: oklch(45.83% 0.0548 255.55);
+    --n-7: oklch(53.22% 0.0509 255.74);
+    --n-8: oklch(60.40% 0.0475 255.99);
+    --n-9: oklch(67.67% 0.0430 255.36);
+    --n-10: oklch(75.09% 0.0388 254.61);
+    --n-11: oklch(82.34% 0.0349 253.74);
+    --n-12: oklch(96.09% 0.0188 255.53);
+    --a-1: oklch(22.66% 0.0206 230.46);
+    --a-2: oklch(28.03% 0.0326 230.06);
+    --a-3: oklch(33.23% 0.0446 232.00);
+    --a-4: oklch(38.52% 0.0553 231.20);
+    --a-5: oklch(43.97% 0.0676 231.09);
+    --a-6: oklch(48.99% 0.0802 232.09);
+    --a-7: oklch(54.42% 0.0908 230.97);
+    --a-8: oklch(59.74% 0.1023 230.68);
+    --a-9: oklch(73.65% 0.1370 231.23);
+    --a-10: oklch(79.72% 0.1261 231.10);
+    --a-11: oklch(81.97% 0.1095 230.90);
+    --a-12: oklch(95.09% 0.0291 230.28);
+  }
 }
 body { font-size: 1.05rem; }
 .nav-link[aria-current="page"] { box-shadow: inset 4px 0 0 var(--accent); }
-.card:focus-visible { transform: scale(1.06); }
+.nav-link[aria-current="page"]:focus-visible { box-shadow: var(--focus-halo-ring), inset 4px 0 0 var(--accent); }
+.card:focus-visible { transform: scale(var(--focus-grow)); } /* A4: the growth the rows keep room for (app.css) */
 @media (hover: hover) and (pointer: fine) { .card:hover { transform: scale(1.06); } } /* v0.28: no hover left stuck on touch screens */
+/* Card motion v2: the whole card already grows 1.06 here, so its art only lifts (no growth on top of growth). */
+:root { --focus-scale-poster: 1; --focus-scale-wide: 1; --hover-scale-poster: 1; --hover-scale-wide: 1; }

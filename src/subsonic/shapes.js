@@ -5,6 +5,7 @@
 import path from 'node:path';
 import { parseJson } from '../db.js';
 import { SubsonicError } from './envelope.js';
+import { replayGainOf } from '../library/loudness.js';
 
 const TYPES = { mp3: 'audio/mpeg', flac: 'audio/flac', m4a: 'audio/mp4', mp4: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav', wma: 'audio/x-ms-wma', aiff: 'audio/aiff', aif: 'audio/aiff', ape: 'audio/x-ape', wv: 'audio/x-wavpack', mka: 'audio/x-matroska', webm: 'audio/webm' };
 const iso = (ms) => (ms ? new Date(ms).toISOString() : undefined);
@@ -87,6 +88,8 @@ export function song(row, mine) {
     created: iso(row.added_at),
   };
   if (m?.lastPlayed) out.played = iso(m.lastPlayed);
+  const rg = replayGainOf(media.loudness); // v0.28: OpenSubsonic replayGain, so apps level songs too
+  if (rg) out.replayGain = rg;
   return annotate(out, m);
 }
 
