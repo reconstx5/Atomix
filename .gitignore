@@ -6,3 +6,4 @@ nodeflix.config.json
 *.log
 .DS_Store
 Thumbs.db
+devtools/out/
