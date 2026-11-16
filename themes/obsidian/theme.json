@@ -4,5 +4,6 @@
   "author": "Atomix",
   "layout": "top",
   "colorScheme": "dark",
+  "oled": true,
   "preview": { "background": "#000000", "surface": "#111114", "accent": "#a78bfa" }
 }

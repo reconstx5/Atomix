@@ -4,5 +4,6 @@
   "author": "Atomix",
   "layout": "orbit",
   "colorScheme": "dark",
+  "artworkTint": true,
   "preview": { "background": "#05050c", "surface": "#1c1c2a", "accent": "#8fe9ff" }
 }

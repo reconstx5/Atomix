@@ -26,6 +26,9 @@ export class Themes {
           author: t.author || '',
           layout: ['side', 'orbit'].includes(t.layout) ? t.layout : 'top',
           colorScheme: t.colorScheme === 'light' ? 'light' : 'dark',
+          oled: t.oled === true, // True black unless the profile says otherwise
+          artworkTint: t.artworkTint === true, // the accent glow and fills follow the artwork
+          backdropFollowsFocus: t.backdropFollowsFocus === true,
           preview: t.preview || {},
           css: `/themes/${encodeURIComponent(entry.name)}/${t.stylesheet || 'theme.css'}`,
         });

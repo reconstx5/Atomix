@@ -18,7 +18,7 @@ import { sync, keepSnapshot, readSnapshot, forgetSnapshot } from './offline/sync
 import { watchState, notifyState } from './state-events.js';
 import { mountView } from './screen.js';
 import { applyMotion } from './motion.js';
-import { glassMode, contrastMode, textScale, orderLibraries, movePinned, effectsReduced } from './appearance-rules.js';
+import { glassMode, contrastMode, textScale, orderLibraries, movePinned, effectsReduced, oledMode } from './appearance-rules.js';
 import { historyStep } from './motion-rules.js';
 import { noteStep, beginPageChange, initCapture } from './transitions.js';
 import { initCardMotion } from './card-motion.js';
@@ -265,12 +265,13 @@ const mq = (q) => (typeof matchMedia === 'function' ? matchMedia(q) : { matches:
 const appearanceQueries = { tv: mq(TV_QUERY), reducedTransparency: mq('(prefers-reduced-transparency: reduce)'), contrastMore: mq('(prefers-contrast: more)') };
 const blurSupported = () => typeof CSS !== 'undefined' && (CSS.supports('backdrop-filter', 'blur(1px)') || CSS.supports('-webkit-backdrop-filter', 'blur(1px)'));
 let appearanceWatched = false;
-function applyAppearance(prefs, scheme = document.documentElement.style.colorScheme || 'dark') {
+let currentTheme = null; // the theme applyTheme last applied, for re-applying the appearance when the device changes
+function applyAppearance(prefs, theme = currentTheme) {
   const html = document.documentElement;
   const contrast = contrastMode(prefs, { prefersMore: appearanceQueries.contrastMore.matches });
   html.dataset.contrast = contrast;
   // True black only means something on a dark theme (Daylight keeps its canvas).
-  if (prefs.oled && scheme !== 'light') html.dataset.oled = '';
+  if (oledMode(prefs, theme || { colorScheme: html.style.colorScheme || 'dark' })) html.dataset.oled = '';
   else delete html.dataset.oled;
   html.style.setProperty('--text-scale', String(textScale(prefs)));
   const glass = glassMode(prefs, { tv: appearanceQueries.tv.matches, backdropFilter: blurSupported(), reducedTransparency: appearanceQueries.reducedTransparency.matches, contrastMore: contrast === 'more' });
@@ -309,7 +310,10 @@ export function applyTheme() {
   applyAccent(root, prefs.accent, theme?.colorScheme === 'light' ? 'light' : 'dark');
   root.setProperty('--subtitle-scale', String(prefs.subtitleSize || 1));
   applyMotion({ profileReduce: Boolean(prefs.reduceMotion) }); // v0.28: data-motion (and html.reduce-motion)
-  applyAppearance(prefs, theme?.colorScheme === "light" ? "light" : "dark");
+  currentTheme = theme;
+  document.documentElement.dataset.artworkTint = String(theme?.artworkTint === true);
+  document.documentElement.dataset.followFocus = String(theme?.backdropFollowsFocus === true);
+  applyAppearance(prefs, theme);
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta && theme?.preview?.background) meta.setAttribute('content', theme.preview.background);
   // Orbit and the older layouts build different menus.

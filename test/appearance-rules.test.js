@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { glassMode, contrastMode, textScale, orderLibraries, movePinned } from '../public/js/appearance-rules.js';
+import { glassMode, contrastMode, textScale, orderLibraries, movePinned, oledMode } from '../public/js/appearance-rules.js';
 
 const desk = { tv: false, backdropFilter: true, reducedTransparency: false };
 
@@ -67,4 +67,13 @@ test('effects: reduced only by the profile\'s own choice', () => {
   assert.equal(effectsReduced({ reduceEffects: true }), true);
   assert.equal(effectsReduced({ glass: 'tinted', reduceEffects: true }), false);
   assert.equal(effectsReduced({}), false);
+});
+
+test('oled: a theme that is True black by default is on', () => assert.equal(oledMode({}, { colorScheme: 'dark', oled: true }), true));
+test('oled: the profile can turn it off', () => assert.equal(oledMode({ oled: false }, { colorScheme: 'dark', oled: true }), false));
+test('oled: never on a light theme', () => assert.equal(oledMode({ oled: true }, { colorScheme: 'light' }), false));
+test('oled: off by default, on when the profile asks', () => {
+  assert.equal(oledMode({}, { colorScheme: 'dark' }), false);
+  assert.equal(oledMode({ oled: true }, { colorScheme: 'dark' }), true);
+  assert.equal(oledMode(), false);
 });

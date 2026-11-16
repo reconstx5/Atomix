@@ -31,6 +31,16 @@ export function contrastMode(prefs = {}, env = {}) {
   return env.prefersMore ? 'more' : 'normal';
 }
 
+/**
+ * Whether True black is on: never on a light theme; the profile's own yes or no wins; otherwise the theme's default.
+ * theme: { colorScheme, oled }.
+ */
+export function oledMode(prefs = {}, theme = {}) {
+  if (theme.colorScheme === 'light') return false;
+  if (typeof prefs.oled === 'boolean') return prefs.oled;
+  return theme.oled === true;
+}
+
 /** The text size multiplier: 1, 1.15 or 1.3. */
 export function textScale(prefs = {}) {
   return TEXT_SCALES.includes(prefs.textScale) ? prefs.textScale : 1;

@@ -76,3 +76,26 @@ test('themes can use the orbit layout; unknown layouts get the top menu', () => 
   const layouts = Object.fromEntries(new Themes({ themesDir: dir }).list().map((t) => [t.id, t.layout]));
   assert.deepEqual(layouts, { a: 'orbit', b: 'side', c: 'top', d: 'top' });
 });
+
+test('theme flags: only real booleans pass through; absent means false', () => {
+  const dir = tempDir();
+  const cases = { a: { oled: true, artworkTint: true, backdropFollowsFocus: true }, b: { oled: 'yes', artworkTint: 1, backdropFollowsFocus: 'true' }, c: {} };
+  for (const [id, flags] of Object.entries(cases)) {
+    fs.mkdirSync(path.join(dir, id));
+    fs.writeFileSync(path.join(dir, id, 'theme.json'), JSON.stringify({ name: id, ...flags }));
+  }
+  const by = Object.fromEntries(new Themes({ themesDir: dir }).list().map((t) => [t.id, t]));
+  for (const k of ['oled', 'artworkTint', 'backdropFollowsFocus']) {
+    assert.equal(by.a[k], true, `a.${k}`);
+    assert.equal(by.b[k], false, `b.${k}`);
+    assert.equal(by.c[k], false, `c.${k}`);
+  }
+});
+
+test('shipped themes: Obsidian is True black, Orbit and the Arctics tint from artwork', () => {
+  const by = Object.fromEntries(new Themes({ themesDir: path.join(import.meta.dirname, '..', 'themes') }).list().map((t) => [t.id, t]));
+  assert.equal(by.obsidian.oled, true);
+  for (const id of ['orbit', 'arctic', 'arctic-side']) assert.equal(by[id].artworkTint, true, id);
+  assert.equal(by.midnight.oled, false);
+  assert.equal(by.midnight.artworkTint, false);
+});

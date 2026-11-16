@@ -2,7 +2,7 @@
 import { api } from '../api.js';
 import { addDeviceDialog } from '../cast.js';
 import { h, icon, clear, timeAgo, formatClock } from '../dom.js';
-import { orderLibraries, movePinned } from '../appearance-rules.js';
+import { orderLibraries, movePinned, oledMode } from '../appearance-rules.js';
 import { button, toast, openDialog, confirmDialog, field, toggle, pillChoice, spinner, avatar, AVATAR_NAMES, rovingRadios, rowActions, moreButton, emptyState, TOASTS } from '../components.js';
 import { musicAppsCard, scrobblingCard, lastfmFields, quickConnectCard } from './settings-music.js';
 import { installCard } from './settings-install.js';
@@ -197,7 +197,7 @@ function accentPicker(prefs, themes, themeId) {
     preview.style.setProperty('--sw', custom ? clampAccent(chosen, scheme) : 'transparent');
     preview.classList.toggle('is-empty', !custom);
   }
-  const hintText = (id) => (['orbit', 'arctic'].includes(id) ? 'Used when a title has no artwork to take its colour from. ' : '') + 'Each colour is adjusted so it stays readable in this theme.';
+  const hintText = (id) => (themes.find((t) => t.id === id)?.artworkTint ? 'Used when a title has no artwork to take its colour from. ' : '') + 'Each colour is adjusted so it stays readable in this theme.';
   const hint = h('p', { class: 'hint' }, hintText(themeId));
   paint();
   const el = h(
@@ -312,7 +312,7 @@ async function profileTab(el) {
       accent.el,
       toggle('Reduce motion', prefs.reduceMotion, (v) => save(() => updatePrefs({ reduceMotion: v })), { hint: 'Nothing grows, slides or zooms. Fades stay, so you can still see what changed.' }),
       pillChoice('Glass', [['clear', 'Clear'], ['tinted', 'Tinted'], ['solid', 'Solid']], document.documentElement.dataset.glass || 'tinted', (v) => save(() => updatePrefs({ glass: v, reduceEffects: null })), { hint: 'How see-through menus and panels are. Solid is easiest to read and fastest on TVs.' }),
-      document.documentElement.style.colorScheme === 'light' ? null : toggle('True black (for OLED screens)', prefs.oled === true, (v) => save(() => updatePrefs({ oled: v })), { hint: 'A black page with thin edges on panels. Saves power on OLED TVs and phones.' }),
+      document.documentElement.style.colorScheme === 'light' ? null : toggle('True black (for OLED screens)', oledMode(prefs, themes.find((t) => t.id === current) || { colorScheme: 'dark' }), (v) => save(() => updatePrefs({ oled: v })), { hint: 'A black page with thin edges on panels. Saves power on OLED TVs and phones.' }),
       toggle('More contrast', document.documentElement.dataset.contrast === 'more', (v) => save(() => updatePrefs({ contrast: v ? 'more' : 'normal' })), { hint: 'Stronger text, solid panels and clear edges on buttons and cards.' }),
       pillChoice('Text size', [[1, 'Normal'], [1.15, 'Large'], [1.3, 'Largest']], prefs.textScale || 1, (v) => save(() => updatePrefs({ textScale: v })), { hint: 'Makes the words bigger everywhere in Atomix.' }),
       toggle('Play previews on cards', prefs.cardPreviews !== false, (v) => save(() => updatePrefs({ cardPreviews: v })), { hint: 'After a moment on a title, a few silent seconds of it play on the card. Never on kids profiles or with Reduce motion on.' }),
