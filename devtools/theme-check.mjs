@@ -115,7 +115,7 @@ const CHECKS = {
           // Hold ArrowRight for 1.2 s: key repeats (e.repeat) set html.nav-held; the backdrop may change at most once (on release).
           // Start at the row's first card and repeat every 200 ms (6 steps): the row has only 8 cards, and a hold that
           // runs off its end would leave the row for the menu.
-          await focusCard(page, 0);
+          const startId = await focusCard(page, 0);
           await page.waitForTimeout(700);
           await page.evaluate(() => { window.__bd.length = 0; });
           let heldSeen = false;
@@ -131,6 +131,7 @@ const CHECKS = {
           const after = await backdropSrc(page);
           check(`follow-focus ${theme}: a held arrow sets html.nav-held`, heldSeen);
           check(`follow-focus ${theme}: during the hold the backdrop changes at most once`, changesDuring <= 1, `${changesDuring} changes`);
+          check(`follow-focus ${theme}: the hold moved focus along the row`, landed && landed !== startId, `from ${startId} to ${landed}`);
           check(`follow-focus ${theme}: after the release the backdrop is the card it landed on`, landed && after.includes(`backdrop-${landed}.svg`), `landed ${landed}, backdrop ${after}`);
           // Motion none: focusing a card must not change the backdrop (the older spotlight path must stay out of it too).
           await page.evaluate(() => { document.documentElement.dataset.motion = 'none'; window.__bd.length = 0; });
