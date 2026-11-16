@@ -5,6 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readThemeTokens, composite } from '../src/themes/tokens.js';
@@ -208,7 +209,7 @@ test('an old-names-only theme (a copy of the old Midnight) looks as before', () 
     near(colour(m, '--text-high'), parseColor('#eef1f6'), '--text-high');
   }
   // Its own values win over tokens.css's defaults (which happen to be Midnight's): change them and they follow.
-  const tmp = fs.mkdtempSync(path.join((process.env.TMPDIR || '/tmp'), 'atomix-legacy-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'atomix-legacy-'));
   const own = path.join(tmp, 'theme.css');
   fs.writeFileSync(own, fs.readFileSync(file, 'utf8').replace('--bg: #0c0e13', '--bg: #102030').replace('--text: #eef1f6', '--text: #fafafa')
     .replace('--surface: #191d27', '--surface: #203040').replace('--accent: #ff6b3d', '--accent: #33cc99'));
