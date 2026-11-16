@@ -206,5 +206,6 @@ Plan `docs/superpowers/plans/2026-11-17-atomix-visual-refresh-c.md`; each theme 
   Gallery: `ART=1 SIZES=desk,tv,phone PAGES='#/,#/library/1,#/item/1,#/live,#/settings' node devtools/fixed-compare.mjs record <dir>`, then
   `node devtools/gallery.mjs <before> <after> <out>` (Pillow; `PYTHON` overrides `python`) writes `index.html` sliders and `visual-evidence.json`.
 - Still needs real devices: TV timings and the focus ring on a TV, Safari/iPhone, old TV browsers (no `oklch`/`color-mix`), Daylight dimming on a real TV.
-- Parked minors: `modes-check` fails 10 checks on midnight/orbit identically before Plan C (likely the check or leftover prefs); `card-select` ignores
+- glass/modes/pinned/polish-check used to PATCH prefs to a fixed :8787 while the page ran on BASE (fixed eb35e29); modes-check is ALL PASS now.
+- Parked minors: `card-select` ignores
   `THEMES`; `sized.js` guesses 196 px for row posters; laptop widths 1000-1366 show about 5.8 Orbit posters, unchecked.
