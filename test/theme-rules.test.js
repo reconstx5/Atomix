@@ -23,9 +23,10 @@ export const RULES = {
       },
     })),
     ...[1, 2, 3, 4, 5, 6].map((n) => ({
-      name: `n-${n} is a slight hue (C 0.01-0.04, allowing 0.004 of 8-bit rounding) and lighter than n-${n - 1 || 'none'}`, token: `--n-${n}`,
+      name: `n-${n} is a slight hue (C 0.01-0.04)${n > 1 ? ` and lighter than n-${n - 1}` : ''}`, token: `--n-${n}`,
       check: (lch, map) => {
-        assert.ok(lch.C >= 0.006 && lch.C <= 0.044, `chroma ${lch.C.toFixed(3)} is outside 0.01-0.04`);
+        // 0.04 plus 0.004 of 8-bit rounding (lchOf goes through a hex)
+        assert.ok(lch.C >= 0.01 && lch.C <= 0.044, `chroma ${lch.C.toFixed(3)} is outside 0.01-0.04`);
         if (n > 1) assert.ok(lch.L > lchOf(map, `--n-${n - 1}`).L, 'is not lighter than the step before');
       },
     })),

@@ -19,8 +19,10 @@
   --accent-solid: var(--a-10);
   --accent-hover: var(--a-11);
 }
-/* No blur anywhere on the shared chrome, whatever the app's own rules say. */
-.app-header, .panel, .dialog, .details-panel, .player-menu { -webkit-backdrop-filter: none; backdrop-filter: none; }
+/* Midnight is the low-power reference: no blur anywhere (backdrop-filter is the costly part on old TVs and phones).
+   Surfaces stay readable without it: the ones that leaned on blur over a thin background get a solid one below. */
+*, *::before, *::after, ::backdrop { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+.card-play, .list-mosaic > .icon { background: var(--n-2); }
 /* Ramps (devtools/ramp.mjs): --n-* neutrals, --a-* accent. Hex for every browser; the same colours in oklch() where
    it is understood. --bg, --bg-2, --surface, --surface-2, --text and --accent come from these (public/css/tokens.css). */
 :root {
