@@ -62,9 +62,11 @@ if (mode === 'capture') {
 } else if (mode === 'diff') {
   const { execSync } = await import('node:child_process');
   let bad = 0;
+  // Whether a picture had finished loading when the page was read (loaded, is-instant) is timing, not markup.
+  const settle = (t) => t.replace(/class="art art-(\w+)[^"]*"/g, 'class="art art-$1"');
   for (const f of fs.readdirSync(a).filter((f) => f.endsWith('.html'))) {
-    const x = fs.readFileSync(path.join(a, f), 'utf8');
-    const y = fs.existsSync(path.join(b, f)) ? fs.readFileSync(path.join(b, f), 'utf8') : '';
+    const x = settle(fs.readFileSync(path.join(a, f), 'utf8'));
+    const y = settle(fs.existsSync(path.join(b, f)) ? fs.readFileSync(path.join(b, f), 'utf8') : '');
     if (x !== y) {
       bad++;
       console.log(`MARKUP DIFFERS ${f}`);
