@@ -309,21 +309,26 @@ export function mediaFlags(item) {
   return flags;
 }
 
-/**
- * v0.29 visual refresh B4: the title page's outlined chips, from the file's media info: 4K, the HDR kind, Atmos,
- * 5.1/7.1 and Subtitles (codec words stay in Details). Null when there is nothing to say.
- */
-export function mediaChips(item) {
+/** The words on the title page's media chips (mediaChips, and ui/detail.js's MediaChips). */
+export function mediaChipWords(item) {
   const m = item.media;
-  if (!m) return null;
+  if (!m) return [];
   const a = m.audio?.find((t) => t.default) || m.audio?.[0];
-  const words = [
+  return [
     m.resolution === '4K' ? '4K' : null,
     m.hdrFormat || (m.hdr ? 'HDR' : null),
     m.atmos ? 'Atmos' : null,
     a?.channels >= 6 ? CHANNELS[a.channels] || `${a.channels}ch` : null,
     m.subtitles ? 'Subtitles' : null,
   ].filter(Boolean);
+}
+
+/**
+ * v0.29 visual refresh B4: the title page's outlined chips, from the file's media info: 4K, the HDR kind, Atmos,
+ * 5.1/7.1 and Subtitles (codec words stay in Details). Null when there is nothing to say.
+ */
+export function mediaChips(item) {
+  const words = mediaChipWords(item);
   return words.length ? h('ul', { class: 'media-flags media-chips', 'aria-label': 'Picture and sound' }, words.map((w) => h('li', {}, w))) : null;
 }
 

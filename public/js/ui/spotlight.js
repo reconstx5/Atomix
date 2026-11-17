@@ -9,12 +9,12 @@ import { itemHref, endsAt, timeLeft, orbitLayout } from '../components.js';
 import { scoresText } from '../scores.js';
 import { sizedAttrs } from '../sized.js';
 
-/** metaLine(item): year · runtime or seasons/episodes · rating · scores · age rating. */
-export function MetaLine({ item, extra = null }) {
+/** metaLine(item): year · runtime or seasons/episodes · rating · scores · age rating. `rise`: the title page's data-rise. */
+export function MetaLine({ item, extra = null, rise = null }) {
   const runtime = formatRuntime(item.runtime || (item.duration ? item.duration / 60 : null));
   const scores = scoresText(item.scores);
   const cert = item.certification ? String(item.certification).split(':').pop().trim() : '';
-  return html`<div class="meta-line">
+  return html`<div class="meta-line" data-rise=${rise}>
     ${item.year ? html`<span>${String(item.year)}</span>` : null}
     ${runtime && item.kind !== 'show' ? html`<span>${runtime}</span>` : null}
     ${item.kind === 'show' && item.seasonCount ? html`<span>${`${item.seasonCount} ${item.seasonCount === 1 ? 'season' : 'seasons'}`}</span>` : item.kind === 'show' && item.episodeCount ? html`<span>${`${item.episodeCount} episodes`}</span>` : null}

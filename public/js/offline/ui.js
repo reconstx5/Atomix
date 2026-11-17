@@ -61,7 +61,7 @@ export function stateLabel(st) {
 }
 
 /** The sheet for a title that already has a download. */
-async function manage(item) {
+export async function manage(item) {
   const st = await downloads.state(item.id);
   if (!st || st.status === 'failed') {
     if (st) await downloads.remove(item.id);

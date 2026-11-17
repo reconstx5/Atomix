@@ -75,10 +75,17 @@ const meta = (title, sub, left) => html`<div class="card-meta">
   ${left ? html`<span class="card-sub card-sub-orbit">${left}</span>` : null}
 </div>`;
 
-/** posterCard(item): films and shows. `role`: "listitem" inside a Grid. */
-export function PosterCard({ item, role }) {
+/** posterCard(item): films and shows. `role`: "listitem" inside a Grid. `current`: the title page's own film in its
+ * collection's row — a "This movie" badge, and not a link (nor a stop for the remote) to the page you're on. */
+export function PosterCard({ item, role, current = false }) {
   const sub = item.note ? (item.kind === 'episode' && item.showTitle ? `${item.showTitle} · ${item.note}` : item.note) : item.kind === 'episode' ? `${item.showTitle || ''} · ${episodeLabel(item)}` : item.subtitle || (item.kind === 'series' ? 'Series' : item.kind === 'book' ? item.author : null) || item.year || (item.kind === 'season' && item.childCount ? `${item.childCount} episodes` : '');
   const info = cardInfoLine(item);
+  if (current) {
+    return html`<div class="card poster-card is-current" tabindex="-1" aria-current="true" aria-label=${`${cardLabel(item, cardState(item))}, this movie`}>
+      <div class="card-art"><${Art} key=${item.poster || ''} src=${item.poster} title=${item.title} /><${Badge} item=${item} /><${Progress} item=${item} />${info ? html`<span class="card-info">${info}</span>` : null}<span class="badge badge-current">This movie</span></div>
+      ${meta(item.title, sub)}
+    </div>`;
+  }
   return html`<a ref=${remember(item)} class="card poster-card" href=${itemHref(item)} aria-label=${cardLabel(item, cardState(item))} role=${role || null} style=${tintStyle(item, 'poster')}>
     <div class="card-art"><${Art} key=${item.poster || ''} src=${item.poster} title=${item.title} /><${Badge} item=${item} /><${Progress} item=${item} />${info ? html`<span class="card-info">${info}</span>` : null}</div>
     ${meta(item.title, sub)}
@@ -171,18 +178,19 @@ export function Grid({ items, style = 'poster' }) {
   return html`<div class=${`grid grid-${style}`} role="list">${items.map((item, i) => html`<${Card} key=${keyOf(item, i)} style=${style} item=${item} play=${false} role="listitem" />`)}</div>`;
 }
 
-/** row({ title, subtitle, items, style, href, id, inMenu }): a scrolling row with mouse scroll buttons. */
-export function Row({ title, subtitle, items, style = 'poster', href, id, inMenu = false }) {
+/** row({ title, subtitle, items, style, href, id, inMenu }): a scrolling row with mouse scroll buttons.
+ * `card(item, i)`: a vnode drawn in place of that item's card (undefined: the usual card). `rise`: its data-rise. */
+export function Row({ title, subtitle, items, style = 'poster', href, id, inMenu = false, card, rise = null }) {
   const scroller = useRef(null);
   const scrollBy = (dir) => scroller.current?.scrollBy({ left: dir * scroller.current.clientWidth * 0.85, behavior: reduceMotion() ? 'auto' : 'smooth' });
   // Orbit's remote moves between cards: a heading whose page is in the menu too is for a mouse there.
   const heading = href ? html`<a href=${href} class="row-title-link" tabindex=${inMenu && document.body.dataset.layout === 'orbit' ? '-1' : null}>${title}<${Icon} name="forward" size=${18} /></a>` : title;
-  return html`<section class="row" data-row=${id || null}>
+  return html`<section class="row" data-row=${id || null} data-rise=${rise}>
     <h2 class="row-title">${heading}</h2>
     ${subtitle ? html`<p class="row-subtitle muted">${subtitle}</p>` : null}
     <div class="row-body">
       <button class="row-nav row-prev" type="button" tabindex="-1" aria-label="Scroll left" onClick=${() => scrollBy(-1)}><${Icon} name="back" /></button>
-      <div ref=${scroller} class=${`row-scroller row-${style}`}>${items.map((item, i) => html`<${Card} key=${keyOf(item, i)} style=${style} item=${item} play=${true} />`)}</div>
+      <div ref=${scroller} class=${`row-scroller row-${style}`}>${items.map((item, i) => card?.(item, i) ?? html`<${Card} key=${keyOf(item, i)} style=${style} item=${item} play=${true} />`)}</div>
       <button class="row-nav row-next" type="button" tabindex="-1" aria-label="Scroll right" onClick=${() => scrollBy(1)}><${Icon} name="forward" /></button>
     </div>
   </section>`;
