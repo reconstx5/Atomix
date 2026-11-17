@@ -3,10 +3,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { routeItems, FIXTURE_PAGES } from './item-fixtures.mjs';
 const { chromium } = createRequire(import.meta.url)('playwright');
-const BASE = process.env.BASE || 'http://localhost:8787';
+const BASE = process.env.BASE;
 const [mode, a, b] = process.argv.slice(2);
-const PAGES = (process.env.PAGES || '#/,#/item/1,#/item/9,#/item/10,#/lists,#/lists/1,#/lists/2').split(',');
+if (mode === 'capture' && (!BASE || /:8787/.test(BASE))) {
+  console.log('Set BASE to the dev Atomix (for example http://localhost:8797). This check changes the profile, so it will not run against the default or the live server on port 8787.');
+  process.exit(2);
+}
+// Today's pages plus the made-up title pages (item-fixtures.mjs).
+const PAGES = (process.env.PAGES || ['#/', '#/item/1', '#/item/9', '#/item/10', '#/lists', '#/lists/1', '#/lists/2', ...FIXTURE_PAGES].join(',')).split(',');
+const T = new Date('2026-11-17T20:00:00').getTime(); // a fixed clock: "Ends at" reads the same in both runs
 const THEMES = (process.env.THEMES || 'orbit,arctic,arctic-side,midnight,daylight,harbour,obsidian').split(',');
 const SIZES = { desk: [1917, 992], phone: [390, 844] };
 const name = (t, s, p) => `${t}-${s}-${p.replace(/[#/?=&]+/g, '_')}`;
@@ -17,10 +25,11 @@ if (mode === 'capture') {
   for (const theme of THEMES) {
     for (const [size, [w, h]] of Object.entries(SIZES)) {
       if (size === 'phone' && !['orbit', 'arctic', 'midnight'].includes(theme)) continue;
-      const ctx = await browser.newContext({ viewport: { width: w, height: h }, reducedMotion: 'reduce', isMobile: size === 'phone', hasTouch: size === 'phone' });
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, reducedMotion: 'reduce', isMobile: size === 'phone', hasTouch: size === 'phone', serviceWorkers: 'block' }); // the service worker would answer past page.route
       await ctx.request.post(`${BASE}/api/auth/login`, { data: { username: 'dallas', password: 'atomix-dev-1' } });
       await ctx.request.patch(`${BASE}/api/me`, { data: { prefs: { theme, reduceMotion: true } } });
       const page = await ctx.newPage();
+      await page.clock.setFixedTime(T);
       // Home's hero and "Something random" row are random: a fixed answer for both runs.
       await page.route('**/api/home', async (route) => {
         const res = await route.fetch();
@@ -29,6 +38,7 @@ if (mode === 'capture') {
         data.rows = data.rows.filter((r) => !/random/.test(r.id));
         await route.fulfill({ response: res, json: data });
       });
+      await routeItems(page);
       const errors = [];
       page.on('pageerror', (e) => errors.push(String(e)));
       for (const p of PAGES) {
@@ -42,7 +52,7 @@ if (mode === 'capture') {
         });
         const file = name(theme, size, p);
         fs.writeFileSync(path.join(a, `${file}.html`), html.replace(/></g, '>\n<'));
-        await page.screenshot({ path: path.join(a, `${file}.png`), mask: [page.locator('[data-row="random-picks/random"]'), page.locator('.nav-clock, .orbit-clock, time')] });
+        await page.screenshot({ path: path.join(a, `${file}.png`), mask: [page.locator('[data-row="random-picks/random"]'), page.locator('.nav-clock, .orbit-clock, time, .ends-at')] });
       }
       fs.writeFileSync(path.join(a, `errors-${theme}-${size}.txt`), errors.join('\n'));
       await ctx.close();
@@ -58,12 +68,12 @@ if (mode === 'capture') {
     if (x !== y) {
       bad++;
       console.log(`MARKUP DIFFERS ${f}`);
-      try { execSync(`diff ${path.join(a, f)} ${path.join(b, f)} | head -${process.env.LINES || 12}`, { stdio: 'inherit' }); } catch {}
+      try { execSync(`diff "${path.join(a, f)}" "${path.join(b, f)}" | head -${process.env.LINES || 12}`, { stdio: 'inherit', shell: process.env.SHELL || 'bash' }); } catch {}
     }
     const png = f.replace('.html', '.png');
     // Pictures: every pixel but the clock corner (top right).
     let same = false;
-    try { same = execSync(`python3 ${new URL('./imgdiff.py', import.meta.url).pathname} ${path.join(a, png)} ${path.join(b, png)}`).toString().trim() === 'same'; } catch {}
+    try { same = execSync(`${process.env.PYTHON || 'python'} "${fileURLToPath(new URL('./imgdiff.py', import.meta.url))}" "${path.join(a, png)}" "${path.join(b, png)}"`).toString().trim() === 'same'; } catch {}
     if (!same) { bad++; console.log(`PICTURE DIFFERS ${png}`); }
   }
   for (const f of fs.readdirSync(b).filter((f) => f.startsWith('errors-'))) { const t = fs.readFileSync(path.join(b, f), 'utf8'); if (t) { bad++; console.log(`ERRORS ${f}: ${t.slice(0, 300)}`); } }

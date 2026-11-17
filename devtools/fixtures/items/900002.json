@@ -1,0 +1,79 @@
+{
+ "item": {
+  "tagline": null,
+  "originalTitle": null,
+  "tmdbId": null,
+  "imdbId": null,
+  "scores": null,
+  "media": {
+   "resolution": "1080p",
+   "width": 1920,
+   "height": 1080,
+   "videoCodec": "h264",
+   "hdr": false,
+   "hdrFormat": null,
+   "atmos": false,
+   "bitDepth": 8,
+   "container": "mov,mp4,m4a,3gp,3g2,mj2",
+   "bitrate": 8000000,
+   "audio": [
+    {
+     "index": 0,
+     "codec": "aac",
+     "channels": 2,
+     "language": "eng",
+     "title": null,
+     "default": true
+    }
+   ],
+   "subtitles": 0
+  },
+  "fileName": "Night Ferry (2022).mp4",
+  "size": 3400000000,
+  "metadataLocked": false,
+  "certification": null,
+  "minAge": null,
+  "lockedFields": [],
+  "id": 900002,
+  "kind": "movie",
+  "libraryId": 1,
+  "parentId": null,
+  "showId": null,
+  "title": "Night Ferry",
+  "sortTitle": "night ferry",
+  "year": 2022,
+  "season": null,
+  "episode": null,
+  "overview": "Two strangers share the last crossing of the year.",
+  "genres": [
+   "Drama"
+  ],
+  "rating": null,
+  "runtime": 100,
+  "airDate": null,
+  "duration": 6000,
+  "poster": "/fake-art/poster-900002.svg",
+  "backdrop": "/fake-art/backdrop-900002.svg",
+  "logo": null,
+  "addedAt": 1794848673750,
+  "tint": null,
+  "tintWide": null,
+  "progress": {
+   "position": 1800,
+   "duration": 6000,
+   "watched": false,
+   "updatedAt": 1794848673750
+  },
+  "playCount": 0,
+  "lastPlayed": null,
+  "stars": null,
+  "favourite": false
+ },
+ "subtitles": [],
+ "collection": null,
+ "inWatchlist": false,
+ "inLists": [],
+ "similar": [],
+ "extras": [],
+ "trailer": null
+}
