@@ -779,6 +779,22 @@ export const MIGRATIONS = [
   `
   ALTER TABLE items ADD COLUMN colors TEXT;
   `,
+  // 34 — the Jellyfin-compatible API (src/jellyfin/): one sign-in token per device, kept as a sha256 and tied to an
+  // app password, so revoking the password ends its tokens.
+  `
+  CREATE TABLE jellyfin_tokens (
+    id INTEGER PRIMARY KEY,
+    app_password_id INTEGER NOT NULL REFERENCES app_passwords(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    device_id TEXT,
+    device_name TEXT,
+    client TEXT,
+    version TEXT,
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER
+  );
+  CREATE INDEX jellyfin_tokens_app_password ON jellyfin_tokens(app_password_id);
+  `,
 ];
 
 /**
