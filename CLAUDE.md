@@ -43,7 +43,7 @@ Atomix is a self-hosted media hub in the spirit of Kodi: films, TV, music and Li
   say "uncommitted" date from before that commit. Dallas decides when to commit; suggest committing before large new work.
 - Work moved to Claude Code on this PC on 17 Nov. The handoff (what was done, decisions, deferred minors, what's next)
   is `docs/HANDOFF-2026-11.md`. The design research is `Claude outputs/Media app UI design 2026.md`.
-- Visual refresh **Plan C is done and merged into `main`** (17 Nov, a fast-forward from c4cdb6d; branch deleted). The title page on Preact is merged into `main` (18 Nov, a fast-forward; branch deleted, not pushed yet); next the Jellyfin API.
+- Visual refresh **Plan C is done and merged into `main`** (17 Nov, a fast-forward from c4cdb6d; branch deleted). The title page on Preact is merged into `main` (18 Nov, a fast-forward; branch deleted) and pushed to GitHub; next the Jellyfin API.
   Plans A, B and C: `docs/superpowers/plans/`.
 - Still to verify on real hardware: iPhone FairPlay and films on iPhone, Chromecast with encrypted channels, PlayReady
   on Edge/Xbox, TV timings for motion, Safari view transitions.
