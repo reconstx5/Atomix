@@ -11,7 +11,7 @@ const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 
 export const FIXTURE_PAGES = [
   '#/item/900001', '#/item/900002', '#/item/900003', '#/item/900004', '#/item/900005',
   '#/item/900010', '#/item/900010?season=900013', '#/item/900014', '#/item/900015', '#/item/900020',
-  '#/item/900030', '#/item/900030?track=900305', '#/item/900031',
+  '#/item/900030', '#/item/900030?track=900340', '#/item/900031',
   '#/item/900040', '#/item/900041', '#/item/900042',
 ];
 

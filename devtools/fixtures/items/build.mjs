@@ -62,14 +62,15 @@ const ep = (id, seasonId, s, e, extra = {}) => base(id, 'episode', `Episode titl
 const watched = { position: 2700, duration: 2700, watched: true, updatedAt: ADDED };
 const seasons = [
   { id: 900011, s: 1, eps: [1, 2, 3].map((e) => ep(900200 + e, 900011, 1, e, { progress: watched, playCount: 1 })), overview: null },
-  { id: 900012, s: 2, eps: [1, 2, 3].map((e) => ep(900210 + e, 900012, 2, e, e === 2 ? { progress: { position: 900, duration: 2700, watched: false, updatedAt: ADDED } } : e === 1 ? { progress: watched, playCount: 1 } : {})), overview: 'Season two moves the station to the harbour.' },
+  // Season 2: long enough to scroll Orbit's row; episodes 1-5 watched, 6 part-watched (where the row opens).
+  { id: 900012, s: 2, eps: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((e) => ep(900210 + e, 900012, 2, e, e === 6 ? { progress: { position: 900, duration: 2700, watched: false, updatedAt: ADDED } } : e < 6 ? { progress: watched, playCount: 1 } : {})), overview: 'Season two moves the station to the harbour.' },
   { id: 900013, s: 3, eps: [1, 2, 3].map((e) => ep(900220 + e, 900013, 3, e)), overview: null },
 ];
 const seasonItem = (s) => base(s.id, 'season', `Season ${s.s}`, { libraryId: 2, parentId: 900010, showId: 900010, season: s.s, sortTitle: String(s.s).padStart(4, '0'), overview: s.overview, playCount: null, poster: art('poster', s.id) });
 files[900010] = {
   item: full({ ...show, episodeCount: 9 }),
-  seasons: seasons.map((s) => ({ ...seasonItem(s), unwatched: s.eps.filter((x) => !x.progress?.watched).length, childCount: 3 })),
-  nextEpisode: seasons[1].eps[1],
+  seasons: seasons.map((s) => ({ ...seasonItem(s), unwatched: s.eps.filter((x) => !x.progress?.watched).length, childCount: s.eps.length })),
+  nextEpisode: seasons[1].eps[5],
   collection: null, inWatchlist: false, inLists: [], similar: [film(900121, 'Tide Line')], extras: [], trailer: null,
 };
 for (const s of seasons) files[s.id] = { item: full(seasonItem(s)), show: base(900010, 'show', 'Coastal Watch'), episodes: s.eps.map((e) => ({ ...e, childCount: null })) };
@@ -91,7 +92,8 @@ files[900020] = {
 
 // 900030: an album with two discs; 900031: its artist.
 const track = (id, disc, n, extra = {}) => base(id, 'track', `Song ${disc}-${n}`, { libraryId: 3, parentId: 900030, showId: 900031, season: disc, episode: n, duration: 180 + n * 7, artist: 'The Tidewaters', albumTitle: 'Low Water', ...extra });
-const tracks = [track(900301, 1, 1), track(900302, 1, 2), track(900303, 1, 3), track(900304, 2, 1), track(900305, 2, 2)];
+// Two discs, long enough that a song near the end can be scrolled to the middle (?track=900340 is disc 2's 14th).
+const tracks = [...Array.from({ length: 14 }, (_, i) => track(900301 + i, 1, i + 1)), ...Array.from({ length: 14 }, (_, i) => track(900327 + i, 2, i + 1))];
 const artist = base(900031, 'artist', 'The Tidewaters', { libraryId: 3, poster: art('poster', 900031), backdrop: art('backdrop', 900031), overview: 'A folk band from the coast.', genres: ['Folk'] });
 const album = (id, title, year) => base(id, 'album', title, { libraryId: 3, parentId: 900031, year, poster: art('poster', id) });
 files[900030] = { item: full({ ...album(900030, 'Low Water', 2018), genres: ['Folk'], duration: tracks.reduce((a, t) => a + t.duration, 0), childCount: tracks.length }), tracks, artist };
