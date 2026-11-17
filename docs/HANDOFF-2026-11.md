@@ -5,7 +5,7 @@ On 17 Nov Dallas moved the project to Claude Code on his PC. This file is what t
 rules and the technical notes for each piece.
 
 ## State of the code
-- Git: `main` is at 3cee3a0. Everything below is **uncommitted** in the working tree. Dallas commits and pushes
+- Git: `main` is at d7c36b4. Everything below is **uncommitted** in the working tree. Dallas commits and pushes
   (remote https://github.com/reconstx5/Atomix.git); ask before committing.
 - Full test suite at hand-off: 1825 of 1826 pass. The one failure, `test/subsonic-browse.test.js` "artists, albums and
   songs in JSON and XML" (an extra `<replayGain>` in the XML), predates this work. Under heavy parallel load the clip,

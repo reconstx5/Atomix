@@ -38,19 +38,17 @@ Atomix is a self-hosted media hub in the spirit of Kodi: films, TV, music and Li
   Commits are authored as reconstx5 (the repo's git config) with **no co-author line** (Dallas, 17 Nov 2026).
 
 ## Current state (17 Nov 2026) — start here
-- The git history on this PC is `main` at 3cee3a0 (Motion). Everything after it (v0.28: iPhone playback fixes,
-  card motion v2, batch 3, multi-DRM; v0.29: visual refresh A and B) is in the working tree, **uncommitted**. It was
-  built in a Claude cloud session and copied here with every file hash-checked; the cloud copy matched this folder
-  file for file on 17 Nov. Dallas decides when to commit; suggest committing before large new work.
+- Everything is committed on `main` and pushed to GitHub: v0.28 and v0.29 (iPhone playback fixes, card motion v2,
+  batch 3, multi-DRM, visual refresh A and B) are commit c4cdb6d, and Plan C follows it. The sections below that still
+  say "uncommitted" date from before that commit. Dallas decides when to commit; suggest committing before large new work.
 - Work moved to Claude Code on this PC on 17 Nov. The handoff (what was done, decisions, deferred minors, what's next)
   is `docs/HANDOFF-2026-11.md`. The design research is `Claude outputs/Media app UI design 2026.md`.
-- Visual refresh **Plan C is done on branch `visual-refresh-c`** (from main 7030c00, the v0.28+v0.29 commit), waiting for Dallas's
-  gallery review and merge decision (nothing pushed). Next: the title page (`views/item.js`) on Preact, then the Jellyfin API.
+- Visual refresh **Plan C is done and merged into `main`** (17 Nov, a fast-forward from c4cdb6d; branch deleted). Next: the title page (`views/item.js`) on Preact, then the Jellyfin API.
   Plans A, B and C: `docs/superpowers/plans/`.
 - Still to verify on real hardware: iPhone FairPlay and films on iPhone, Chromecast with encrypted channels, PlayReady
   on Edge/Xbox, TV timings for motion, Safari view transitions.
 
-## Motion ("Capture", v0.28 work, committed 3cee3a0)
+## Motion ("Capture", v0.28 work, committed d7c36b4)
 - Follow the `web-animation` skill for any animation work.
 - One attribute decides how much moves: `html[data-motion]` = full | reduce | none (`public/js/motion.js`, rules in
   `public/js/motion-rules.js`, tested in `test/motion-rules.test.js`). `html.reduce-motion` is still set when not full.
@@ -187,7 +185,7 @@ Plan `docs/superpowers/plans/2026-11-12-atomix-visual-refresh-b.md`.
   test/theme-tokens.test.js`; devtools `glass-check`, `modes-check`, `pinned-check`, `polish-check` (run devtools checks
   one at a time: they share the dev profile's prefs).
 
-## Visual refresh C (v0.29 work, on branch visual-refresh-c)
+## Visual refresh C (v0.29 work, merged into main)
 Plan `docs/superpowers/plans/2026-11-17-atomix-visual-refresh-c.md`; each theme made itself (see `docs/THEMES.md`, "What each built-in theme is after Plan C").
 - Files: `themes/*/theme.css` + `theme.json`, `public/css/tokens.css` (`--surface-edge`, `--button-radius`), `app.css`, `orbit.css`
   (`--poster-w` 256, `--grid-poster-w` 196), `public/js/tint.js` (`envTint`), `backdrop.js` (`--env-tint`, `focusSetsBackdrop`),
@@ -206,6 +204,6 @@ Plan `docs/superpowers/plans/2026-11-17-atomix-visual-refresh-c.md`; each theme 
   Gallery: `ART=1 SIZES=desk,tv,phone PAGES='#/,#/library/1,#/item/1,#/live,#/settings' node devtools/fixed-compare.mjs record <dir>`, then
   `node devtools/gallery.mjs <before> <after> <out>` (Pillow; `PYTHON` overrides `python`) writes `index.html` sliders and `visual-evidence.json`.
 - Still needs real devices: TV timings and the focus ring on a TV, Safari/iPhone, old TV browsers (no `oklch`/`color-mix`), Daylight dimming on a real TV.
-- glass/modes/pinned/polish-check used to PATCH prefs to a fixed :8787 while the page ran on BASE (fixed eb35e29); modes-check is ALL PASS now.
+- glass/modes/pinned/polish-check used to PATCH prefs to a fixed :8787 while the page ran on BASE (fixed 97fce13); modes-check is ALL PASS now.
 - Parked minors: `card-select` ignores
   `THEMES`; `sized.js` guesses 196 px for row posters; laptop widths 1000-1366 show about 5.8 Orbit posters, unchecked.
