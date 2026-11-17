@@ -12,6 +12,7 @@ import { music, trackList } from '../music.js';
 import { setBackdrop, followFocus } from '../backdrop.js';
 import { openEditDetails } from './edit-details.js';
 import { downloadButton, downloadSheetItem } from '../offline/ui.js';
+import { resumeInfo, selectedSeasonId, rowStartEpisode, introText, isWatched } from '../item-rules.js';
 
 /**
  * The title as its clear logo when there is one (v0.29 B4: in a fixed-height logo box, so nothing moves when it
@@ -32,13 +33,6 @@ function titleArt(logoUrl, text) {
   return box;
 }
 
-function resumeInfo(item) {
-  const p = item.progress;
-  if (!p || p.watched || p.position < 30) return null;
-  const dur = p.duration || item.duration;
-  return { position: p.position, left: dur ? Math.max(0, dur - p.position) : null };
-}
-
 async function setWatched(item, watched) {
   await api.post(`/api/items/${item.id}/watched`, { watched });
   toast(watched ? 'Marked as watched' : 'Marked as unwatched');
@@ -46,7 +40,7 @@ async function setWatched(item, watched) {
 }
 
 function watchedButton(item) {
-  const watched = item.kind === 'show' ? item.unwatched === 0 : Boolean(item.progress?.watched);
+  const watched = isWatched(item);
   return button(watched ? 'Watched' : 'Mark watched', {
     icon: 'check',
     variant: watched ? 'secondary active' : 'ghost',
@@ -183,13 +177,10 @@ async function identifyDialog(item) {
   });
 }
 
-const INTRO_SOURCE = { audio: 'found automatically', chapter: 'from chapters', manual: 'set by hand' };
-
 /** Admins: where this episode's intro is, and (older themes) a way to fix it. Orbit keeps Edit intro in "…". */
 function introLine(item, markers, { edit = true } = {}) {
   const m = markers?.intro;
-  const text = !m ? 'Intro not found yet' : m.none ? 'No intro' : `Intro ${formatClock(m.start)}–${formatClock(m.end)} · ${INTRO_SOURCE[m.source] || ''}`;
-  return h('p', { class: 'intro-line muted' }, h('span', {}, text), edit ? button('Edit', { icon: 'edit', variant: 'ghost', onClick: () => introDialog(item, m) }) : null);
+  return h('p', { class: 'intro-line muted' }, h('span', {}, introText(markers)), edit ? button('Edit', { icon: 'edit', variant: 'ghost', onClick: () => introDialog(item, m) }) : null);
 }
 
 async function introDialog(item, current) {
@@ -296,7 +287,7 @@ function episodeRow(episodes) {
   const cards = h('div', { class: 'row-scroller row-landscape episode-row' });
   const byCard = new WeakMap();
   // The episode the story below describes: the one to resume, else the first unwatched, else the first.
-  const first = episodes.find((e) => resumeInfo(e)) || episodes.find((e) => !e.progress?.watched) || episodes[0];
+  const first = rowStartEpisode(episodes);
   let firstCard = null;
   for (const ep of episodes) {
     const r = resumeInfo(ep);
@@ -533,7 +524,7 @@ export async function render(el, params, query) {
 
   if (item.kind === 'show') {
     const seasons = data.seasons || [];
-    const selectedId = Number(query.season) || (data.nextEpisode ? data.nextEpisode.parentId : seasons.find((s) => s.season > 0)?.id || seasons[0]?.id);
+    const selectedId = selectedSeasonId(seasons, { query, nextEpisode: data.nextEpisode });
     const tabs = h('div', { class: 'season-tabs', role: 'tablist', 'aria-label': 'Seasons' });
     const panel = h('div', { class: 'season-panel', role: 'tabpanel', id: `season-panel-${item.id}` });
     // A tab pattern: one tab stop (the selected season), Left/Right between seasons, the panel named by its tab.
