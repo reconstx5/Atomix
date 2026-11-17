@@ -43,7 +43,7 @@ Atomix is a self-hosted media hub in the spirit of Kodi: films, TV, music and Li
   say "uncommitted" date from before that commit. Dallas decides when to commit; suggest committing before large new work.
 - Work moved to Claude Code on this PC on 17 Nov. The handoff (what was done, decisions, deferred minors, what's next)
   is `docs/HANDOFF-2026-11.md`. The design research is `Claude outputs/Media app UI design 2026.md`.
-- Visual refresh **Plan C is done and merged into `main`** (17 Nov, a fast-forward from c4cdb6d; branch deleted). The title page on Preact is built on branch `title-page-preact` (18 Nov, not merged); next the Jellyfin API.
+- Visual refresh **Plan C is done and merged into `main`** (17 Nov, a fast-forward from c4cdb6d; branch deleted). The title page on Preact is merged into `main` (18 Nov, a fast-forward; branch deleted, not pushed yet); next the Jellyfin API.
   Plans A, B and C: `docs/superpowers/plans/`.
 - Still to verify on real hardware: iPhone FairPlay and films on iPhone, Chromecast with encrypted channels, PlayReady
   on Edge/Xbox, TV timings for motion, Safari view transitions.
@@ -102,7 +102,7 @@ Atomix is a self-hosted media hub in the spirit of Kodi: films, TV, music and Li
 
 ## Preact screens
 - Done: Live TV, libraries, search, genre/person (v0.26); Home and Lists (`views/home.js`, `views/lists.js`, v0.28); the title page
-  (`views/item.js` + `item-show.js` + `item-music.js`, pieces in `ui/detail.js`, rules in `item-rules.js`; branch `title-page-preact`).
+  (`views/item.js` + `item-show.js` + `item-music.js`, pieces in `ui/detail.js`, rules in `item-rules.js`; merged 18 Nov).
   Books, podcasts and audiobooks are still their older modules, handed the data by the title page's `load()`.
 - Next: Guide/Recordings, music, books, Settings, the player.
 - Title-page checks (dev server, `BASE=http://localhost:8797`): `item-fn.mjs` (behaviour, made-up titles from
