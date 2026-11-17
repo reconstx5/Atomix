@@ -62,8 +62,8 @@ Plan B:
   the spotlight still shifts when a logo arrives; no "New season"/"New episode" badges (no data yet).
 
 ## Next
-1. Dallas reviews the Plan C gallery and decides on the merge of `visual-refresh-c` (Plan C is built and checked; nothing pushed).
-2. The title page (`views/item.js`) on Preact.
+1. Done: Plan C merged into `main` and pushed (17 Nov).
+2. The title page (`views/item.js`) on Preact: built on branch `title-page-preact` (18 Nov); Dallas decides the merge.
 3. A Jellyfin-compatible API so Infuse, Streamyfin/Swiftfin and Finamp can connect (needs real devices).
 4. Remove the iPhone diagnostics once playback is stable.
 5. Real-device checks: TV timings and focus rings, Safari/iPhone, old TV browsers.

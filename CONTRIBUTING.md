@@ -50,7 +50,7 @@ Add its route to the `routes` list in `public/js/app.js`:
 { pattern: /^\/recent\/(\d+)$/, keys: ['id'], view: lazyView('views/recent.js') },
 ```
 
-The smallest real screen is `public/js/views/genre.js`; Live TV (`views/live.js`) and the libraries (`views/library.js`) are the larger ones.
+The smallest real screen is `public/js/views/genre.js`; Live TV (`views/live.js`), the libraries (`views/library.js`) and the title page (`views/item.js`, with `item-show.js` and `item-music.js`) are the larger ones. The title page also shows how to hand a kind of page to an older module that hasn't moved yet: `load()` renders it into a detached element and the screen adopts its nodes.
 
 Older screens still export `render(el, params, query)`. The router mounts both kinds, so a screen can move over on its own.
 
@@ -59,7 +59,8 @@ Older screens still export `render(el, params, query)`. The router mounts both k
 `public/js/ui/` has the pieces most screens need:
 
 - `Button`, `Icon`, `EmptyState`, `MoreButton` and `Spinner` (`basics.js`);
-- `PosterCard`, `SquareCard`, `LandscapeCard`, `LiveCard`, `Grid` and `Row` (`cards.js`);
+- `PosterCard`, `SquareCard`, `LandscapeCard`, `LiveCard`, `Grid` and `Row` (`cards.js`); `Row`'s `card(item, i)` draws one card differently (return a vnode; `undefined` keeps the usual card), as the title page does for the film you're on in its collection;
+- `MediaChips`, `DetailMeta`, `TitleArt`, `Genres`, `WatchlistButton`, `DownloadButton` and `RatingControl` (`detail.js`), the title page's pieces;
 - `Spotlight` and `MetaLine` (`spotlight.js`);
 - `Island` (`basics.js`): an element whose children come from older DOM-building code (the music engine's `trackList`, say) until that code becomes a component. Preact leaves those children alone.
 
