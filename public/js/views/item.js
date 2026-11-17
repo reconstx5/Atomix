@@ -7,19 +7,18 @@ import { Button, MoreButton } from '../ui/basics.js';
 import { Art, LandscapeCard, PosterCard, Row } from '../ui/cards.js';
 import { MediaChips, DetailMeta, TitleArt, Genres, WatchlistButton, DownloadButton, RatingControl } from '../ui/detail.js';
 import { openCastPicker } from '../cast.js';
-import { h, icon, clear, episodeLabel, formatRuntime, formatBytes, formatClock } from '../dom.js';
-import { toast, openDialog, spinner, endsAt, timeLeft, field, TOASTS, art, metaLine, button, landscapeCard, grid, mediaChips, moreButton, row, episodeCaption, cardState } from '../components.js';
-import { addToPlaylistItems, watchlistButton } from '../lists.js';
-import { openRating, canRate, ratingControl } from '../rating.js';
-import { sizedAttrs } from '../sized.js';
-import { music, trackList } from '../music.js';
+import { h, clear, episodeLabel, formatRuntime, formatBytes, formatClock } from '../dom.js';
+import { toast, openDialog, spinner, endsAt, timeLeft, field, button, TOASTS } from '../components.js';
+import { addToPlaylistItems } from '../lists.js';
+import { openRating, canRate } from '../rating.js';
 import { parseClock } from '../markers.js';
 import { setTitle, navigate, refreshView, canAdmin, isKidsProfile, isOrbit } from '../app.js';
-import { setBackdrop, followFocus } from '../backdrop.js';
+import { setBackdrop } from '../backdrop.js';
 import { openEditDetails } from './edit-details.js';
-import { downloadButton, downloadSheetItem } from '../offline/ui.js';
+import { downloadSheetItem } from '../offline/ui.js';
 import { resumeInfo, selectedSeasonId, introText, isWatched } from '../item-rules.js';
 import { Seasons } from './item-show.js';
+import { AlbumPage, ArtistPage } from './item-music.js';
 
 /** An older page (book, podcast, audiobook) drawn into a detached element; the screen puts its nodes on the page. */
 async function older(load, params, query, data) {
@@ -41,8 +40,16 @@ export async function load(params, query) {
   if (item.kind === 'podcast_episode' && item.showId) return go(`#/item/${item.showId}?episode=${item.id}`);
   if (item.kind === 'audiobook') return older(() => import('./audiobook.js'), params, query, data);
   if (item.kind === 'chapter' && item.parentId) return go(`#/item/${item.parentId}`);
-  // Not moved yet: the older render, handed the data (albums and artists: Plan step 7).
-  if (['album', 'artist'].includes(item.kind)) return older(async () => ({ render: renderOlder }), params, query, data);
+  if (item.kind === 'album') {
+    setTitle(`${item.title}${data.artist ? ` · ${data.artist.title}` : ''}`);
+    setBackdrop(item.backdrop || data.artist?.backdrop || item.poster);
+    return { page: data };
+  }
+  if (item.kind === 'artist') {
+    setTitle(item.title);
+    setBackdrop(item.backdrop || item.poster);
+    return { page: data };
+  }
   if (item.kind === 'show') {
     setTitle(item.title);
     setBackdrop(item.backdrop || item.poster); // before the season's answer, so the card's art has it at once
@@ -67,7 +74,13 @@ export function Screen({ params, query, data, view }) {
     return () => data.older.forEach((n) => n.remove());
   }, []);
   if (!data.page) return null;
-  return html`<${TitlePage} data=${data.page} query=${query} />`;
+  const { item, tracks } = data.page;
+  if (item.kind === 'album' || item.kind === 'artist') {
+    const Page = item.kind === 'album' ? AlbumPage : ArtistPage;
+    const more = html`<${MoreActions} item=${item} more=${moreItems(item, undefined, { tracks: tracks || [] })} download=${false} />`;
+    return html`<${Page} data=${data.page} query=${query} more=${more} />`;
+  }
+  return html`<${TitlePage} data=${data.page} />`;
 }
 
 async function setWatched(item, watched) {
@@ -348,147 +361,3 @@ async function introDialog(item, current) {
 }
 
 
-// ---- Not moved yet: the older DOM code for albums and artists (removed in Plan step 7) ----
-
-/**
- * The title as its clear logo when there is one (v0.29 B4: in a fixed-height logo box, so nothing moves when it
- * arrives). The typed title shows in the box until the logo has loaded, and stays if it fails; it stays for screen
- * readers either way.
- */
-function titleArt(logoUrl, text) {
-  const heading = h('h1', { class: 'detail-title' }, text);
-  if (!logoUrl) return heading;
-  const img = h('img', { class: 'detail-logo', hidden: true, src: sizedAttrs(logoUrl, 'logo', { orbit: document.body?.dataset.layout === 'orbit', width: Math.min(600, window.innerWidth * 0.8) * (window.devicePixelRatio || 1) }).src, alt: '', decoding: 'async' });
-  const box = h('div', { class: 'logo-box' }, img, heading);
-  img.addEventListener('load', () => {
-    img.hidden = false;
-    heading.classList.add('visually-hidden');
-    box.classList.add('has-logo');
-  });
-  img.addEventListener('error', () => img.remove());
-  return box;
-}
-
-function adminMenu(item) {
-  if (!canAdmin() || item.remote) return null; // a connected server's title: its details live there
-  const actions = [
-    button('Refresh info', {
-      icon: 'refresh',
-      variant: 'ghost',
-      onClick: async (e) => {
-        e.currentTarget.disabled = true;
-        TOASTS.refreshStarted();
-        await api.post(`/api/items/${item.id}/refresh`, {});
-        refreshView();
-      },
-    }),
-  ];
-  if (item.kind === 'movie' || item.kind === 'show') actions.push(button('Fix match', { icon: 'edit', variant: 'ghost', onClick: () => identifyDialog(item) }));
-  return actions;
-}
-
-function headerMore(item, more) {
-  if (isOrbit()) return more.length ? [moreButton(item.title, more)] : [];
-  const inline = new Set(['Refresh info', 'Fix match']);
-  const rest = more.filter((m) => !inline.has(m.label));
-  return [...(rest.length ? [moreButton(item.title, rest)] : []), ...(adminMenu(item) || [])];
-}
-
-// ---- Music: album and artist pages ----
-function musicHeader(el, { item, eyebrow, backdrop, meta, actions, round = false }) {
-  setBackdrop(backdrop || item.poster);
-  el.append(
-    h(
-      'header',
-      { class: 'detail-header music-header' },
-      h(
-        'div',
-        { class: 'detail-inner' },
-        h('div', { class: `detail-poster is-square${round ? ' is-round' : ''}` }, art(item.poster, item.title, { kind: 'square', eager: true })),
-        h(
-          'div',
-          { class: 'detail-info' },
-          h('p', { class: 'eyebrow' }, eyebrow),
-          titleArt(item.logo, item.title),
-          h('div', { class: 'meta-line' }, meta.filter(Boolean).map((m) => h('span', {}, m))),
-          item.genres?.length ? h('ul', { class: 'genres', role: 'list' }, item.genres.map((g) => h('li', { class: 'chip' }, g))) : null,
-          item.overview ? h('p', { class: 'overview' }, item.overview) : null,
-          h('div', { class: 'actions' }, actions),
-          isOrbit() && canRate(item) ? ratingControl(item) : null,
-        ),
-      ),
-    ),
-  );
-}
-
-const songCount = (n) => `${n} ${n === 1 ? 'song' : 'songs'}`;
-const totalTime = (sec) => (sec ? formatRuntime(sec / 60) : null);
-
-function playButtons(tracks, { label = 'Play', autofocus = true } = {}) {
-  if (!tracks.length) return [];
-  return [
-    button(label, { icon: 'play', variant: 'primary', autofocus, onClick: () => music.playTracks(tracks, 0) }),
-    button('Shuffle', { icon: 'shuffle', onClick: () => music.playTracks(tracks, -1, { shuffle: true }) }),
-    button('', { icon: 'queue', variant: 'ghost', title: 'Add to queue', onClick: () => music.addToQueue(tracks) }),
-  ];
-}
-
-function renderAlbum(el, data, query) {
-  const { item, artist } = data;
-  const tracks = data.tracks || [];
-  setTitle(`${item.title}${artist ? ` · ${artist.title}` : ''}`);
-  const focusId = Number(query.track) || null;
-  const actions = playButtons(tracks, { autofocus: !focusId });
-  actions.push(...headerMore(item, moreItems(item, undefined, { tracks })));
-  musicHeader(el, {
-    item,
-    backdrop: item.backdrop || artist?.backdrop,
-    eyebrow: artist ? ['Album · ', h('a', { href: `#/item/${artist.id}` }, artist.title)] : 'Album',
-    meta: [item.year ? String(item.year) : null, songCount(tracks.length), totalTime(item.duration)],
-    actions,
-  });
-  el.append(
-    h(
-      'div',
-      { class: 'detail-body' },
-      h(
-        'section',
-        { class: 'detail-section' },
-        h('h2', { class: 'visually-hidden' }, 'Songs'),
-        tracks.length ? trackList(tracks, { showArtist: artist?.title || true, discs: true, focusId }) : h('p', { class: 'muted' }, 'No songs found.'),
-      ),
-    ),
-  );
-  if (focusId) requestAnimationFrame(() => el.querySelector(`.track-row[data-id="${focusId}"]`)?.scrollIntoView({ block: 'center' }));
-}
-
-function renderArtist(el, data) {
-  const { item } = data;
-  const albums = data.albums || [];
-  const tracks = data.tracks || [];
-  setTitle(item.title);
-  const actions = playButtons(tracks, { label: 'Play all' });
-  actions.push(...headerMore(item, moreItems(item, undefined, { tracks })));
-  musicHeader(el, {
-    item,
-    round: true,
-    backdrop: item.backdrop,
-    eyebrow: 'Artist',
-    meta: [`${albums.length} ${albums.length === 1 ? 'album' : 'albums'}`, songCount(tracks.length), totalTime(item.duration)],
-    actions,
-  });
-  el.append(
-    h(
-      'div',
-      { class: 'detail-body detail-body-flush' },
-      h('section', { class: 'detail-section' }, h('h2', { class: 'section-pad' }, 'Albums'), albums.length ? grid(albums, { style: 'square' }) : h('p', { class: 'muted section-pad' }, 'No albums found.')),
-    ),
-  );
-}
-
-/** The older render, for albums and artists until they move (Plan steps 6 and 7). */
-async function renderOlder(el, params, query, data) {
-  const item = data.item;
-  if (item.kind === 'album') return renderAlbum(el, data, query);
-  return renderArtist(el, data);
-}
