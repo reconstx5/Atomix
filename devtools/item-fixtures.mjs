@@ -12,7 +12,7 @@ export const FIXTURE_PAGES = [
   '#/item/900001', '#/item/900002', '#/item/900003', '#/item/900004', '#/item/900005',
   '#/item/900010', '#/item/900010?season=900013', '#/item/900014', '#/item/900015', '#/item/900020',
   '#/item/900030', '#/item/900030?track=900340', '#/item/900031',
-  '#/item/900040', '#/item/900041', '#/item/900042',
+  '#/item/900040', '#/item/900041', '#/item/900042', '#/item/900050',
 ];
 
 const svg = (w, h, hue, text = '') => `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="100%" height="100%" fill="hsl(${hue} 55% 38%)"/><circle cx="50%" cy="42%" r="${Math.min(w, h) / 4}" fill="hsl(${(hue + 40) % 360} 70% 62%)"/>${text}</svg>`;

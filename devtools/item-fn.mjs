@@ -66,6 +66,23 @@ if (LEGS.includes('focus')) {
   check('focus: ?track= focuses that song', t.id === '900340', JSON.stringify(t));
   // Today's page (full motion) leaves it at the bottom of the screen: its centring runs before the page is shown.
   check('focus: ?track= has that song on screen', t.top >= 0 && t.bottom <= 992, JSON.stringify(t));
+  // "Go to album" from a page that already shows the song (Search, Songs, the queue): the page being left is kept as a
+  // still copy while the album draws, and it has the same song row in it. The album's own row is the one centred.
+  // Stand-in for that copy: a row with the same song, earlier in the document than the new page.
+  await visit(page, '#/');
+  await page.evaluate(() => {
+    const copy = Object.assign(document.createElement('div'), { className: 'still-copy', inert: true });
+    copy.innerHTML = '<div class="track-row" data-id="900307">Song 7</div>';
+    document.body.prepend(copy);
+  });
+  await visit(page, '#/item/900030?track=900307');
+  const g = await page.evaluate(() => {
+    document.querySelector('.still-copy')?.remove();
+    const row = document.querySelector('main .track-row[data-id="900307"]');
+    const r = row?.getBoundingClientRect();
+    return { mid: r ? Math.round(r.top + r.height / 2) : null, centre: Math.round(innerHeight / 2), h: r && Math.round(r.height) };
+  });
+  check('focus: "Go to album" from a page with that song centres the album’s own row', g.mid !== null && Math.abs(g.mid - g.centre) <= g.h, JSON.stringify(g));
   check('focus: no page errors', !errors.filter((e) => !/404/.test(e)).length, errors.join(' | '));
   await browser.close();
 }
@@ -228,6 +245,9 @@ if (LEGS.includes('empty')) {
   await visit(page, '#/item/900015');
   const e = await page.evaluate(() => document.querySelector('.season-panel')?.textContent.trim());
   check('empty: a season with no episodes says "No episodes found."', e === 'No episodes found.', e);
+  await visit(page, '#/item/900050');
+  const x = await page.evaluate(() => ({ actions: [...document.querySelectorAll('.detail-header .actions > *')].map((el) => el.getAttribute('aria-label') || el.textContent.trim()), ends: Boolean(document.querySelector('.ends-at')), focus: document.activeElement?.textContent?.trim() }));
+  check('empty: an extra on its own has no Play, Resume, Download or ends-at', !x.actions.some((t) => /^(Play|Resume|Download)/.test(t || '')) && !x.ends, JSON.stringify(x));
   check('empty: no page errors', !errors.filter((x) => !/404/.test(x)).length, errors.join(' | '));
   await browser.close();
 }

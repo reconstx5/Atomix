@@ -1,6 +1,6 @@
 // The title page's music parts (v0.30): an album (its songs, by disc) and an artist (their albums). Same elements as
 // the older page; the songs are the music engine's trackList(), hosted as it is.
-import { html, useLayoutEffect } from '../ui.js';
+import { html, useLayoutEffect, useRef } from '../ui.js';
 import { Button, Island } from '../ui/basics.js';
 import { Art, Grid } from '../ui/cards.js';
 import { TitleArt, Genres, RatingControl } from '../ui/detail.js';
@@ -45,15 +45,17 @@ export function AlbumPage({ data, query, more }) {
   const { item, artist } = data;
   const tracks = data.tracks || [];
   const focusId = Number(query.track) || null;
+  const body = useRef(null);
   useLayoutEffect(() => {
     if (!focusId) return undefined;
     // The page is drawn before it is shown: wait until it is on the page (at most a second), then a frame more, so
     // the router's own scroll to the top (straight after it puts the page in) has happened.
+    // Only this page's own row: the page being left can still be on screen (a still copy) with the same song in it.
     let tries = 0;
     let frame = 0;
     let seen = false;
     const centre = () => {
-      const row = document.querySelector(`.track-row[data-id="${focusId}"]`);
+      const row = body.current?.querySelector(`.track-row[data-id="${focusId}"]`);
       if (!row?.isConnected || !seen) {
         seen = Boolean(row?.isConnected);
         return void (tries++ < 60 && (frame = requestAnimationFrame(centre)));
@@ -66,7 +68,7 @@ export function AlbumPage({ data, query, more }) {
   const eyebrow = artist ? ['Album · ', html`<a href=${`#/item/${artist.id}`}>${artist.title}</a>`] : 'Album';
   return [
     html`<${MusicHeader} item=${item} eyebrow=${eyebrow} meta=${[item.year ? String(item.year) : null, songCount(tracks.length), totalTime(item.duration)]} actions=${[html`<${PlayButtons} tracks=${tracks} autofocus=${!focusId} />`, more]} />`,
-    html`<div class="detail-body">
+    html`<div class="detail-body" ref=${body}>
       <${Island}
         tag="section"
         class="detail-section"

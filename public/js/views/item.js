@@ -203,7 +203,7 @@ function TitlePage({ data }) {
   const r = resumeInfo(item);
   const episode = item.kind === 'episode';
   const isShow = item.kind === 'show';
-  const playable = !isShow; // a film or an episode (a show plays its next episode)
+  const playable = item.kind === 'movie' || episode; // only these play from here (a show plays its next episode)
   const season = useRef(null); // the show's selected season, for "…"'s Add season to playlist and Download season
   const t = data.trailer;
   const actions = [
@@ -213,7 +213,7 @@ function TitlePage({ data }) {
     item.kind === 'movie' || isShow ? html`<${WatchlistButton} item=${item} initialIn=${data.inWatchlist} />` : null,
     html`<${WatchedButton} item=${item} />`,
     orbit && playable && !item.remote ? html`<${DownloadButton} item=${item} />` : null,
-    html`<${MoreActions} item=${item} more=${moreItems(item, data.markers, { seasonId: () => season.current })} download=${playable} />`,
+    html`<${MoreActions} item=${item} more=${moreItems(item, data.markers, { seasonId: () => season.current })} download=${!isShow} />`,
   ];
   // The body's first block rises in after the page's first-screen blocks (data-rise: their order).
   const next = episode && data.nextEpisode;

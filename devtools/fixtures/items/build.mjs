@@ -56,6 +56,9 @@ files[900004] = movieOut(film(900004, 'Broken Signal', { overview: 'The logo for
 // 900005: a film from a connected server.
 files[900005] = movieOut(film(900005, 'Borrowed Time', { overview: 'Streams from a friend’s server.', remote: true, media: MEDIA_HD, fileName: 'Borrowed Time.mkv', serverName: 'Sam’s Atomix' }));
 
+// 900050: an extra opened on its own (no Play, no ends-at, no details: only films and episodes have those).
+files[900050] = movieOut(base(900050, 'extra', 'Making the island', { parentId: 900001, duration: 600, poster: art('backdrop', 900050) }));
+
 // 900010: a show with 3 seasons; 900011 all watched; next episode in 900012.
 const show = base(900010, 'show', 'Coastal Watch', { overview: 'A small coastguard station and the town it keeps safe.', genres: ['Drama', 'Crime'], year: 2019, poster: art('poster', 900010), backdrop: art('backdrop', 900010), logo: art('logo', 900010), playCount: null });
 const ep = (id, seasonId, s, e, extra = {}) => base(id, 'episode', `Episode title ${s}.${e}`, { libraryId: 2, parentId: seasonId, showId: 900010, season: s, episode: e, duration: 2700, airDate: `2019-0${s}-0${e}`, overview: `What happens in season ${s}, episode ${e}.`, poster: art('backdrop', id), ...extra });
