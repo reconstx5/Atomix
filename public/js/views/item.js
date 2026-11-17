@@ -2,7 +2,7 @@
 // (the same elements as before, built from ui/detail.js and ui/cards.js). Books, comics, series, podcasts and
 // audiobooks keep their own older pages (book.js, podcast.js, audiobook.js), handed the data load() already fetched.
 import { api, qs } from '../api.js';
-import { html, useLayoutEffect } from '../ui.js';
+import { html, useLayoutEffect, useRef } from '../ui.js';
 import { Button, MoreButton } from '../ui/basics.js';
 import { Art, LandscapeCard, PosterCard, Row } from '../ui/cards.js';
 import { MediaChips, DetailMeta, TitleArt, Genres, WatchlistButton, DownloadButton, RatingControl } from '../ui/detail.js';
@@ -18,7 +18,8 @@ import { setTitle, navigate, refreshView, canAdmin, isKidsProfile, isOrbit } fro
 import { setBackdrop, followFocus } from '../backdrop.js';
 import { openEditDetails } from './edit-details.js';
 import { downloadButton, downloadSheetItem } from '../offline/ui.js';
-import { resumeInfo, selectedSeasonId, rowStartEpisode, introText, isWatched } from '../item-rules.js';
+import { resumeInfo, selectedSeasonId, introText, isWatched } from '../item-rules.js';
+import { Seasons } from './item-show.js';
 
 /** An older page (book, podcast, audiobook) drawn into a detached element; the screen puts its nodes on the page. */
 async function older(load, params, query, data) {
@@ -40,8 +41,19 @@ export async function load(params, query) {
   if (item.kind === 'podcast_episode' && item.showId) return go(`#/item/${item.showId}?episode=${item.id}`);
   if (item.kind === 'audiobook') return older(() => import('./audiobook.js'), params, query, data);
   if (item.kind === 'chapter' && item.parentId) return go(`#/item/${item.parentId}`);
-  // Not moved yet: the older render, handed the data (shows: Plan step 6; albums and artists: step 7).
-  if (['show', 'album', 'artist'].includes(item.kind)) return older(async () => ({ render: renderOlder }), params, query, data);
+  // Not moved yet: the older render, handed the data (albums and artists: Plan step 7).
+  if (['album', 'artist'].includes(item.kind)) return older(async () => ({ render: renderOlder }), params, query, data);
+  if (item.kind === 'show') {
+    setTitle(item.title);
+    setBackdrop(item.backdrop || item.poster); // before the season's answer, so the card's art has it at once
+    // The page arrives with its selected season's episodes (the address says which, for Back and a reload).
+    const id = selectedSeasonId(data.seasons || [], { query, nextEpisode: data.nextEpisode });
+    if (id) {
+      history.replaceState(null, '', `#/item/${item.id}?season=${id}`);
+      data.season = await api.get(`/api/items/${id}`);
+    }
+    return { page: data };
+  }
   const show = data.show;
   setTitle(item.kind === 'episode' ? `${show?.title} ${episodeLabel(item)}` : item.title);
   setBackdrop(item.backdrop || show?.backdrop || item.poster || show?.poster);
@@ -170,25 +182,29 @@ function TitleRows({ data, item, backdrop, rise }) {
   return blocks.map((b, i) => b(i === 0 ? rise : null));
 }
 
-/** A movie or an episode. */
+/** A movie, a show or an episode. */
 function TitlePage({ data }) {
   const { item, show } = data;
   const orbit = isOrbit();
   const backdrop = item.backdrop || show?.backdrop;
   const r = resumeInfo(item);
   const episode = item.kind === 'episode';
+  const isShow = item.kind === 'show';
+  const playable = !isShow; // a film or an episode (a show plays its next episode)
+  const season = useRef(null); // the show's selected season, for "…"'s Add season to playlist and Download season
   const t = data.trailer;
   const actions = [
-    html`<${PlayButtons} target=${item} label=${(res) => (res ? `Resume from ${formatClock(res.position)}` : 'Play')} />`,
+    playable ? html`<${PlayButtons} target=${item} label=${(res) => (res ? `Resume from ${formatClock(res.position)}` : 'Play')} />` : null,
+    isShow && data.nextEpisode ? html`<${PlayButtons} target=${data.nextEpisode} label=${(res) => `${res ? 'Resume' : 'Play'} ${episodeLabel(data.nextEpisode)}`} />` : null,
     t ? html`<${Button} label="Trailer" icon="film" variant="ghost" href=${t.kind === 'local' ? `#/play/${t.itemId}?from=${item.id}` : `#/trailer/${item.id}`} />` : null,
-    item.kind === 'movie' ? html`<${WatchlistButton} item=${item} initialIn=${data.inWatchlist} />` : null,
+    item.kind === 'movie' || isShow ? html`<${WatchlistButton} item=${item} initialIn=${data.inWatchlist} />` : null,
     html`<${WatchedButton} item=${item} />`,
-    orbit && !item.remote ? html`<${DownloadButton} item=${item} />` : null,
-    html`<${MoreActions} item=${item} more=${moreItems(item, data.markers)} />`,
+    orbit && playable && !item.remote ? html`<${DownloadButton} item=${item} />` : null,
+    html`<${MoreActions} item=${item} more=${moreItems(item, data.markers, { seasonId: () => season.current })} download=${playable} />`,
   ];
   // The body's first block rises in after the page's first-screen blocks (data-rise: their order).
   const next = episode && data.nextEpisode;
-  const details = MediaDetails({ item, subtitles: data.subtitles, rise: next ? null : '3' });
+  const details = playable ? MediaDetails({ item, subtitles: data.subtitles, rise: next ? null : '3' }) : null;
   return [
     html`<header class="detail-header" data-art=${backdrop ? 'backdrop' : 'poster'}>
       <div class="detail-inner">
@@ -196,7 +212,7 @@ function TitlePage({ data }) {
         <div class="detail-info">
           ${episode ? html`<p class="eyebrow"><a href=${`#/item/${show.id}`}>${show.title}</a>${` · ${episodeLabel(item)}`}</p>` : null}
           <${TitleArt} logo=${episode ? null : item.logo} title=${item.title} />
-          <${DetailMeta} item=${item} ends=${endsAt(timeLeft(item))} rise="0" />
+          <${DetailMeta} item=${item} ends=${playable ? endsAt(timeLeft(item)) : null} rise="0" />
           <${MediaChips} item=${item} />
           <${Genres} genres=${item.genres} />
           ${item.tagline ? html`<p class="tagline">${item.tagline}</p>` : null}
@@ -209,9 +225,10 @@ function TitlePage({ data }) {
       </div>
     </header>`,
     html`<div class="detail-body">
+      ${isShow ? html`<${Seasons} show=${item} seasons=${data.seasons || []} first=${data.season || null} rise="3" selected=${season} />` : null}
       ${next ? html`<section class="detail-section" data-rise="3"><h2>Next episode</h2><div class="next-card"><${LandscapeCard} item=${{ ...data.nextEpisode, showTitle: show.title }} /></div></section>` : null}
       ${details}
-      <${TitleRows} data=${data} item=${item} backdrop=${backdrop} rise=${next || details ? null : '3'} />
+      <${TitleRows} data=${data} item=${item} backdrop=${backdrop} rise=${isShow || next || details ? null : '3'} />
     </div>`,
   ];
 }
@@ -331,7 +348,7 @@ async function introDialog(item, current) {
 }
 
 
-// ---- Not moved yet: the older DOM code for shows, albums and artists (removed in Plan steps 6 and 7) ----
+// ---- Not moved yet: the older DOM code for albums and artists (removed in Plan step 7) ----
 
 /**
  * The title as its clear logo when there is one (v0.29 B4: in a fixed-height logo box, so nothing moves when it
@@ -350,16 +367,6 @@ function titleArt(logoUrl, text) {
   });
   img.addEventListener('error', () => img.remove());
   return box;
-}
-
-function watchedButton(item) {
-  const watched = isWatched(item);
-  return button(watched ? 'Watched' : 'Mark watched', {
-    icon: 'check',
-    variant: watched ? 'secondary active' : 'ghost',
-    onClick: () => setWatched(item, !watched),
-    attrs: { 'aria-pressed': String(watched) },
-  });
 }
 
 function adminMenu(item) {
@@ -385,107 +392,6 @@ function headerMore(item, more) {
   const inline = new Set(['Refresh info', 'Fix match']);
   const rest = more.filter((m) => !inline.has(m.label));
   return [...(rest.length ? [moreButton(item.title, rest)] : []), ...(adminMenu(item) || [])];
-}
-
-/** Admins: where this episode's intro is, and (older themes) a way to fix it. Orbit keeps Edit intro in "…". */
-function introLine(item, markers, { edit = true } = {}) {
-  const m = markers?.intro;
-  return h('p', { class: 'intro-line muted' }, h('span', {}, introText(markers)), edit ? button('Edit', { icon: 'edit', variant: 'ghost', onClick: () => introDialog(item, m) }) : null);
-}
-
-function mediaDetails(item, subtitles) {
-  const m = item.media;
-  const rows = [];
-  if (item.fileName) rows.push(['File', `${item.fileName}${item.size ? ` · ${formatBytes(item.size)}` : ''}`]);
-  if (item.remote && item.serverName) rows.push(['From', item.serverName]);
-  if (m?.videoCodec) rows.push(['Video', `${m.videoCodec.toUpperCase()} ${m.width}×${m.height}${m.bitDepth > 8 ? ` · ${m.bitDepth}-bit` : ''}${m.hdr ? ' · HDR' : ''}`]);
-  if (m?.audio?.length) rows.push(['Audio', m.audio.map((a) => [a.language?.toUpperCase(), a.codec?.toUpperCase(), a.channels ? `${a.channels}ch` : null, a.title].filter(Boolean).join(' ')).join(' / ')]);
-  if (subtitles?.length) rows.push(['Subtitles', subtitles.map((s) => s.label).join(' / ')]);
-  if (item.originalTitle) rows.push(['Original title', item.originalTitle]);
-  if (!rows.length) return null;
-  return h('section', { class: 'detail-section details-panel' }, h('h2', {}, 'Details'), h('dl', { class: 'details-list' }, rows.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])));
-}
-
-function episodeList(episodes) {
-  if (!episodes.length) return h('p', { class: 'muted' }, 'No episodes found.');
-  return h(
-    'ol',
-    { class: 'episodes', role: 'list' },
-    episodes.map((ep) => {
-      const r = resumeInfo(ep);
-      const bits = [ep.airDate ? new Date(ep.airDate).toLocaleDateString() : null, episodeCaption(ep)].filter(Boolean);
-      return h(
-        'li',
-        { class: `episode${ep.progress?.watched ? ' is-watched' : ''}` },
-        h(
-          'a',
-          { class: 'episode-thumb', href: `#/play/${ep.id}`, 'aria-label': `Play episode ${ep.episode}: ${ep.title}${cardState(ep)}` },
-          art(ep.poster, ep.title, { kind: 'landscape' }),
-          h('span', { class: 'card-play' }, icon('play', { size: 20 })),
-          ep.progress?.watched ? h('span', { class: 'badge badge-watched' }, icon('check', { size: 14, label: 'Watched' })) : null,
-          r && ep.duration ? h('div', { class: 'progress' }, h('span', { style: { width: `${Math.min(100, (r.position / ep.duration) * 100)}%` } })) : null,
-        ),
-        h(
-          'div',
-          { class: 'episode-info' },
-          h('h3', {}, h('a', { href: `#/item/${ep.id}` }, h('span', { class: 'ep-num' }, `${ep.episode}.`), ` ${ep.title}`)),
-          bits.length ? h('p', { class: 'muted small' }, bits.join(' · ')) : null,
-          ep.overview ? h('p', { class: 'episode-overview' }, ep.overview) : null,
-        ),
-      );
-    }),
-  );
-}
-
-/**
- * Orbit: a season's episodes as a row of wide cards. The selected episode's story shows under the
- * row, next to an Episode details button that Down reaches. OK on a card plays that episode.
- */
-function episodeRow(episodes) {
-  if (!episodes.length) return h('p', { class: 'muted' }, 'No episodes found.');
-  const cards = h('div', { class: 'row-scroller row-landscape episode-row' });
-  const byCard = new WeakMap();
-  // The episode the story below describes: the one to resume, else the first unwatched, else the first.
-  const first = rowStartEpisode(episodes);
-  let firstCard = null;
-  for (const ep of episodes) {
-    const r = resumeInfo(ep);
-    const length = episodeCaption(ep);
-    const card = h(
-      'a',
-      { class: `card episode-card${ep.progress?.watched ? ' is-watched' : ''}`, href: `#/play/${ep.id}`, 'aria-label': `Play episode ${ep.episode}: ${ep.title}${cardState(ep)}` },
-      h(
-        'div',
-        { class: 'card-art' },
-        art(ep.poster, ep.title, { kind: 'landscape' }),
-        ep.progress?.watched ? h('span', { class: 'badge badge-watched' }, icon('check', { size: 14, label: 'Watched' })) : null,
-        r && ep.duration ? h('div', { class: 'progress' }, h('span', { style: { width: `${Math.min(100, (r.position / ep.duration) * 100)}%` } })) : null,
-      ),
-      h('div', { class: 'card-meta' }, h('span', { class: 'card-title' }, `${ep.episode}. ${ep.title}`), length ? h('span', { class: 'card-sub' }, length) : null),
-    );
-    byCard.set(card, ep);
-    if (ep === first) firstCard = card;
-    cards.append(card);
-  }
-  // Open the row at that episode, so the story matches the card at the start and Down lands on it
-  // (it may be far along a long season). Waits for the row to be on the page; gives up after a second.
-  let tries = 0;
-  const reveal = () => {
-    if (!cards.isConnected) return void (tries++ < 60 && requestAnimationFrame(reveal));
-    const pad = parseFloat(getComputedStyle(cards).paddingLeft) || 0;
-    cards.scrollLeft += firstCard.getBoundingClientRect().left - cards.getBoundingClientRect().left - pad;
-  };
-  if (firstCard !== cards.firstElementChild) requestAnimationFrame(reveal);
-  const story = h('p', { class: 'episode-story' });
-  const details = button('Episode details', { icon: 'info', variant: 'ghost', href: `#/item/${first.id}` });
-  const show = (ep) => {
-    clear(story).append(h('strong', {}, `${ep.title}.`), ep.overview ? ` ${ep.overview}` : '');
-    details.href = `#/item/${ep.id}`;
-    details.setAttribute('aria-label', `Episode details: ${ep.episode}. ${ep.title}`);
-  };
-  show(first);
-  followFocus(cards, (card) => byCard.get(card), show);
-  return h('div', { class: 'episode-browser' }, cards, h('div', { class: 'episode-about' }, story, details));
 }
 
 // ---- Music: album and artist pages ----
@@ -580,162 +486,9 @@ function renderArtist(el, data) {
   );
 }
 
-/** The older render, for shows, albums and artists until they move (Plan steps 6 and 7). */
+/** The older render, for albums and artists until they move (Plan steps 6 and 7). */
 async function renderOlder(el, params, query, data) {
   const item = data.item;
   if (item.kind === 'album') return renderAlbum(el, data, query);
-  if (item.kind === 'artist') return renderArtist(el, data);
-  const show = data.show;
-  setTitle(item.kind === 'episode' ? `${show?.title} ${episodeLabel(item)}` : item.title);
-
-  const backdrop = item.backdrop || show?.backdrop;
-  setBackdrop(backdrop || item.poster || show?.poster);
-  const r = resumeInfo(item);
-  const actions = [];
-
-  if (item.kind === 'movie' || item.kind === 'episode') {
-    actions.push(button(r ? `Resume from ${formatClock(r.position)}` : 'Play', { icon: 'play', variant: 'primary', href: `#/play/${item.id}`, autofocus: true }));
-    if (r) actions.push(button('From the start', { icon: 'replay', variant: 'ghost', href: `#/play/${item.id}?t=0` }));
-  } else if (item.kind === 'show' && data.nextEpisode) {
-    const n = data.nextEpisode;
-    const nr = resumeInfo(n);
-    actions.push(button(`${nr ? 'Resume' : 'Play'} ${episodeLabel(n)}`, { icon: 'play', variant: 'primary', href: `#/play/${n.id}`, autofocus: true }));
-    if (nr) actions.push(button('From the start', { icon: 'replay', variant: 'ghost', href: `#/play/${n.id}?t=0` }));
-  }
-  if (data.trailer) {
-    const t = data.trailer;
-    actions.push(button('Trailer', { icon: 'film', variant: 'ghost', href: t.kind === 'local' ? `#/play/${t.itemId}?from=${item.id}` : `#/trailer/${item.id}` }));
-  }
-  if (item.kind === 'movie' || item.kind === 'show') actions.push(watchlistButton(item, data.inWatchlist));
-  actions.push(watchedButton(item));
-  if (isOrbit() && (item.kind === 'movie' || item.kind === 'episode') && !item.remote) actions.push(downloadButton(item));
-  const currentSeason = () => Number(document.querySelector('.season-tab[aria-selected="true"]')?.dataset.id) || null;
-  // One action set for every theme: Orbit folds it all into "…"; the classic layouts show the admin buttons and the
-  // download inline and keep the rest (playlists, casting, Edit intro) in "…".
-  const more = moreItems(item, data.markers, { seasonId: currentSeason });
-  if (isOrbit()) {
-    if (more.length) actions.push(moreButton(item.title, more));
-  } else {
-    const inline = new Set(['Refresh info', 'Fix match', 'Save the file']);
-    const rest = more.filter((m) => !inline.has(m.label));
-    if (rest.length) actions.push(moreButton(item.title, rest));
-    if (item.kind !== 'show' && !isKidsProfile() && !item.remote) {
-      actions.push(button('', { icon: 'download', variant: 'ghost', href: `/api/items/${item.id}/download`, title: 'Download file', attrs: { download: '' } }));
-    }
-    const admin = adminMenu(item);
-    if (admin) actions.push(...admin);
-  }
-
-  // Episodes say which show they belong to; movies and shows don't need a label.
-  const eyebrow = item.kind === 'episode' ? h('p', { class: 'eyebrow' }, h('a', { href: `#/item/${show.id}` }, show.title), ` · ${episodeLabel(item)}`) : null;
-  const meta = metaLine(item);
-  const ends = item.kind === 'movie' || item.kind === 'episode' ? endsAt(timeLeft(item)) : null;
-  if (ends) meta.append(h('span', { class: 'ends-at' }, ends));
-  const chips = mediaChips(item);
-  // The first-screen blocks that rise in, in turn, after a card opens the page (data-rise: their order).
-  meta.dataset.rise = '0';
-  const overview = item.overview ? h('p', { class: 'overview', dataset: { rise: '1' } }, item.overview) : h('p', { class: 'overview muted', dataset: { rise: '1' } }, 'No description yet.');
-
-  el.append(
-    h(
-      'header',
-      // data-art: what a card opening this page travels into (transitions.js): the backdrop, else the poster.
-      { class: 'detail-header', dataset: { art: backdrop ? 'backdrop' : 'poster' } },
-      h(
-        'div',
-        { class: 'detail-inner' },
-        h('div', { class: `detail-poster ${item.kind === 'episode' ? 'is-landscape' : ''}` }, art(item.poster || show?.poster, item.title, { kind: item.kind === 'episode' ? 'landscape' : 'poster', eager: true })),
-        h(
-          'div',
-          { class: 'detail-info' },
-          eyebrow,
-          titleArt(item.kind === 'episode' ? null : item.logo, item.title),
-          meta,
-          chips,
-          item.genres?.length ? h('ul', { class: 'genres', role: 'list' }, item.genres.map((g) => h('li', { class: 'chip' }, g))) : null,
-          item.tagline ? h('p', { class: 'tagline' }, item.tagline) : null,
-          overview,
-          r?.left ? h('p', { class: 'muted small' }, `${formatRuntime(r.left / 60)} left`) : null,
-          h('div', { class: 'actions', dataset: { rise: '2' } }, actions),
-          isOrbit() && canRate(item) ? ratingControl(item) : null,
-          data.markers !== undefined ? introLine(item, data.markers, { edit: !isOrbit() }) : null,
-        ),
-      ),
-    ),
-  );
-
-  const body = h('div', { class: 'detail-body' });
-  el.append(body);
-
-  if (item.kind === 'show') {
-    const seasons = data.seasons || [];
-    const selectedId = selectedSeasonId(seasons, { query, nextEpisode: data.nextEpisode });
-    const tabs = h('div', { class: 'season-tabs', role: 'tablist', 'aria-label': 'Seasons' });
-    const panel = h('div', { class: 'season-panel', role: 'tabpanel', id: `season-panel-${item.id}` });
-    // A tab pattern: one tab stop (the selected season), Left/Right between seasons, the panel named by its tab.
-    tabs.addEventListener('keydown', (e) => {
-      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-      const all = [...tabs.children];
-      const i = all.indexOf(document.activeElement);
-      if (i < 0) return;
-      const next = all[i + (e.key === 'ArrowRight' ? 1 : -1)];
-      if (!next) return;
-      e.preventDefault();
-      e.stopPropagation();
-      next.focus();
-      next.click();
-    });
-    async function selectSeason(season) {
-      for (const t of tabs.children) {
-        const on = Number(t.dataset.id) === season.id;
-        t.setAttribute('aria-selected', String(on));
-        t.tabIndex = on ? 0 : -1;
-        if (on) panel.setAttribute('aria-labelledby', t.id);
-      }
-      history.replaceState(null, '', `#/item/${item.id}?season=${season.id}`);
-      clear(panel).append(spinner());
-      const sd = await api.get(`/api/items/${season.id}`);
-      clear(panel);
-      if (sd.item.overview && sd.item.overview !== item.overview) panel.append(h('p', { class: 'season-overview muted' }, sd.item.overview));
-      panel.append(isOrbit() ? episodeRow(sd.episodes || []) : episodeList(sd.episodes || []));
-    }
-    for (const s of seasons) {
-      const done = s.childCount && !s.unwatched;
-      tabs.append(
-        h(
-          'button',
-          { type: 'button', role: 'tab', class: 'season-tab', id: `season-tab-${s.id}`, 'aria-controls': panel.id, tabindex: '-1', dataset: { id: s.id }, 'aria-selected': 'false', title: `${s.childCount || 0} episodes${done ? ', all watched' : ''}`, onClick: () => selectSeason(s) },
-          s.title,
-          done ? icon('check', { size: 14, label: 'All watched' }) : null,
-        ),
-      );
-    }
-    body.append(h('section', { class: 'detail-section' }, h('h2', { class: 'visually-hidden' }, 'Episodes'), tabs, panel));
-    const sel = seasons.find((s) => s.id === selectedId) || seasons[0];
-    if (sel) await selectSeason(sel);
-  } else {
-    if (item.kind === 'episode' && data.nextEpisode) {
-      body.append(h('section', { class: 'detail-section' }, h('h2', {}, 'Next episode'), h('div', { class: 'next-card' }, landscapeCard({ ...data.nextEpisode, showTitle: show.title }))));
-    }
-    const details = mediaDetails(item, data.subtitles);
-    if (details) body.append(details);
-  }
-  if (data.extras?.length) {
-    body.append(row({ id: 'extras', title: 'Extras', items: data.extras.map((e) => ({ ...e, href: `#/play/${e.id}?from=${item.id}`, ownerBackdrop: backdrop })), style: 'landscape' }));
-  }
-  if (data.collection) {
-    const part = row({ id: 'collection', title: `Part of ${data.collection.name}`, subtitle: `${data.collection.owned} of ${data.collection.total} in your library`, items: data.collection.items, style: 'poster', href: `#/collections/${data.collection.id}` });
-    // The movie you're on: a "This movie" badge, and not a link to the page you're already on.
-    const at = data.collection.items.findIndex((i) => i.isCurrent);
-    const link = at >= 0 ? part.querySelector('.row-scroller').children[at] : null;
-    if (link) {
-      // Not a stop for the remote (OK would do nothing on it): marked current for a screen reader instead.
-      const card = h('div', { class: `${link.className} is-current`, tabindex: '-1', 'aria-current': 'true', 'aria-label': `${link.getAttribute('aria-label') || ''}, this movie` }, ...link.childNodes);
-      card.querySelector('.card-art')?.append(h('span', { class: 'badge badge-current' }, 'This movie'));
-      link.replaceWith(card);
-    }
-    body.append(part);
-  }
-  if (data.similar?.length) body.append(row({ id: 'similar', title: 'More like this', items: data.similar, style: 'poster' }));
-  body.firstElementChild?.setAttribute('data-rise', '3'); // the first row (or the episodes, or the details)
+  return renderArtist(el, data);
 }
