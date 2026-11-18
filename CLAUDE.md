@@ -102,8 +102,8 @@ Atomix is a self-hosted media hub in the spirit of Kodi: films, TV, music and Li
   an error. Remove the diagnostics once a real iPhone plays.
 
 ## Jellyfin API (v0.30 work, branch `jellyfin-api`, not merged)
-Spec/plan: `docs/superpowers/specs|plans/2026-11-18-atomix-jellyfin-api*`. Infuse (and later Streamyfin/Swiftfin, Finamp) sign in at `/jellyfin` with an app password.
-- Files: `src/jellyfin/{index,tokens,ids,shapes,system,browse,media,userdata,sessions}.js`, migration 34 (`jellyfin_tokens`),
+Spec/plan: `docs/superpowers/specs|plans/2026-11-18-atomix-jellyfin-api*`. Infuse (Streamyfin/Swiftfin/Finamp not yet checked) signs in at `/jellyfin` with an app password.
+- Files: `src/jellyfin/{index,routes,tokens,ids,shapes,system,browse,media,userdata,sessions}.js`, migration 34 (`jellyfin_tokens`),
   `src/api/account.js` (the app-password reply has `jellyfin`), `public/js/views/settings-music.js` (Settings → Profile → "Apps").
 - Rules that matter: tokens are stored as sha256 and arrive in headers and `api_key`/`ApiKey` queries, never in a log line
   or body (trace switch `ATOMIX_JELLYFIN_TRACE=1` masks them); every read goes through the profile's viewer (hidden = 404,
@@ -141,7 +141,7 @@ suites and mock servers (mock IPTV, mock Chromecast) from earlier rounds were lo
 - Even volume: `src/library/loudness.js` (EBU R128, target -16 LUFS), "Volume check" job, Web Audio gain in `public/js/music.js`
   (not on iPhone/iPad). Gapless playback not done.
 - Your own channels: `plugins/my-channels` (schedule rules -> 24/7 live channels, ffmpeg concat -> MPEG-TS, loopback-only route).
-- The Jellyfin-compatible API for Infuse, Streamyfin/Swiftfin and Finamp is built (see its section; needs real-device testing).
+- The Jellyfin-compatible API is built for Infuse only this round (Swiftfin/Streamyfin/Finamp not yet; see its section; needs real-device testing).
 
 ## Multi-DRM (v0.28, uncommitted)
 - Spec/plan: `docs/superpowers/specs|plans/2026-11-11-atomix-multi-drm*`. A channel can offer several key systems; the

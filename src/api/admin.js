@@ -114,6 +114,7 @@ export function registerAdminRoutes(r, core) {
     (ctx) => {
       if (core.live?.drm?.sessions.has(ctx.params.sid)) core.live.drm.stop(ctx.params.sid, 'admin');
       else if (core.live?.streams?.viewers.has(ctx.params.sid)) core.live.streams.viewerStop(ctx.params.sid, 'admin', 'An admin stopped this stream.');
+      else if (core.jellyfin?.sessions?.stopById(ctx.params.sid)) { /* an Infuse or other Jellyfin app's stream */ }
       else playback.stop(ctx.params.sid, 'admin');
       return { ok: true };
     },

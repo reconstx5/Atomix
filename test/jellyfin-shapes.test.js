@@ -117,3 +117,29 @@ test('a library becomes a CollectionFolder', () => {
   assert.equal(l.Id, toGuid('library', 2));
   assert.equal(libraryDto({ id: 1, name: 'F', type: 'movies' }, SID).CollectionType, 'movies');
 });
+
+test('a show or season is Played only when every child is', () => {
+  const play = (counts, row = show) => itemDto(row, { serverId: SID, counts }).UserData.Played;
+  assert.equal(play({ children: 3, unplayed: 0 }), true);
+  assert.equal(play({ children: 3, unplayed: 2 }), false);
+  assert.equal(play({ children: 0, unplayed: 0 }), false);
+  assert.equal(play({ children: 2, unplayed: 0 }, { ...show, kind: 'season', id: 11 }), true);
+});
+
+test('stream Indexes are unique even when ffprobe put audio first', () => {
+  const m = JSON.stringify({
+    video: { codec: 'h264', streamIndex: 1 }, audio: [{ streamIndex: 0, codec: 'aac' }], subtitles: [{ streamIndex: 2, codec: 'subrip' }],
+  });
+  const [src] = mediaSources({ ...film, media: m }, { subtitles: [{ source: 'sidecar', language: 'en', label: 'x' }] });
+  const idx = src.MediaStreams.map((s) => s.Index);
+  assert.equal(new Set(idx).size, idx.length, idx.join());
+  assert.equal(src.MediaStreams.find((s) => s.Type === 'Video').Index, 1);
+  assert.equal(src.MediaStreams.find((s) => s.Type === 'Audio').Index, 0);
+});
+
+test('non-array JSON columns cannot throw or leak', () => {
+  const d = itemDto({ ...film, people: '{}', genres: '{"a":1}', media: JSON.stringify({ audio: {}, subtitles: 'x', video: { codec: 'h264' } }) }, { serverId: SID });
+  assert.deepEqual(d.People, []);
+  assert.deepEqual(d.Genres, []);
+  assert.ok(Array.isArray(d.MediaSources[0].MediaStreams));
+});

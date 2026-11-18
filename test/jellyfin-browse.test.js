@@ -153,11 +153,13 @@ test('seasons and episodes', { skip }, async () => {
 });
 
 test('filters', { skip }, async () => {
-  assert.equal((await admin.post(`/api/items/${ids.alpha}/progress`, { position: 30, duration: 600 })).status, 200);
+  assert.equal((await admin.post(`/api/items/${ids.alpha}/progress`, { position: 10, duration: 600 })).status, 200);
   const q = (Filters) => me.get('/Items', { ParentId: g.movies, Filters, SortBy: 'SortName' });
+  assert.deepEqual(names(await q('IsResumable')), [], 'under 30 s is not resumable, as in Resume');
+  assert.equal((await admin.post(`/api/items/${ids.alpha}/progress`, { position: 60, duration: 600 })).status, 200);
   assert.deepEqual(names(await q('IsResumable')), ['Alpha']);
   const alpha = (await q('IsResumable')).body.Items[0];
-  assert.equal(alpha.UserData.PlaybackPositionTicks, 30 * 10_000_000);
+  assert.equal(alpha.UserData.PlaybackPositionTicks, 60 * 10_000_000);
   assert.equal(alpha.UserData.Played, false);
   assert.equal((await admin.post(`/api/items/${ids.beta}/watched`, { watched: true })).status, 200);
   assert.deepEqual(names(await q('IsPlayed')), ['Beta']);

@@ -3,17 +3,24 @@
 // stream, the playing reports, PlayedItems, DisplayPreferences, Logout. Prints PASS / FAIL per step and ends with
 // `ALL PASS` or `n FAILED`.
 //
-//   BASE=http://localhost:8797 USER=<name> APP_PASSWORD=<app password> node devtools/jellyfin-smoke.mjs
+//   BASE=http://localhost:8797 USER_NAME=<name> APP_PASSWORD=<app password> node devtools/jellyfin-smoke.mjs
 //
 // The app password is made in Settings -> Apps (or POST /api/me/app-passwords). Never run this against :8787.
 const BASE = (process.env.BASE || '').replace(/\/+$/, '');
-const USER = process.env.USER_NAME || process.env.USER || '';
+const USER = process.env.USER_NAME || '';
 const PASSWORD = process.env.APP_PASSWORD || '';
 if (!BASE || !USER || !PASSWORD) {
-  console.error('Set BASE, USER and APP_PASSWORD, e.g. BASE=http://localhost:8797 USER=dallas APP_PASSWORD=... node devtools/jellyfin-smoke.mjs');
+  console.error('Set BASE, USER_NAME and APP_PASSWORD, e.g. BASE=http://localhost:8797 USER_NAME=dallas APP_PASSWORD=... node devtools/jellyfin-smoke.mjs');
   process.exit(2);
 }
-if (/:8787(\/|$)/.test(BASE)) {
+let port = '';
+try {
+  port = new URL(BASE).port;
+} catch {
+  console.error('BASE is not a web address this check can read. Use something like http://localhost:8797.');
+  process.exit(2);
+}
+if (port === '8787') {
   console.error('This check does not run against port 8787 (the live server). Use a dev server on 8797.');
   process.exit(2);
 }
@@ -114,7 +121,7 @@ if (!playable) {
   await step('POST', '/Sessions/Playing/Progress', { body: { ItemId: id, PositionTicks: 10000000, IsPaused: false } });
   await step('POST', '/Sessions/Playing/Stopped', { body: { ItemId: id, PositionTicks: 15000000 } });
   await step('POST', `/Users/${user}/PlayedItems/${id}`);
-  await step('DELETE', `/Users/${user}/PlayedItems/${id}`); // leaves the watched mark as it was
+  await step('DELETE', `/Users/${user}/PlayedItems/${id}`); // the watched mark is cleared here, whatever it was before this run
 }
 await step('POST', '/Sessions/Logout', { json: false });
 await step('GET', '/Users/Me', { expect: 401, json: false }); // the token is gone

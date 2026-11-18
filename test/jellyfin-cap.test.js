@@ -139,3 +139,14 @@ test('an idle Infuse stream is freed', () => {
     sessions.close();
   }
 });
+
+test('an admin can stop an Infuse stream from the dashboard', { skip }, async () => {
+  const d = await device('dev-admin-stop');
+  assert.equal(await drain(await read(d, g.alpha)), 206);
+  const rows = await jellyfinRows();
+  assert.equal(rows.length, 1);
+  const res = await admin.post(`/api/admin/sessions/${rows[0].id}/stop`, {});
+  assert.equal(res.status, 200);
+  assert.equal((await jellyfinRows()).length, 0, 'the row is gone and the slot is free');
+  await stopAll(d);
+});

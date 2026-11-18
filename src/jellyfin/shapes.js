@@ -14,6 +14,7 @@ const json = (s, fallback) => {
   if (typeof s !== 'string') return s;
   try { return JSON.parse(s); } catch { return fallback; }
 };
+const list = (s) => { const v = json(s, []); return Array.isArray(v) ? v : []; };
 const ticks = (seconds) => Math.round((Number(seconds) || 0) * TICKS);
 const iso = (ms) => new Date(ms).toISOString();
 const personId = (name) => toGuid('person', createHash('sha1').update(String(name)).digest('hex').slice(0, 16));
@@ -37,7 +38,7 @@ export function userData(progress, rating, row, counts = {}, stats = {}) {
   const out = {
     PlaybackPositionTicks: ticks(position),
     PlayCount: Number(stats?.playCount) || (progress?.watched ? 1 : 0),
-    Played: Boolean(progress?.watched),
+    Played: counts?.children != null && ['show', 'season'].includes(row.kind) ? counts.children > 0 && counts.unplayed === 0 : Boolean(progress?.watched),
     IsFavorite: Boolean(rating?.favourite),
     Key: toGuid('item', row.id),
   };
@@ -49,17 +50,31 @@ export function userData(progress, rating, row, counts = {}, stats = {}) {
   return out;
 }
 
+/** One numbering for every stream: ffprobe's own index where it gave one, bumped past any already taken. */
+function numberStreams(media) {
+  const used = new Set();
+  let next = 0;
+  const take = (pref) => {
+    let i = Number.isInteger(pref) && pref >= 0 ? pref : next;
+    while (used.has(i)) i++;
+    used.add(i);
+    next = Math.max(next, i + 1);
+    return i;
+  };
+  const v = media.video;
+  const video = v ? take(v.streamIndex ?? v.index) : null;
+  const audio = list(media.audio).map((a) => take(a.streamIndex ?? a.index));
+  const subs = list(media.subtitles).map((s) => take(s.streamIndex ?? s.index));
+  return { video, audio, subs, next };
+}
+
 /**
  * The external subtitles (sidecar and downloaded files) of listSubtitles()'s output with the stream Index each gets:
  * numbered after the embedded streams. mediaSources and the subtitle route both use this, so an Index in a
  * DeliveryUrl always names the same file.
  */
 export function externalSubtitles(row, subtitles = []) {
-  const media = json(row.media, null) || {};
-  let next = 0;
-  if (media.video) next++;
-  (media.audio || []).forEach((a) => { next = Math.max(next, (a.streamIndex ?? a.index ?? next) + 1); });
-  for (const s of media.subtitles || []) next = Math.max(next, (s.streamIndex ?? s.index ?? next) + 1);
+  let { next } = numberStreams(json(row.media, null) || {});
   return subtitles.filter((s) => s.source !== 'embedded').map((sub) => ({ index: next++, sub }));
 }
 
@@ -68,29 +83,26 @@ export function mediaSources(row, { subtitles = [], canDownload = false, base = 
   const media = json(row.media, null) || {};
   const id = toGuid('item', row.id);
   const streams = [];
-  let next = 0;
+  const num = numberStreams(media);
   const v = media.video;
   if (v) {
     streams.push({
-      Type: 'Video', Index: next++, Codec: v.codec, IsDefault: true, IsExternal: false, Width: v.width, Height: v.height,
+      Type: 'Video', Index: num.video, Codec: v.codec, IsDefault: true, IsExternal: false, Width: v.width, Height: v.height,
       BitDepth: v.bitDepth, VideoRange: videoRange(v), RealFrameRate: v.fps || undefined, Profile: v.profile || undefined,
     });
   }
-  const audio = media.audio || [];
-  audio.forEach((a, i) => {
+  list(media.audio).forEach((a, i) => {
     streams.push({
-      Type: 'Audio', Index: a.streamIndex ?? a.index ?? next, Codec: a.codec, Language: a.language || undefined, Title: a.title || undefined,
+      Type: 'Audio', Index: num.audio[i], Codec: a.codec, Language: a.language || undefined, Title: a.title || undefined,
       Channels: a.channels, IsDefault: a.default != null ? Boolean(a.default) : i === 0, IsExternal: false,
     });
-    next = Math.max(next, (a.streamIndex ?? a.index ?? next) + 1);
   });
-  for (const s of media.subtitles || []) {
+  list(media.subtitles).forEach((s, i) => {
     streams.push({
-      Type: 'Subtitle', Index: s.streamIndex ?? s.index ?? next, Codec: s.codec, Language: s.language || undefined, Title: s.title || undefined,
+      Type: 'Subtitle', Index: num.subs[i], Codec: s.codec, Language: s.language || undefined, Title: s.title || undefined,
       IsDefault: Boolean(s.default), IsForced: Boolean(s.forced), IsExternal: false,
     });
-    next = Math.max(next, (s.streamIndex ?? s.index ?? next) + 1);
-  }
+  });
   for (const { index, sub: s } of externalSubtitles(row, subtitles)) {
     streams.push({
       Type: 'Subtitle', Index: index, Codec: 'webvtt', Language: s.language || undefined, Title: s.label || undefined,
@@ -149,7 +161,7 @@ export function itemDto(row, { serverId, progress, stats, rating, counts, fields
   void fields;
   const overview = row.overview;
   if (overview) dto.Overview = overview;
-  dto.Genres = json(row.genres, []);
+  dto.Genres = list(row.genres);
   if (row.certification) dto.OfficialRating = String(row.certification).replace(/^[A-Za-z]{2}:/, '');
   if (row.rating != null) dto.CommunityRating = row.rating;
   const premiere = row.air_date ? (/^\d{4}-\d{2}-\d{2}$/.test(row.air_date) ? `${row.air_date}T00:00:00.0000000Z` : row.air_date) : row.year ? `${row.year}-01-01T00:00:00.0000000Z` : null;
@@ -158,7 +170,7 @@ export function itemDto(row, { serverId, progress, stats, rating, counts, fields
   dto.SortName = row.sort_title || row.title;
   if (row.studio) dto.Studios = [{ Name: row.studio, Id: personId(`studio:${row.studio}`) }];
   const roles = { director: 'Director', creator: 'Creator', cast: 'Actor' };
-  dto.People = json(row.people, []).filter((p) => p?.name).map((p) => ({
+  dto.People = list(row.people).filter((p) => p?.name).map((p) => ({
     Name: p.name, Id: personId(p.name), Role: p.character || '',
     Type: roles[p.role] || 'Actor',
   }));

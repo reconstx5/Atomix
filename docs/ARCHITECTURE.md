@@ -104,6 +104,7 @@ changed constraint are rebuilt the way SQLite recommends (create the new table, 
 21. The activity log: `activity` (time, type, user, profile, sentence, address), indexed by time and by type.
 22. Player extras and editing: `play_settings` (per profile and title: `audio_delay`, `subtitle_delay`; a row with
     both at zero is deleted), `items.locked_fields` (JSON list of hand-edited fields) and `items.studio`.
+    (Migrations 23-29 are described in the sections below; 30-33 (recap markers, app links, clips, colours) in CLAUDE.md and the card motion note.)
 
 34. The Jellyfin API: `jellyfin_tokens` (per device: sha256 of the token, the app password it belongs to, device and
     client names, created and last used), deleted with its app password.
@@ -535,7 +536,7 @@ capitals and with or without an `/emby` prefix; a route with fewer `{params}` wi
 - **Ids.** Jellyfin ids are 32-hex GUIDs: `a70a1f00` + an 8-hex kind code (item, library, user, person, server) + 16 hex
   (`ids.js`). A person's is the first 16 hex of sha1(name). Dates are in ticks (1 s = 10,000,000).
 - **Routes.** `system.js` (public info, ping, sign-in, Users/Me, view stubs, Genres), `browse.js` (views, Items, Resume,
-  Latest, NextUp, Seasons, Episodes, Genres, Persons), `media.js` (images, PlaybackInfo, video stream with ranges,
+  Latest, NextUp, Seasons, Episodes), `routes.js` (registers every route on the one handler), `media.js` (images, PlaybackInfo, video stream with ranges,
   subtitles, Download), `userdata.js` (played, favourite, Sessions/Playing/Progress/Stopped/Ping and PlayingItems),
   `shapes.js` (the item, media source and user JSON).
 - **The one-slot rule.** A device (token) holds one stream slot in `JellyfinSessions` (`sessions.js`), shared with web

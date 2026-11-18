@@ -36,7 +36,7 @@ const UNWATCHED_EPISODE = `EXISTS (SELECT 1 FROM items e LEFT JOIN progress pe O
 const FILTERS = {
   isplayed: { sql: `((i.kind IN ('movie','episode') AND COALESCE(pp.watched, 0) = 1) OR (i.kind IN ('show','season') AND NOT ${UNWATCHED_EPISODE}))`, pid: true },
   isunplayed: { sql: `((i.kind IN ('movie','episode') AND COALESCE(pp.watched, 0) = 0) OR (i.kind IN ('show','season') AND ${UNWATCHED_EPISODE}))`, pid: true },
-  isresumable: { sql: "(i.kind IN ('movie','episode') AND COALESCE(pp.watched, 0) = 0 AND COALESCE(pp.position, 0) > 0)" },
+  isresumable: { sql: "(i.kind IN ('movie','episode') AND COALESCE(pp.watched, 0) = 0 AND COALESCE(pp.position, 0) > 30)" },
   isfavorite: { sql: 'COALESCE(ur.favourite, 0) = 1' },
 };
 

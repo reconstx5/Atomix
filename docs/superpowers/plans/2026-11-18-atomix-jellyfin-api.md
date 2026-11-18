@@ -465,7 +465,7 @@ existing non-Preact `settings-music.js`.
 - [ ] **Step 2:** Run. FAIL. **Step 3:** Implement the stubs and the fixture. **Step 4:** Run. PASS.
 - [ ] **Step 5:** Start the dev server on 8797 (`.claude/launch.json` / `npm run dev` with the dev data dir), make an
   app password in Settings, and run
-  `BASE=http://localhost:8797 USER=dallas APP_PASSWORD=<secret> node devtools/jellyfin-smoke.mjs`. Expected: `ALL PASS`.
+  `BASE=http://localhost:8797 USER_NAME=dallas APP_PASSWORD=<secret> node devtools/jellyfin-smoke.mjs`. Expected: `ALL PASS`.
 - [ ] **Step 6: Commit** `Jellyfin API: what Infuse asks for, a recorded session and a smoke check`.
 
 ### Task 10: Settings "Apps", docs and the full suite

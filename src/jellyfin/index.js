@@ -123,7 +123,7 @@ export class Jellyfin {
     if (this.core.config.jellyfinTrace) {
       res.once('close', () => log.info(`${method} ${redactUrl(url)} → ${res.statusCode} ${Date.now() - started}ms`));
     }
-    const rest = url.pathname.replace(/^\/jellyfin/i, '').replace(/^\/emby(?=\/|$)/i, '') || '/';
+    const rest = url.pathname.replace(/^(\/jellyfin)+/i, '').replace(/^\/emby(?=\/|$)/i, '') || '/';
     const found = this.match(method, rest);
     try {
       if (!found) throw new HttpError(404);

@@ -64,6 +64,14 @@ export class JellyfinSessions {
     this.sessions.delete(tokenId);
   }
 
+  /** Ends a slot by its dashboard id (`jf-…`); false when none has it. */
+  stopById(id) {
+    for (const [tokenId, s] of this.sessions) {
+      if (s.id === id) { this.stop(tokenId); return true; }
+    }
+    return false;
+  }
+
   reap() {
     const now = this.now();
     for (const [tokenId, s] of this.sessions) if (now - s.lastSeen > this.idleMs) this.stop(tokenId);

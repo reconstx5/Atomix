@@ -284,5 +284,10 @@ test('a sidecar .srt is offered and sent', { skip }, async () => {
   assert.equal((await me.raw(`/Videos/${g.alpha}/${g.alpha}/Subtitles/0/0/Stream.vtt`, { headers: auth(token) })).status, 404, 'a stream that is not a subtitle file');
   assert.equal((await me.raw(`/Videos/${g.gamma}/${g.gamma}/Subtitles/${first}/0/Stream.vtt`, { headers: auth(kidToken) })).status, 404, 'hidden from Kids');
   assert.equal((await me.raw(`/Videos/${g.alpha}/${g.alpha}/Subtitles/${first}/0/Stream.vtt`)).status, 401);
+
+  // Apps append DeliveryUrl to the address the user typed, which already ends in /jellyfin.
+  const doubled = await me.raw(`/jellyfin${ext[0].DeliveryUrl}`, { headers: auth(token) });
+  assert.equal(doubled.status, 200, 'a repeated /jellyfin prefix still routes');
+  assert.equal(await doubled.text(), vttText);
   assert.equal(nf.app.core.jellyfin.sessions.list().length, 0, 'subtitles take no slot');
 });
