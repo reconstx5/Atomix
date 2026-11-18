@@ -333,7 +333,8 @@ export function registerAccountRoutes(r, core) {
     const made = core.appPasswords.create(ctx.profile.id, b.name);
     said(ctx, 'app-password', `${ctx.user.username} made an app password for ${made.name}`);
     const host = (core.config.trustProxy && ctx.req.headers['x-forwarded-host']) || ctx.req.headers.host;
-    return { ...made, username: ctx.user.username, server: `${core.auth.isSecure(ctx.req) ? 'https' : 'http'}://${host}` };
+    const server = `${core.auth.isSecure(ctx.req) ? 'https' : 'http'}://${host}`;
+    return { ...made, username: ctx.user.username, server, jellyfin: `${server}/jellyfin` };
   });
   r.delete('/api/me/app-passwords/:id', (ctx) => {
     const row = db.get('SELECT name FROM app_passwords WHERE id = ? AND profile_id = ? AND revoked = 0', Number(ctx.params.id), ctx.profile.id);

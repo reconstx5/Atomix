@@ -64,6 +64,6 @@ Plan B:
 ## Next
 1. Done: Plan C merged into `main` and pushed (17 Nov).
 2. The title page (`views/item.js`) on Preact: built on branch `title-page-preact` (18 Nov); Dallas decides the merge.
-3. A Jellyfin-compatible API so Infuse, Streamyfin/Swiftfin and Finamp can connect (needs real devices).
+3. A Jellyfin-compatible API so Infuse, Streamyfin/Swiftfin and Finamp can connect: built on branch `jellyfin-api` (18 Nov, not merged; `src/jellyfin/`, Settings → Profile → Apps). Waiting on real devices (Infuse first).
 4. Remove the iPhone diagnostics once playback is stable.
 5. Real-device checks: TV timings and focus rings, Safari/iPhone, old TV browsers.

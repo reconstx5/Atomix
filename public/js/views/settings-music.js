@@ -1,4 +1,4 @@
-// Settings → Profile: Music apps (app passwords for Subsonic apps) and Scrobbling (ListenBrainz, Last.fm); and the
+// Settings → Profile: Apps (app passwords for Subsonic and Jellyfin apps) and Scrobbling (ListenBrainz, Last.fm); and the
 // Last.fm fields of Settings → Server. Every profile has its own (Kids included); none of it shows another profile's.
 import { api } from '../api.js';
 import { h, clear, timeAgo } from '../dom.js';
@@ -8,10 +8,10 @@ const panel = (cls, title, ...children) => h('section', { class: `panel ${cls}` 
 const when = (ms) => (ms ? timeAgo(ms) : null);
 
 /** Copy text; when the browser won't, select it so the person can copy it themselves. */
-async function copy(text, el) {
+async function copy(text, el, done = 'Password copied') {
   try {
     await navigator.clipboard.writeText(text);
-    toast('Password copied');
+    toast(done);
   } catch {
     const r = document.createRange();
     r.selectNodeContents(el);
@@ -84,13 +84,20 @@ export function musicAppsCard() {
           const m = await api.post('/api/me/app-passwords', { name: name.value });
           name.value = '';
           const value = h('code', { class: 'secret-value' }, m.secret);
+          const jellyfin = h('code', {}, m.jellyfin);
           clear(made).append(
             h(
               'div',
               { class: 'app-secret', role: 'status' },
-              h('dl', {}, h('dt', {}, 'Server'), h('dd', {}, h('code', {}, m.server)), h('dt', {}, 'Username'), h('dd', {}, h('code', {}, m.username)), h('dt', {}, 'Password'), h('dd', {}, value)),
+              h('dl', {}, h('dt', {}, 'Server'), h('dd', {}, h('code', {}, m.server)), h('dt', {}, 'Jellyfin address'), h('dd', {}, jellyfin), h('dt', {}, 'Username'), h('dd', {}, h('code', {}, m.username)), h('dt', {}, 'Password'), h('dd', {}, value)),
               h('p', { class: 'muted small' }, 'This password is shown once.'),
-              h('div', { class: 'actions' }, button('Copy password', { icon: 'check', variant: 'secondary', onClick: () => copy(m.secret, value) })),
+              h('p', { class: 'muted small' }, `In Infuse, add a Jellyfin server with the address ${m.jellyfin}, your username ${m.username} and this password. Music apps use the address ${m.server}.`),
+              h(
+                'div',
+                { class: 'actions' },
+                button('Copy password', { icon: 'check', variant: 'secondary', onClick: () => copy(m.secret, value) }),
+                button('Copy Jellyfin address', { icon: 'check', variant: 'secondary', onClick: () => copy(m.jellyfin, jellyfin, 'Address copied') }),
+              ),
             ),
           );
           await load();
@@ -108,8 +115,8 @@ export function musicAppsCard() {
   load();
   return panel(
     'music-apps',
-    'Music apps',
-    h('p', { class: 'muted' }, 'Sign in to Subsonic music apps such as Symfonium, Amperfy or play:Sub with an app password. Each app gets its own, and revoking one signs that app out.'),
+    'Apps',
+    h('p', { class: 'muted' }, 'Sign in to other apps with an app password. Music apps such as Symfonium, Amperfy or play:Sub use it as a Subsonic server. Infuse uses it as a Jellyfin server. Each app gets its own password, and revoking one signs that app out.'),
     form,
     made,
     list,
