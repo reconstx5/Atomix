@@ -322,7 +322,8 @@ export function registerBrowse(j) {
     } else {
       rows = library.nextUp(ctx.viewer, 100); // one query per started show, so at most 100 shows
     }
-    rows = inLibraries(ctx, rows);
+    // nextUp/nextUpFor check the show and the watched episodes, not the next one: each (at most 100) is checked here.
+    rows = inLibraries(ctx, rows).filter((r) => library.canSee(ctx.viewer, r));
     return paged(ctx, rows.slice(start, start + limit), rows.length, start);
   });
 

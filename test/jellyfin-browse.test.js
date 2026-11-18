@@ -17,6 +17,7 @@ let me; // the grown-up's Jellyfin client
 let meId;
 let kid;
 let guest;
+let miaId;
 
 before(async () => {
   if (!hasFfmpeg) return;
@@ -57,6 +58,7 @@ before(async () => {
   for (const [k, v] of Object.entries(ids)) g[k] = toGuid(['movies', 'tv', 'music'].includes(k) ? 'library' : 'item', v);
 
   const mia = (await admin.post('/api/profiles', { name: 'Mia', kids: true, maxAge: 10, avatar: 'teal' })).data;
+  miaId = mia.id;
   const guestProfile = (await admin.post('/api/profiles', { name: 'Guest', avatar: 'blue' })).data;
   await admin.patch(`/api/profiles/${guestProfile.id}`, { libraries: [ids.movies] });
   const secret = (await admin.post('/api/me/app-passwords', { name: 'Infuse' })).data.secret;
@@ -228,6 +230,18 @@ test("a Kids token can't reach a grown-up title by id", { skip }, async () => {
   assert.deepEqual(latest.body.map((i) => i.Name), ['Beta', 'Alpha']);
   assert.ok(!(await kid.get('/Items/Latest')).body.some((i) => i.Id === g.gamma));
   assert.ok(!itemIds(await kid.get('/UserItems/Resume')).includes(g.gamma));
+  // Next Up: episode 1 is hers and watched; episode 2 is above her age, so it is never her next episode.
+  const core = nf.app.core;
+  core.db.run('UPDATE items SET min_age = 16 WHERE id = ?', ids.e2);
+  try {
+    core.library.setWatched(miaId, core.library.get(ids.e1), true);
+    assert.equal((await kid.get(`/Items/${g.e2}`)).status, 404);
+    assert.ok(!itemIds(await kid.get('/Shows/NextUp')).includes(g.e2), "Mia's Next Up hides an episode above her age");
+    assert.ok(!itemIds(await kid.get('/Shows/NextUp', { SeriesId: g.show })).includes(g.e2), 'and so does her Next Up for the show');
+    assert.deepEqual(itemIds(await me.get('/Shows/NextUp')), [g.e2], "Dallas's Next Up still lists it");
+  } finally {
+    core.db.run('UPDATE items SET min_age = 0 WHERE id = ?', ids.e2);
+  }
 });
 
 test('a profile without the TV library can\'t list it', { skip }, async () => {
