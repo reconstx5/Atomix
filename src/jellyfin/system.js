@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { HttpError } from './index.js';
 import { userDto } from './shapes.js';
 import { fromGuid } from './ids.js';
+import { ensureVisible, ownUser } from './browse.js';
 
 // Infuse checks the server is a Jellyfin it knows; 10.10.x is the current stable line.
 const VERSION = '10.10.7';
@@ -84,5 +85,51 @@ export function registerSystem(j) {
     if (!id || id.kind !== 'user' || id.id !== ctx.profile.id) throw new HttpError(404);
     return userDto(ctx.user, ctx.profile, { serverId: ctx.serverId });
   });
+
+  registerStubs(j);
 }
 
+const EMPTY_LIST = { Items: [], TotalRecordCount: 0, StartIndex: 0 };
+const VIDEO_LIBRARIES = new Set(['movies', 'tv']);
+
+/**
+ * What Infuse (and other Jellyfin apps) ask for around the main calls. Harmless answers of the right shape, so a
+ * client doesn't stop at a 404: nothing here changes anything. Titles are still checked with the viewer.
+ */
+function registerStubs(j) {
+  j.route('GET', '/DisplayPreferences/{id}', (ctx) => ({ Id: ctx.params.id, SortBy: 'SortName', SortOrder: 'Ascending', CustomPrefs: {} }));
+  j.route('POST', '/DisplayPreferences/{id}', () => null);
+  j.route('GET', '/Users/{userId}/Configuration', (ctx) => {
+    ownUser(ctx);
+    return userDto(ctx.user, ctx.profile, { serverId: ctx.serverId }).Configuration;
+  });
+  j.route('POST', '/Sessions/Capabilities', () => null);
+  j.route('POST', '/Sessions/Capabilities/Full', () => null);
+  j.route('GET', '/Branding/Configuration', () => ({ LoginDisclaimer: '', CustomCss: '' }), { auth: false });
+  for (const name of ['Cultures', 'Countries', 'ParentalRatings']) j.route('GET', `/Localization/${name}`, () => []);
+  j.route('GET', '/Users/{userId}/Items/{itemId}/Intros', (ctx) => {
+    ownUser(ctx);
+    ensureVisible(ctx, ctx.params.itemId);
+    return { ...EMPTY_LIST };
+  });
+  const similar = (ctx) => (ensureVisible(ctx, ctx.params.itemId), { ...EMPTY_LIST });
+  j.route('GET', '/Items/{itemId}/Similar', similar);
+  j.route('GET', '/Shows/{itemId}/Similar', similar);
+  j.route('GET', '/Items/{itemId}/SpecialFeatures', (ctx) => (ensureVisible(ctx, ctx.params.itemId), []));
+  j.route('GET', '/Users/{userId}/Items/{itemId}/SpecialFeatures', (ctx) => (ownUser(ctx), ensureVisible(ctx, ctx.params.itemId), []));
+  j.route('GET', '/QuickConnect/Enabled', () => false, { auth: false });
+
+  // The genres of the viewer's film and TV libraries (or of the one named by ParentId), through the viewer.
+  j.route('GET', '/Genres', (ctx) => {
+    const { library } = ctx.core;
+    const { viewer } = ctx;
+    let libs = library.visibleLibraries(viewer).filter((l) => VIDEO_LIBRARIES.has(l.type));
+    if (ctx.query.parentid) {
+      const id = fromGuid(ctx.query.parentid);
+      libs = id?.kind === 'library' ? libs.filter((l) => l.id === id.id) : [];
+    }
+    const names = [...new Set(libs.flatMap((l) => library.genres(l.id, viewer)))].sort((a, b) => a.localeCompare(b));
+    const items = names.map((Name) => ({ Name, Id: crypto.createHash('md5').update(`atomix-jellyfin-genre:${Name.toLowerCase()}`).digest('hex'), Type: 'Genre' }));
+    return { Items: items, TotalRecordCount: items.length, StartIndex: 0 };
+  });
+}
