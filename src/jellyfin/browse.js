@@ -55,7 +55,7 @@ function includedKinds(q) {
 }
 
 /** A `{userId}` in the path must be the token's own profile. */
-function ownUser(ctx) {
+export function ownUser(ctx) {
   if (ctx.params.userId == null) return;
   const id = fromGuid(ctx.params.userId);
   if (!id || id.kind !== 'user' || id.id !== ctx.profile.id) throw new HttpError(404);

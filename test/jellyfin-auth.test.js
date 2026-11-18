@@ -147,6 +147,31 @@ test('api_key in the query signs in and is never logged', { skip }, async () => 
   if (fs.existsSync(file)) assert.ok(!fs.readFileSync(file, 'utf8').includes(token), 'the token is in the log file');
 });
 
+test("a failing route's log line carries no address and no token", { skip }, async () => {
+  const { token } = await signIn(nf.base, 'dallas', secret);
+  const farUrl = 'http://192.0.2.7:8096/Videos/abc/stream?static=true&api_key=fartoken123456';
+  nf.app.core.jellyfin.route('GET', '/Test/Boom', () => {
+    throw new Error(`fetch failed for ${farUrl} (token=farsecret999, X-Emby-Token: farheader777)`);
+  });
+  const lines = [];
+  const kept = { log: console.log, warn: console.warn, error: console.error };
+  for (const k of Object.keys(kept)) console[k] = (...a) => lines.push(a.map(String).join(' '));
+  try {
+    const r = await fetch(`${nf.base}/jellyfin/Test/Boom?api_key=${token}`);
+    assert.equal(r.status, 500);
+    assert.equal(await r.text(), '{}');
+    await new Promise((res) => setTimeout(res, 100));
+  } finally {
+    Object.assign(console, kept);
+  }
+  assert.ok(lines.some((l) => l.includes('/Test/Boom') && l.includes('fetch failed')), `the failure is logged:\n${lines.join('\n')}`);
+  for (const l of lines) {
+    for (const bit of ['192.0.2.7', farUrl, 'fartoken123456', 'farsecret999', 'farheader777', token]) {
+      assert.ok(!l.includes(bit), `"${bit}" is in a log line: ${l}`);
+    }
+  }
+});
+
 test('routes match without regard to capitals and with /emby', { skip }, async () => {
   const { token } = await signIn(nf.base, 'dallas', secret);
   const ids = new Set();

@@ -16,6 +16,18 @@ const BODY_LIMIT = 1024 * 1024;
 const TOUCH_EVERY_MS = 60_000; // a token's and its app password's "last used" is written at most once a minute
 const SECRET_KEYS = /^(api_?key|token|x-emby-token|x-mediabrowser-token|pw|password)$/i;
 
+/**
+ * An error's text for a log line: any network address (a connected server's, with its token) as <address>, any
+ * token=/api_key=/X-Emby-Token: style value as ***, and any 64-hex as ***. Stack frames (file://) stay readable.
+ */
+export function redactError(err) {
+  return String(err?.stack || err)
+    .replace(/\b(?:https?|wss?|rtmps?|rtsp|udp|ftp):\/\/[^\s'"<>)]+/gi, '<address>')
+    .replace(/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b/g, '<address>') // a bare IPv4 (ECONNREFUSED 10.0.0.5:8096)
+    .replace(/\b(api_?key|apikey|access_?token|token|x-emby-token|x-mediabrowser-token|x-plex-token|authorization|pw|password|secret)(\s*[=:]\s*)("[^"]*"|[^\s&,;)'"]+)/gi, '$1$2***')
+    .replace(/[0-9a-f]{64}/gi, '***');
+}
+
 /** The request's path and query for a log line, with every token-carrying value as *** (and any 64-hex too). */
 export function redactUrl(url) {
   const parts = [];
@@ -29,14 +41,20 @@ function compile(pattern) {
   const source = pattern
     .replace(/\/+$/, '')
     .split('/')
-    .map((seg) => {
-      const m = /^\{(\w+)\}$/.exec(seg);
-      if (m) {
-        keys.push(m[1]);
-        return '([^/]+)';
-      }
-      return seg.replace(/[.+*?^${}()|[\]\\]/g, '\\$&');
-    })
+    // A `{name}` may be a whole segment or part of one ('stream.{ext}').
+    .map((seg) =>
+      seg
+        .split(/(\{\w+\})/)
+        .map((part) => {
+          const m = /^\{(\w+)\}$/.exec(part);
+          if (m) {
+            keys.push(m[1]);
+            return '([^/]+)';
+          }
+          return part.replace(/[.+*?^${}()|[\]\\]/g, '\\$&');
+        })
+        .join(''),
+    )
     .join('/');
   return { regex: new RegExp(`^${source}/?$`, 'i'), keys };
 }
@@ -153,8 +171,9 @@ export class Jellyfin {
       else sendJson(res, 200, out);
     } catch (err) {
       const status = err instanceof HttpError ? err.status : 500;
-      // Logged by method and route only: the address can carry a token (api_key).
-      if (status >= 500) log.error(`${method} ${found?.route?.pattern || 'unknown route'} failed: ${String(err?.stack || err).replace(/[0-9a-f]{64}/gi, '***')}`);
+      // Logged by method and route only: the address can carry a token (api_key), and an error from a connected
+      // server's fetch can carry that server's address and token, so addresses and token values are taken out.
+      if (status >= 500) log.error(`${method} ${found?.route?.pattern || 'unknown route'} failed: ${redactError(err)}`);
       if (res.headersSent) {
         res.destroy();
         return;

@@ -452,6 +452,7 @@ export async function createApp(overrides = {}) {
     await Promise.race([core.live.refresher.idle(), new Promise((r) => setTimeout(r, 3000))]);
     await core.cast.manager.stopAll(); // TVs are told to stop and progress is saved (at most 3 s)
     for (const s of [...core.playback.sessions.keys()]) core.playback.stop(s, 'shutdown');
+    core.jellyfin?.sessions?.close(); // Jellyfin apps' stream slots
     // Connected servers hear about those stops before the database closes (at most 3 s).
     if (core.remote?.reporter) await Promise.race([core.remote.reporter.idle(), new Promise((r) => setTimeout(r, 3000))]);
     core.closeTogetherStreams?.();
