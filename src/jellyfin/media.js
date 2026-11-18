@@ -9,7 +9,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { HttpError } from './index.js';
 import { ensureVisible } from './browse.js';
-import { mediaSources } from './shapes.js';
+import path from 'node:path';
+import { mediaSources, externalSubtitles } from './shapes.js';
+import { listSubtitles, getSubtitleVtt } from '../stream/subtitles.js';
 import { sendArtwork } from '../library/artwork.js';
 import { sendFile, mimeFor } from '../http/static.js';
 import { isRemotePath } from '../remote/index.js';
@@ -40,7 +42,8 @@ function playableRow(ctx) {
 
 function playbackInfo(ctx) {
   const row = playableRow(ctx);
-  return { MediaSources: mediaSources(row), PlaySessionId: crypto.randomBytes(16).toString('hex') };
+  const subtitles = listSubtitles(row, ctx.core.config);
+  return { MediaSources: mediaSources(row, { subtitles, canDownload: !ctx.profile?.kids && !isRemotePath(row.path) }), PlaySessionId: crypto.randomBytes(16).toString('hex') };
 }
 
 async function stream(ctx) {
@@ -62,7 +65,57 @@ async function stream(ctx) {
   if (!ok) throw new HttpError(404, 'The file is missing on the server.');
 }
 
+// Offline copy: grown-ups only, local files only, no stream slot (as the web's /api/items/:id/download). The
+// visibility check comes first, so a hidden title is 404 and only a visible one answers 403 to a Kids profile.
+async function download(ctx) {
+  const row = playableRow(ctx);
+  if (ctx.profile?.kids) throw new HttpError(403);
+  if (isRemotePath(row.path)) throw new HttpError(400, 'Downloads come from the server that holds the file.');
+  ctx.res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(path.basename(row.path))}`);
+  const ok = await sendFile(ctx.req, ctx.res, row.path, { cacheControl: 'private, no-cache', contentType: 'application/octet-stream' });
+  if (!ok) throw new HttpError(404, 'The file is missing on the server.');
+}
+
+/** WebVTT -> SubRip: numbered cues, comma milliseconds, no header, notes or cue settings. */
+function vttToSrt(vtt) {
+  const blocks = vtt.replace(/\r\n?/g, '\n').replace(/^WEBVTT[^\n]*\n/, '').trim().split(/\n{2,}/);
+  const cues = [];
+  for (const b of blocks) {
+    const lines = b.split('\n');
+    const at = lines.findIndex((l) => l.includes('-->'));
+    if (at < 0) continue; // a NOTE or STYLE block
+    const [from, rest] = lines[at].split('-->');
+    const to = rest.trim().split(/\s+/)[0];
+    const clock = (t) => {
+      let x = t.trim().replace('.', ',');
+      if (/^\d{1,2}:\d{2},/.test(x)) x = `00:${x}`; // WebVTT may leave the hours out
+      return x.padStart(12, '0');
+    };
+    cues.push(`${cues.length + 1}\n${clock(from)} --> ${clock(to)}\n${lines.slice(at + 1).join('\n')}`);
+  }
+  return `${cues.join('\n\n')}\n`;
+}
+
+// The index is the one mediaSources put in the item's DeliveryUrl (shapes.js externalSubtitles), so it names the same
+// file. A `.srt` address gets SubRip and a `.vtt` one WebVTT.
+async function subtitle(ctx) {
+  const row = playableRow(ctx);
+  const index = Number(ctx.params.index);
+  const found = /^\d+$/.test(String(ctx.params.index)) && externalSubtitles(row, listSubtitles(row, ctx.core.config)).find((e) => e.index === index);
+  if (!found) throw new HttpError(404);
+  const vtt = await getSubtitleVtt(row, found.sub.id, ctx.core.config, null, { slot: () => ctx.core.playback.extractionSlot() });
+  if (vtt == null) throw new HttpError(404);
+  const srt = String(ctx.params.ext).toLowerCase() === 'srt';
+  if (!srt && String(ctx.params.ext).toLowerCase() !== 'vtt') throw new HttpError(404);
+  const body = srt ? vttToSrt(vtt) : vtt;
+  ctx.res.writeHead(200, { 'Content-Type': srt ? 'application/x-subrip; charset=utf-8' : 'text/vtt; charset=utf-8', 'Cache-Control': 'private, max-age=3600' });
+  ctx.res.end(ctx.req.method === 'HEAD' ? undefined : body);
+}
+
 export function registerMedia(j) {
+  j.route('GET', '/Items/{itemId}/Download', download);
+  j.route('GET', '/Videos/{itemId}/{sourceId}/Subtitles/{index}/{start}/Stream.{ext}', subtitle);
+  j.route('GET', '/Videos/{itemId}/{sourceId}/Subtitles/{index}/Stream.{ext}', subtitle);
   j.route('GET', '/Items/{itemId}/Images/{type}', image);
   j.route('GET', '/Items/{itemId}/Images/{type}/{index}', image);
   j.route(['GET', 'POST'], '/Items/{itemId}/PlaybackInfo', playbackInfo);

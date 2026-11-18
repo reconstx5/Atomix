@@ -7,6 +7,7 @@
 // in three queries per page, never one per row.
 import { HttpError } from './index.js';
 import { itemDto, libraryDto } from './shapes.js';
+import { listSubtitles } from '../stream/subtitles.js';
 import { fromGuid } from './ids.js';
 import { ensureSearchKeys, keyMatch } from '../library/searchkey.js';
 
@@ -100,7 +101,7 @@ function select(ctx, { where = [], params = [], order = SORT_NAME, start = 0, li
 }
 
 /** Rows -> Jellyfin items, with the viewer's progress, plays and heart fetched once for the whole page. */
-function dtos(ctx, rows) {
+function dtos(ctx, rows, { withSubtitles = false } = {}) {
   const { library, ratings } = ctx.core;
   const pid = ctx.viewer.profileId || 0;
   const ids = rows.map((r) => r.id);
@@ -114,6 +115,9 @@ function dtos(ctx, rows) {
     rating: rated.get(r.id) || null,
     counts: ['show', 'season'].includes(r.kind) ? { children: r.child_count ?? 0, unplayed: r.unwatched_count ?? 0 } : {},
     fields: ctx.query.fields,
+    kids: Boolean(ctx.profile?.kids),
+    // Sidecar files are read from the disk, so only a single item (not a list page) lists them.
+    subtitles: withSubtitles ? listSubtitles(r, ctx.core.config) : [],
   }));
 }
 
@@ -222,7 +226,7 @@ function oneItem(ctx) {
   const row = ensureVisible(ctx, ctx.params.itemId);
   const { rows } = select(ctx, { where: ['i.id = ?'], params: [row.id], limit: 1, count: false });
   if (!rows.length) throw new HttpError(404); // not a film/TV title
-  return dtos(ctx, rows)[0];
+  return dtos(ctx, rows, { withSubtitles: true })[0];
 }
 
 /** One visible film or TV row as a Jellyfin item (404 for anything else); the played and heart writes answer its UserData. */

@@ -2,6 +2,7 @@
 // Nothing here ever carries a file path, a connected server's address or a token.
 import { createHash } from 'node:crypto';
 import { toGuid } from './ids.js';
+import { isRemotePath } from '../remote/index.js';
 
 export const TICKS = 10_000_000;
 
@@ -48,6 +49,20 @@ export function userData(progress, rating, row, counts = {}, stats = {}) {
   return out;
 }
 
+/**
+ * The external subtitles (sidecar and downloaded files) of listSubtitles()'s output with the stream Index each gets:
+ * numbered after the embedded streams. mediaSources and the subtitle route both use this, so an Index in a
+ * DeliveryUrl always names the same file.
+ */
+export function externalSubtitles(row, subtitles = []) {
+  const media = json(row.media, null) || {};
+  let next = 0;
+  if (media.video) next++;
+  (media.audio || []).forEach((a) => { next = Math.max(next, (a.streamIndex ?? a.index ?? next) + 1); });
+  for (const s of media.subtitles || []) next = Math.max(next, (s.streamIndex ?? s.index ?? next) + 1);
+  return subtitles.filter((s) => s.source !== 'embedded').map((sub) => ({ index: next++, sub }));
+}
+
 /** `subtitles` is listSubtitles()'s output; only sidecar and downloaded files become external streams. */
 export function mediaSources(row, { subtitles = [], canDownload = false, base = '/jellyfin' } = {}) {
   const media = json(row.media, null) || {};
@@ -64,21 +79,19 @@ export function mediaSources(row, { subtitles = [], canDownload = false, base = 
   const audio = media.audio || [];
   audio.forEach((a, i) => {
     streams.push({
-      Type: 'Audio', Index: a.index ?? next, Codec: a.codec, Language: a.language || undefined, Title: a.title || undefined,
+      Type: 'Audio', Index: a.streamIndex ?? a.index ?? next, Codec: a.codec, Language: a.language || undefined, Title: a.title || undefined,
       Channels: a.channels, IsDefault: a.default != null ? Boolean(a.default) : i === 0, IsExternal: false,
     });
-    next = Math.max(next, (a.index ?? next) + 1);
+    next = Math.max(next, (a.streamIndex ?? a.index ?? next) + 1);
   });
   for (const s of media.subtitles || []) {
     streams.push({
-      Type: 'Subtitle', Index: s.index ?? next, Codec: s.codec, Language: s.language || undefined, Title: s.title || undefined,
+      Type: 'Subtitle', Index: s.streamIndex ?? s.index ?? next, Codec: s.codec, Language: s.language || undefined, Title: s.title || undefined,
       IsDefault: Boolean(s.default), IsForced: Boolean(s.forced), IsExternal: false,
     });
-    next = Math.max(next, (s.index ?? next) + 1);
+    next = Math.max(next, (s.streamIndex ?? s.index ?? next) + 1);
   }
-  for (const s of subtitles) {
-    if (s.source === 'embedded') continue;
-    const index = next++;
+  for (const { index, sub: s } of externalSubtitles(row, subtitles)) {
     streams.push({
       Type: 'Subtitle', Index: index, Codec: 'webvtt', Language: s.language || undefined, Title: s.label || undefined,
       IsDefault: false, IsForced: Boolean(s.forced), IsExternal: true, DeliveryMethod: 'External',
@@ -97,7 +110,7 @@ export function mediaSources(row, { subtitles = [], canDownload = false, base = 
   }];
 }
 
-export function itemDto(row, { serverId, progress, stats, rating, counts, fields, base = '/jellyfin' } = {}) {
+export function itemDto(row, { serverId, progress, stats, rating, counts, fields, subtitles = [], kids = false, base = '/jellyfin' } = {}) {
   const type = TYPES[row.kind] || 'Folder';
   const playable = PLAYABLE.has(row.kind);
   const tag = tagOf(row);
@@ -154,7 +167,7 @@ export function itemDto(row, { serverId, progress, stats, rating, counts, fields
   if (row.imdb_id) ids.Imdb = String(row.imdb_id);
   dto.ProviderIds = ids;
   if (row.added_at) dto.DateCreated = iso(row.added_at);
-  if (playable) dto.MediaSources = mediaSources(row, { canDownload: false, base });
+  if (playable) dto.MediaSources = mediaSources(row, { subtitles, canDownload: !kids && !isRemotePath(row.path), base });
   return dto;
 }
 

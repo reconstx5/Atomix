@@ -217,3 +217,72 @@ test("a Kids token can't stream or report a grown-up title", { skip }, async () 
   assert.deepEqual(progressOf(), was, "the R16 film's progress is unchanged");
   assert.equal(nf.app.core.jellyfin.sessions.list().length, 0, 'no slot taken');
 });
+
+const jellyfinSessions = async () => (await admin.get('/api/admin/dashboard')).data.sessions.filter((s) => s.delivery === 'jellyfin');
+
+test('a grown-up downloads a film', { skip }, async () => {
+  const bytes = fs.readFileSync(files.alpha);
+  const r = await me.raw(`/Items/${g.alpha}/Download`, { headers: auth(token) });
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get('content-disposition'), /^attachment; filename\*=UTF-8''Alpha%20\(2001\)\.mp4$/);
+  assert.ok(Buffer.from(await r.arrayBuffer()).equals(bytes), 'the whole file');
+  const part = await me.raw(`/Items/${g.alpha}/Download?api_key=${token}`, { headers: { Range: 'bytes=10-19' } });
+  assert.equal(part.status, 206);
+  assert.ok(Buffer.from(await part.arrayBuffer()).equals(bytes.subarray(10, 20)));
+  assert.equal((await me.raw(`/Items/${g.alpha}/Download`, { method: 'HEAD', headers: auth(token) })).status, 200);
+  assert.equal((await me.raw(`/Items/${g.alpha}/Download`)).status, 401);
+  assert.equal(nf.app.core.jellyfin.sessions.list().length, 0, 'a download takes no stream slot');
+  assert.equal((await jellyfinSessions()).length, 0, 'the dashboard shows no jellyfin session');
+  const item = await me.get(`/Items/${g.alpha}`);
+  assert.equal(item.body.MediaSources[0].CanDownload, true);
+});
+
+test("a Kids profile can't download", { skip }, async () => {
+  assert.equal((await kid.raw(`/Items/${g.alpha}/Download`, { headers: auth(kidToken) })).status, 403, 'a visible title');
+  assert.equal((await kid.raw(`/Items/${g.gamma}/Download`, { headers: auth(kidToken) })).status, 404, 'a hidden title');
+  assert.equal((await kid.get(`/Items/${g.alpha}`)).body.MediaSources[0].CanDownload, false);
+  assert.equal((await kid.post(`/Items/${g.alpha}/PlaybackInfo`)).body.MediaSources[0].CanDownload, false);
+  assert.equal(nf.app.core.jellyfin.sessions.list().length, 0);
+});
+
+test("a connected server's title can't be downloaded", { skip }, async () => {
+  const r = await me.raw(`/Items/${g.far}/Download`, { headers: auth(token) });
+  assert.equal(r.status, 400);
+  assert.ok(!(await r.text()).includes('tok1'));
+  assert.equal((await me.get(`/Items/${g.far}`)).body.MediaSources[0].CanDownload, false);
+  assert.equal((await me.raw(`/Items/${g.delta}/Download`, { headers: auth(token) })).status, 404, 'a missing file (deleted by an earlier test)');
+});
+
+test('a sidecar .srt is offered and sent', { skip }, async () => {
+  const sidecar = path.join(path.dirname(files.alpha), 'Alpha (2001).en.srt');
+  fs.writeFileSync(sidecar, '1\n00:00:01,000 --> 00:00:02,500\nHello there\n\n2\n00:01:02,000 --> 00:01:03,000\nSecond cue\n');
+  const item = await me.get(`/Items/${g.alpha}`);
+  const ext = item.body.MediaSources[0].MediaStreams.filter((s) => s.Type === 'Subtitle' && s.IsExternal);
+  assert.equal(ext.length, 1);
+  assert.equal(ext[0].Language, 'en');
+  const all = item.body.MediaSources[0].MediaStreams.map((s) => s.Index);
+  assert.equal(new Set(all).size, all.length, 'every stream has its own Index');
+  const first = item.body.MediaSources[0].MediaStreams.length - 1;
+  assert.equal(ext[0].Index, first, 'numbered after the embedded streams');
+  assert.match(ext[0].DeliveryUrl, new RegExp(`^/jellyfin/Videos/${g.alpha}/${g.alpha}/Subtitles/${first}/0/Stream\.vtt$`));
+  assert.ok(!item.text.includes('Alpha (2001).en.srt'), 'no file name');
+  const info = await me.post(`/Items/${g.alpha}/PlaybackInfo`);
+  assert.equal(info.body.MediaSources[0].MediaStreams.filter((s) => s.IsExternal).length, 1, 'PlaybackInfo lists it too');
+  const vtt = await me.raw(ext[0].DeliveryUrl, { headers: auth(token) });
+  assert.equal(vtt.status, 200);
+  assert.match(vtt.headers.get('content-type'), /^text\/vtt/);
+  const vttText = await vtt.text();
+  assert.ok(vttText.startsWith('WEBVTT'));
+  assert.ok(vttText.includes('Hello there'));
+  const srt = await me.raw(`/Videos/${g.alpha}/${g.alpha}/Subtitles/${first}/Stream.srt`, { headers: auth(token) });
+  assert.equal(srt.status, 200);
+  assert.match(srt.headers.get('content-type'), /^application\/x-subrip/);
+  const srtText = await srt.text();
+  assert.ok(srtText.startsWith('1\n00:00:01,000 --> 00:00:02,500\nHello there'), srtText);
+  assert.ok(srtText.includes('2\n00:01:02,000 --> 00:01:03,000\nSecond cue'));
+  assert.equal((await me.raw(`/Videos/${g.alpha}/${g.alpha}/Subtitles/${first + 1}/0/Stream.vtt`, { headers: auth(token) })).status, 404, 'no such index');
+  assert.equal((await me.raw(`/Videos/${g.alpha}/${g.alpha}/Subtitles/0/0/Stream.vtt`, { headers: auth(token) })).status, 404, 'a stream that is not a subtitle file');
+  assert.equal((await me.raw(`/Videos/${g.gamma}/${g.gamma}/Subtitles/${first}/0/Stream.vtt`, { headers: auth(kidToken) })).status, 404, 'hidden from Kids');
+  assert.equal((await me.raw(`/Videos/${g.alpha}/${g.alpha}/Subtitles/${first}/0/Stream.vtt`)).status, 401);
+  assert.equal(nf.app.core.jellyfin.sessions.list().length, 0, 'subtitles take no slot');
+});
