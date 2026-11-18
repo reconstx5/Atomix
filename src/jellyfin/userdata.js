@@ -1,10 +1,10 @@
-// What a Jellyfin app tells Atomix about the viewer: playing reports (this file's Sessions/Playing* part; Task 7 adds
-// played and favourite writes). Positions arrive in ticks (1 s = 10,000,000) and are saved as the profile's Atomix
+// What a Jellyfin app tells Atomix about the viewer: playing reports (Sessions/Playing*) and the played and
+// favourite writes (through the web's own library.setWatched and ratings.set). Positions arrive in ticks (1 s = 10,000,000) and are saved as the profile's Atomix
 // progress through recordProgress, the web's own path (play history, scrobblers, "watched" near the end). A report
 // keeps the device's stream slot alive; Stopped ends it. The title is checked with the viewer first: a hidden title is
 // 404 and nothing is saved.
 import { HttpError } from './index.js';
-import { ensureVisible, ownUser } from './browse.js';
+import { ensureVisible, ownUser, dtoOf } from './browse.js';
 import { TICKS } from './shapes.js';
 import { recordProgress } from '../library/progress.js';
 
@@ -50,7 +50,24 @@ const fromQuery = (stage) => (ctx) => {
   return report(ctx, { itemId: ctx.params.itemId, positionTicks: q.positionticks, paused: q.ispaused == null ? null : isTrue(q.ispaused), stage });
 };
 
+/** Played / favourite writes: the viewer must see the title (else 404 and nothing changes); answers its new UserData. */
+const mark = (change) => (ctx) => {
+  ownUser(ctx);
+  const row = ensureVisible(ctx, ctx.params.itemId);
+  dtoOf(ctx, row); // not a film or TV title: 404 before anything is written
+  change(ctx, row);
+  return dtoOf(ctx, row).UserData;
+};
+const played = (on) => mark((ctx, row) => ctx.core.library.setWatched(ctx.viewer.profileId, row, on));
+const hearted = (on) => mark((ctx, row) => ctx.core.ratings.set(ctx.profile.id, row, { favourite: on }));
+
 export function registerUserData(j) {
+  for (const [pl, fav] of [['/Users/{userId}/PlayedItems/{itemId}', '/Users/{userId}/FavoriteItems/{itemId}'], ['/UserPlayedItems/{itemId}', '/UserFavoriteItems/{itemId}']]) {
+    j.route('POST', pl, played(true));
+    j.route('DELETE', pl, played(false));
+    j.route('POST', fav, hearted(true));
+    j.route('DELETE', fav, hearted(false));
+  }
   j.route('POST', '/Sessions/Playing', fromBody('start'));
   j.route('POST', '/Sessions/Playing/Progress', fromBody('progress'));
   j.route('POST', '/Sessions/Playing/Stopped', fromBody('stopped'));

@@ -225,6 +225,13 @@ function oneItem(ctx) {
   return dtos(ctx, rows)[0];
 }
 
+/** One visible film or TV row as a Jellyfin item (404 for anything else); the played and heart writes answer its UserData. */
+export function dtoOf(ctx, row) {
+  const { rows } = select(ctx, { where: ['i.id = ?'], params: [row.id], limit: 1, count: false });
+  if (!rows.length) throw new HttpError(404);
+  return dtos(ctx, rows)[0];
+}
+
 function showOf(ctx) {
   const show = ensureVisible(ctx, ctx.params.seriesId);
   if (show.kind !== 'show') throw new HttpError(404);
