@@ -404,8 +404,7 @@ export function registerLibraryRoutes(r, core) {
     if (row.kind === 'show') {
       const seasons = library.list({ viewer, parentId: row.id, kind: 'season', sort: 'title' });
       out.seasons = library.withProgress(seasons, viewer);
-      const next = library.nextUpFor(viewer, row.id)
-        || db.get(`SELECT * FROM items WHERE show_id = ? AND kind = 'episode' ORDER BY season = 0, season, episode LIMIT 1`, row.id);
+      const next = library.nextUpFor(viewer, row.id) || library.firstEpisodeFor(viewer, row.id);
       if (next) out.nextEpisode = library.withProgress([next], viewer)[0];
       const counts = db.get(`SELECT COUNT(*) AS n FROM items WHERE show_id = ? AND kind = 'episode'`, row.id);
       item.episodeCount = counts.n;

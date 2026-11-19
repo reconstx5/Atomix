@@ -149,3 +149,26 @@ test('api.library has the helpers', async () => {
     await nf.app.stop();
   }
 });
+
+test("Next Up never offers a profile an episode it can't see, and moves on to the next one it can", () => {
+  const { s, ids } = show('Gappy', 0, [[1, 1], [1, 2], [1, 3]]);
+  db.run('UPDATE items SET min_age = 16 WHERE id = ?', ids[1]);
+  watch(1, ids[0], now - DAY);
+  watch(2, ids[0], now - DAY);
+  assert.equal(library.canSee(kid, library.get(ids[1])), false);
+  assert.equal(library.nextUpFor(kid, s)?.id, ids[2], "Mia's next episode skips the one above her age");
+  assert.equal(library.nextUp(kid, 50).find((r) => r.show_id === s)?.id, ids[2], 'and so does her Next Up row');
+  assert.equal(library.nextUpFor(grown, s)?.id, ids[1], "Dallas's next episode is still 1x2");
+  db.run('UPDATE items SET min_age = 16 WHERE id = ?', ids[2]);
+  assert.equal(library.nextUpFor(kid, s), null, 'no episode she can see left: no next episode');
+  assert.ok(!library.nextUp(kid, 50).some((r) => r.show_id === s));
+});
+
+test("a show's first episode is the first one the profile can see (the title page before anything is watched)", () => {
+  const { s, ids } = show('Opener', 0, [[0, 1], [1, 1], [1, 2]]);
+  db.run('UPDATE items SET min_age = 16 WHERE id = ?', ids[1]);
+  assert.equal(library.firstEpisodeFor(grown, s)?.id, ids[1], 'specials come after season 1');
+  assert.equal(library.firstEpisodeFor(kid, s)?.id, ids[2], "Mia's first episode skips the one above her age");
+  db.run('UPDATE items SET min_age = 16 WHERE id IN (?, ?)', ids[0], ids[2]);
+  assert.equal(library.firstEpisodeFor(kid, s), null, 'none she can see: no first episode');
+});

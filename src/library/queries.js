@@ -416,6 +416,11 @@ export class Library {
     if (!show) return null;
     return this.nextEpisodeAfterLast(viewer, show.id);
   }
+  /** A show's first episode this viewer may see (specials last), or null: the title page's episode before any is watched. */
+  firstEpisodeFor(viewer, showId) {
+    const vis = this.visibility(viewer);
+    return this.db.get(`SELECT i.* FROM items i WHERE i.show_id = ? AND i.kind = 'episode' AND ${vis.sql} ORDER BY i.season = 0, i.season, i.episode LIMIT 1`, Number(showId), ...vis.params) || null;
+  }
   nextEpisodeAfterLast(viewer, show_id) {
     const last = this.db.get(
       `SELECT i.season, i.episode FROM progress p JOIN items i ON i.id = p.item_id
@@ -424,19 +429,22 @@ export class Library {
       show_id,
     );
     if (!last) return null;
+    // The next episode this viewer may see (an episode can be rated above the show, or be a Kids-blocked recording).
+    const vis = this.visibility(viewer);
     return (
       this.db.get(
         `SELECT i.*, s.title AS show_title, s.backdrop AS show_backdrop, s.poster AS show_poster, s.logo AS show_logo, s.metadata_at AS show_meta
          FROM items i JOIN items s ON s.id = i.show_id
          LEFT JOIN progress p ON p.item_id = i.id AND p.profile_id = ?
          WHERE i.show_id = ? AND i.kind = 'episode' AND COALESCE(p.watched, 0) = 0 AND COALESCE(p.position, 0) <= 30
-           AND i.season > 0 AND (i.season > ? OR (i.season = ? AND i.episode > ?))
+           AND i.season > 0 AND (i.season > ? OR (i.season = ? AND i.episode > ?)) AND ${vis.sql}
          ORDER BY i.season, i.episode LIMIT 1`,
         viewer.profileId,
         show_id,
         last.season,
         last.season,
         last.episode,
+        ...vis.params,
       ) || null
     );
   }
