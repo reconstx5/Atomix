@@ -441,7 +441,7 @@ function highlightNav() {
 
 export async function refreshLibraries() {
   const [libraries, live] = await Promise.all([api.get('/api/libraries'), api.get('/api/live/status').catch(() => null)]);
-  state.libraries = libraries;
+  state.libraries = Array.isArray(libraries) ? libraries : []; // an empty answer must not break the menu and Settings
   state.live = live;
   renderNav();
 }

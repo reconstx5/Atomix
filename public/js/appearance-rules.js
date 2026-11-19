@@ -50,7 +50,8 @@ export function textScale(prefs = {}) {
  * The menu's libraries: pinned ones in the profile's order, the rest (for "More") in their own order. No pins (or
  * pins that all point at libraries this profile doesn't have) keeps every library in the menu, as before.
  */
-export function orderLibraries(libraries = [], pinned) {
+export function orderLibraries(list, pinned) {
+  const libraries = Array.isArray(list) ? list : []; // no list yet (or an odd answer): an empty menu, not a crash
   const byId = new Map(libraries.map((l) => [l.id, l]));
   const ids = Array.isArray(pinned) ? [...new Set(pinned)].filter((id) => byId.has(id)) : [];
   if (!ids.length) return { pinned: libraries.slice(), rest: [] };

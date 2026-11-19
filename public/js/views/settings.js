@@ -24,7 +24,7 @@ const KIDS_LEVELS = [
 /** Checkboxes for picking libraries; returns { el, value() } where value() is null for "all". */
 function libraryPicker(libraries, selected, { allLabel = 'All libraries' } = {}) {
   const all = h('input', { type: 'checkbox', checked: selected == null });
-  const boxes = libraries.map((l) => ({ id: l.id, box: h('input', { type: 'checkbox', checked: selected == null || selected.includes(l.id), disabled: selected == null }) }));
+  const boxes = (libraries || []).map((l) => ({ id: l.id, box: h('input', { type: 'checkbox', checked: selected == null || selected.includes(l.id), disabled: selected == null }) }));
   all.addEventListener('change', () => {
     for (const b of boxes) {
       b.box.disabled = all.checked;

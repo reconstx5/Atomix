@@ -46,6 +46,9 @@ test('pinned: pins that all point at gone libraries keep every library', () => {
   const r = orderLibraries(libs, [77]);
   assert.deepEqual(r.pinned.map((l) => l.id), [1, 2, 3, 4]);
 });
+test('pinned: no library list yet (null) is an empty menu, not a crash', () => {
+  assert.deepEqual(orderLibraries(null, [1]), { pinned: [], rest: [] });
+});
 test('movePinned: up, down, pin, unpin and the edges', () => {
   assert.deepEqual(movePinned([1, 2, 3], 2, -1), [2, 1, 3]);
   assert.deepEqual(movePinned([1, 2, 3], 2, 1), [1, 3, 2]);
