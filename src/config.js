@@ -154,6 +154,8 @@ export function loadConfig({ env = process.env, root = ROOT, findTool = (name) =
   cfg.lastfmAuthBase = env.ATOMIX_LASTFM_AUTH_BASE || 'https://www.last.fm/api/auth/';
   // Casting: an address override for TVs, and (dev/test only) devices to list as if found: "chromecast:host:port,dlna:<url>".
   cfg.castBaseUrl = env.ATOMIX_CAST_BASE_URL || null;
+  // The Jellyfin API's trace (ATOMIX_JELLYFIN_TRACE=1): one line per /jellyfin request, tokens shown as ***.
+  cfg.jellyfinTrace = /^(1|true|yes|on)$/i.test(String(env.ATOMIX_JELLYFIN_TRACE || ''));
   // v0.27: the secure address's port (otherwise Settings → Server, 8443); 0 picks a free one (tests).
   cfg.httpsPort = isSet(env.ATOMIX_HTTPS_PORT) ? Number(env.ATOMIX_HTTPS_PORT) : null;
   // Extra names and addresses for Atomix's own certificate (Docker: the host's name and address), comma-separated.

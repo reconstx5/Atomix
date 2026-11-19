@@ -81,7 +81,7 @@ export function registerAdminRoutes(r, core) {
           tracks: counts.track || 0,
           users: db.get('SELECT COUNT(*) AS n FROM users').n,
         },
-        sessions: [...playback.list(), ...(core.live?.drm?.list() || []), ...(core.live?.streams?.viewerList?.() || [])],
+        sessions: [...playback.list(), ...(core.live?.drm?.list() || []), ...(core.live?.streams?.viewerList?.() || []), ...(core.jellyfin?.sessions?.list() || [])],
         downloadsPreparing: core.downloads?.preparingCount() ?? 0, // v0.21
         // Live TV tuners in use (v0.19): the channel, who's watching it, and (Plan B) what it's recording.
         tuners: (core.live?.tuners?.list() || []).filter((t) => t.holders.length).map((t) => ({
@@ -114,6 +114,7 @@ export function registerAdminRoutes(r, core) {
     (ctx) => {
       if (core.live?.drm?.sessions.has(ctx.params.sid)) core.live.drm.stop(ctx.params.sid, 'admin');
       else if (core.live?.streams?.viewers.has(ctx.params.sid)) core.live.streams.viewerStop(ctx.params.sid, 'admin', 'An admin stopped this stream.');
+      else if (core.jellyfin?.sessions?.stopById(ctx.params.sid)) { /* an Infuse or other Jellyfin app's stream */ }
       else playback.stop(ctx.params.sid, 'admin');
       return { ok: true };
     },

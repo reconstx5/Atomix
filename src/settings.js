@@ -4,6 +4,7 @@ import { parseJson } from './db.js';
 
 export const SETTING_DEFAULTS = {
   serverName: 'Atomix',
+  jellyfinServerId: '', // the Jellyfin API's server id (made on first use)
   defaultTheme: 'orbit',
   tmdbApiKey: '',
   metadataLanguage: 'en-US',

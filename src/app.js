@@ -3,6 +3,7 @@ import { Thumbs, referencedPictures } from './library/thumbs.js';
 import { pageServer } from './http/page.js';
 import { Problems, startDiskWatch } from './problems.js';
 import http from 'node:http';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadConfig, ROOT } from './config.js';
@@ -40,6 +41,7 @@ import { Plays } from './library/plays.js';
 import { UserRatings } from './library/userratings.js';
 import { AppPasswords } from './subsonic/apppasswords.js';
 import { createSubsonic } from './subsonic/methods.js';
+import { createJellyfin } from './jellyfin/routes.js';
 import { Scrobblers } from './scrobble/index.js';
 import { registerScrobbleRoutes } from './api/scrobble.js';
 import { registerTogetherRoutes } from './api/together.js';
@@ -232,6 +234,9 @@ export async function createApp(overrides = {}) {
   core.live.routes = registerLiveRoutes(router, core);
   registerRecordingRoutes(router, core);
   core.subsonic = createSubsonic(core);
+  // Jellyfin apps (Infuse): /jellyfin. The server's Jellyfin Id is made once and kept (Infuse remembers it).
+  if (!settings.get('jellyfinServerId')) settings.set({ jellyfinServerId: crypto.randomBytes(16).toString('hex') });
+  core.jellyfin = createJellyfin(core);
   core.scrobblers = new Scrobblers({ db, settings, config: { ...config, version } });
   core.plays.onStarted((e) => e.item.kind === 'track' && core.scrobblers.nowPlaying(e).catch(() => {}));
   core.plays.onCounted((e) => e.item.kind === 'track' && core.scrobblers.listen(e).catch(() => {}));
@@ -369,7 +374,8 @@ export async function createApp(overrides = {}) {
     }
     try {
       if (url.pathname.startsWith('/tls/') && core.https.serveCa(req, res, url)) return; // the home CA for phones (v0.27)
-      if (url.pathname.startsWith('/rest/')) await core.subsonic.handle(req, res, url);
+      if (/^\/jellyfin(\/|$)/i.test(url.pathname)) await core.jellyfin.handle(req, res, url);
+      else if (url.pathname.startsWith('/rest/')) await core.subsonic.handle(req, res, url);
       else if (url.pathname.startsWith('/api/') || url.pathname === '/sw.js') await handleApi(req, res, url);
       else if (req.method === 'GET' || req.method === 'HEAD') await handleStatic(req, res, url);
       else res.writeHead(405).end();
@@ -446,6 +452,7 @@ export async function createApp(overrides = {}) {
     await Promise.race([core.live.refresher.idle(), new Promise((r) => setTimeout(r, 3000))]);
     await core.cast.manager.stopAll(); // TVs are told to stop and progress is saved (at most 3 s)
     for (const s of [...core.playback.sessions.keys()]) core.playback.stop(s, 'shutdown');
+    core.jellyfin?.sessions?.close(); // Jellyfin apps' stream slots
     // Connected servers hear about those stops before the database closes (at most 3 s).
     if (core.remote?.reporter) await Promise.race([core.remote.reporter.idle(), new Promise((r) => setTimeout(r, 3000))]);
     core.closeTogetherStreams?.();

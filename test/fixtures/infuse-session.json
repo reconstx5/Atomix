@@ -1,0 +1,253 @@
+{
+ "source": "jellyfin-docs",
+ "note": "The calls a Jellyfin app makes from adding a server to signing out, as Jellyfin's API documentation describes them. Ids are placeholders: {film} {show} {season} {episode} {library:films} {library:tv} {user}. Replace with a real capture (source infuse-<version>-<date>) when there is one.",
+ "calls": [
+  {
+   "method": "GET",
+   "path": "/System/Info/Public",
+   "query": {}
+  },
+  {
+   "method": "GET",
+   "path": "/Branding/Configuration",
+   "query": {}
+  },
+  {
+   "method": "GET",
+   "path": "/QuickConnect/Enabled",
+   "query": {}
+  },
+  {
+   "method": "POST",
+   "path": "/Users/AuthenticateByName",
+   "query": {},
+   "signIn": true
+  },
+  {
+   "method": "POST",
+   "path": "/Sessions/Capabilities/Full",
+   "query": {},
+   "body": {
+    "PlayableMediaTypes": [
+     "Video"
+    ],
+    "SupportsMediaControl": false
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/System/Info",
+   "query": {}
+  },
+  {
+   "method": "GET",
+   "path": "/Users/{user}",
+   "query": {}
+  },
+  {
+   "method": "GET",
+   "path": "/Users/{user}/Configuration",
+   "query": {}
+  },
+  {
+   "method": "GET",
+   "path": "/Users/{user}/Views",
+   "query": {}
+  },
+  {
+   "method": "GET",
+   "path": "/Localization/ParentalRatings",
+   "query": {}
+  },
+  {
+   "method": "GET",
+   "path": "/Genres",
+   "query": {
+    "UserId": "{user}",
+    "ParentId": "{library:films}"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/Users/{user}/Items",
+   "query": {
+    "ParentId": "{library:films}",
+    "Recursive": "true",
+    "Fields": "Overview,Genres,MediaSources,ProviderIds,People",
+    "IncludeItemTypes": "Movie",
+    "StartIndex": "0",
+    "Limit": "100"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/Users/{user}/Items",
+   "query": {
+    "ParentId": "{library:tv}",
+    "Recursive": "true",
+    "Fields": "Overview,Genres,ProviderIds",
+    "IncludeItemTypes": "Series",
+    "StartIndex": "0",
+    "Limit": "100"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/Users/{user}/Items/Resume",
+   "query": {
+    "Limit": "12",
+    "MediaTypes": "Video",
+    "Fields": "Overview"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/Shows/NextUp",
+   "query": {
+    "UserId": "{user}",
+    "Limit": "12"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/Users/{user}/Items/Latest",
+   "query": {
+    "ParentId": "{library:films}",
+    "Limit": "16"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/Users/{user}/Items/{film}",
+   "query": {}
+  },
+  {
+   "method": "GET",
+   "path": "/Items/{film}/Similar",
+   "query": {
+    "UserId": "{user}",
+    "Limit": "12"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/Items/{film}/SpecialFeatures",
+   "query": {}
+  },
+  {
+   "method": "GET",
+   "path": "/Shows/{show}/Seasons",
+   "query": {
+    "UserId": "{user}"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/Shows/{show}/Episodes",
+   "query": {
+    "UserId": "{user}",
+    "SeasonId": "{season}",
+    "Fields": "Overview,MediaSources"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/Users/{user}/Items/{episode}",
+   "query": {}
+  },
+  {
+   "method": "GET",
+   "path": "/Users/{user}/Items/{episode}/Intros",
+   "query": {}
+  },
+  {
+   "method": "GET",
+   "path": "/DisplayPreferences/{library:films}",
+   "query": {
+    "userId": "{user}",
+    "client": "emby"
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/DisplayPreferences/{library:films}",
+   "query": {
+    "userId": "{user}",
+    "client": "emby"
+   },
+   "body": {
+    "SortBy": "SortName",
+    "SortOrder": "Ascending",
+    "CustomPrefs": {}
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/Items/{episode}/PlaybackInfo",
+   "query": {
+    "UserId": "{user}",
+    "StartTimeTicks": "0",
+    "IsPlayback": "true",
+    "AutoOpenLiveStream": "true",
+    "MaxStreamingBitrate": "120000000"
+   },
+   "body": {
+    "DeviceProfile": {}
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/Videos/{episode}/stream",
+   "query": {
+    "Static": "true",
+    "MediaSourceId": "{episode}"
+   },
+   "headers": {
+    "Range": "bytes=0-1023"
+   },
+   "binary": true,
+   "expect": 206
+  },
+  {
+   "method": "POST",
+   "path": "/Sessions/Playing",
+   "query": {},
+   "body": {
+    "ItemId": "{episode}",
+    "MediaSourceId": "{episode}",
+    "PositionTicks": 0,
+    "CanSeek": true,
+    "IsPaused": false
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/Sessions/Playing/Progress",
+   "query": {},
+   "body": {
+    "ItemId": "{episode}",
+    "PositionTicks": 10000000,
+    "IsPaused": false
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/Sessions/Playing/Stopped",
+   "query": {},
+   "body": {
+    "ItemId": "{episode}",
+    "PositionTicks": 15000000
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/Users/{user}/PlayedItems/{episode}",
+   "query": {}
+  },
+  {
+   "method": "POST",
+   "path": "/Sessions/Logout",
+   "query": {}
+  }
+ ]
+}

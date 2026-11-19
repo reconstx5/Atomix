@@ -47,6 +47,7 @@ test('an app password is shown once and listed', { skip }, async () => {
   assert.match(made.data.secret, /^[A-Za-z0-9]{24}$/);
   assert.equal(made.data.username, 'dallas');
   assert.equal(made.data.name, 'Phone');
+  assert.equal(made.data.jellyfin, `${made.data.server}/jellyfin`);
   assert.match(made.data.server, /^http:\/\/127\.0\.0\.1:\d+$/);
   secret = made.data.secret;
   const list = (await admin.get('/api/me/app-passwords')).data;

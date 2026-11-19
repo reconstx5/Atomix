@@ -104,6 +104,10 @@ changed constraint are rebuilt the way SQLite recommends (create the new table, 
 21. The activity log: `activity` (time, type, user, profile, sentence, address), indexed by time and by type.
 22. Player extras and editing: `play_settings` (per profile and title: `audio_delay`, `subtitle_delay`; a row with
     both at zero is deleted), `items.locked_fields` (JSON list of hand-edited fields) and `items.studio`.
+    (Migrations 23-29 are described in the sections below; 30-33 (recap markers, app links, clips, colours) in CLAUDE.md and the card motion note.)
+
+34. The Jellyfin API: `jellyfin_tokens` (per device: sha256 of the token, the app password it belongs to, device and
+    client names, created and last used), deleted with its app password.
 
 ### Viewers
 
@@ -515,6 +519,38 @@ library access and Kids rules apply to every method. Ids carry their kind (`ar-`
 song paths are made up from artist/album/file name. `stream` sends the original with ranges when it fits, else
 converts to MP3/Opus in a slot of the ffmpeg pool; a connected server's songs are passed through. Stars, ratings,
 scrobbles and playlists are Atomix's own data.
+
+## Jellyfin apps (`src/jellyfin/`, v0.30)
+
+`/jellyfin/…` is handled before `/api/` by `Jellyfin.handle`, like the Subsonic handler: its own small router, answers in
+Jellyfin's PascalCase JSON with Jellyfin's status codes and `{}` as every error body. Paths match without regard to
+capitals and with or without an `/emby` prefix; a route with fewer `{params}` wins.
+
+- **Signing in.** An app (Infuse) signs in at `POST /Users/AuthenticateByName` with the username and an *app password*
+  (the same ones Subsonic apps use; Settings → Profile → Apps). The answer carries a 64-hex token, kept only as its
+  sha256 in `jellyfin_tokens` (migration 34, one row per device, tied to the app password; revoking the password ends its
+  tokens). The token comes in the `Authorization: MediaBrowser Token="…"` header, `X-Emby-Token`, or `api_key`/`ApiKey`
+  in the query (Infuse puts it in image and stream addresses). Failed sign-ins share the web's lockout. The token's app
+  password names the profile, and that profile's viewer decides what is visible: a hidden title is 404 everywhere (list,
+  item, image, stream, download, PlaybackInfo, played and favourite writes), and Kids rules apply.
+- **Ids.** Jellyfin ids are 32-hex GUIDs: `a70a1f00` + an 8-hex kind code (item, library, user, person, server) + 16 hex
+  (`ids.js`). A person's is the first 16 hex of sha1(name). Dates are in ticks (1 s = 10,000,000).
+- **Routes.** `system.js` (public info, ping, sign-in, Users/Me, view stubs, Genres), `browse.js` (views, Items, Resume,
+  Latest, NextUp, Seasons, Episodes), `routes.js` (registers every route on the one handler), `media.js` (images, PlaybackInfo, video stream with ranges,
+  subtitles, Download), `userdata.js` (played, favourite, Sessions/Playing/Progress/Stopped/Ping and PlayingItems),
+  `shapes.js` (the item, media source and user JSON).
+- **The one-slot rule.** A device (token) holds one stream slot in `JellyfinSessions` (`sessions.js`), shared with web
+  playback, Live TV and casting toward the account's cap (`MAX_SESSIONS_PER_USER`, 4). Every range read of that device
+  shares the slot and reading another title moves it, so pre-reading or jumping to the next episode never gets 429
+  while the account has room. A slot ends at Sessions/Playing/Stopped, Sessions/Logout, or 120 s of silence.
+- **Connected servers.** A connected server's title plays through Atomix; no field carries the far address, token or a
+  real path.
+- **Downloads.** `Items/{id}/Download` sends the original file; a Kids profile gets 403 (after the visibility check,
+  so a hidden title is still 404) and a connected server's title is 400, so `CanDownload` is false for both.
+- **Trace.** `ATOMIX_JELLYFIN_TRACE=1` logs each request's path and query with token values as `***`. Tokens, app
+  passwords, file paths and connected-server addresses never reach a response body or a log line (`redactUrl`,
+  `redactError`).
+- Checks: `test/jellyfin-*.test.js` and `devtools/jellyfin-smoke.mjs` (refuses port 8787).
 
 ## Scrobbling (`src/scrobble/`, v0.20.0)
 

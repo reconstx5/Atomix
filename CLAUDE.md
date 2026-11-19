@@ -43,7 +43,8 @@ Atomix is a self-hosted media hub in the spirit of Kodi: films, TV, music and Li
   say "uncommitted" date from before that commit. Dallas decides when to commit; suggest committing before large new work.
 - Work moved to Claude Code on this PC on 17 Nov. The handoff (what was done, decisions, deferred minors, what's next)
   is `docs/HANDOFF-2026-11.md`. The design research is `Claude outputs/Media app UI design 2026.md`.
-- Visual refresh **Plan C is done and merged into `main`** (17 Nov, a fast-forward from c4cdb6d; branch deleted). The title page on Preact is merged into `main` (18 Nov, a fast-forward; branch deleted) and pushed to GitHub; next the Jellyfin API.
+- The **Jellyfin API is built on branch `jellyfin-api`** (18 Nov, not merged, not pushed; see its section below); it waits on a real Infuse.
+- Visual refresh **Plan C is done and merged into `main`** (17 Nov, a fast-forward from c4cdb6d; branch deleted). The title page on Preact is merged into `main` (18 Nov, a fast-forward; branch deleted) and pushed to GitHub.
   Plans A, B and C: `docs/superpowers/plans/`.
 - Still to verify on real hardware: iPhone FairPlay and films on iPhone, Chromecast with encrypted channels, PlayReady
   on Edge/Xbox, TV timings for motion, Safari view transitions.
@@ -100,6 +101,20 @@ Atomix is a self-hosted media hub in the spirit of Kodi: films, TV, music and Li
 - The `[media]` console lines (`src/app.js`) now say `media link: yes/no`; the player shows "Details: …" under
   an error. Remove the diagnostics once a real iPhone plays.
 
+## Jellyfin API (v0.30 work, branch `jellyfin-api`, not merged)
+Spec/plan: `docs/superpowers/specs|plans/2026-11-18-atomix-jellyfin-api*`. Infuse (Streamyfin/Swiftfin/Finamp not yet checked) signs in at `/jellyfin` with an app password.
+- Files: `src/jellyfin/{index,routes,tokens,ids,shapes,system,browse,media,userdata,sessions}.js`, migration 34 (`jellyfin_tokens`),
+  `src/api/account.js` (the app-password reply has `jellyfin`), `public/js/views/settings-music.js` (Settings → Profile → "Apps").
+- Rules that matter: tokens are stored as sha256 and arrive in headers and `api_key`/`ApiKey` queries, never in a log line
+  or body (trace switch `ATOMIX_JELLYFIN_TRACE=1` masks them); every read goes through the profile's viewer (hidden = 404,
+  Kids rules kept); paths match without regard to capitals and with `/emby`; one stream slot per device token
+  (switching titles keeps it, shared with the account's cap of 4); a connected server's titles play through Atomix and
+  leak nothing; Downloads are 403 for Kids, 400 for connected-server titles.
+- Checks: `node --test test/jellyfin-*.test.js test/subsonic-auth.test.js`; `devtools/jellyfin-smoke.mjs` (dev server
+  on BASE, never 8787). Run server tests with ffmpeg on PATH or they skip.
+- Known gaps (minors): hearting an episode or season is 400 (web limit); remote rows lack stream indexes; a slot can be
+  freed mid-stream on one very long read; Kids counts (ChildCount) include hidden episodes. Waiting on a real Infuse.
+
 ## Preact screens
 - Done: Live TV, libraries, search, genre/person (v0.26); Home and Lists (`views/home.js`, `views/lists.js`, v0.28); the title page
   (`views/item.js` + `item-show.js` + `item-music.js`, pieces in `ui/detail.js`, rules in `item-rules.js`; merged 18 Nov).
@@ -126,7 +141,7 @@ suites and mock servers (mock IPTV, mock Chromecast) from earlier rounds were lo
 - Even volume: `src/library/loudness.js` (EBU R128, target -16 LUFS), "Volume check" job, Web Audio gain in `public/js/music.js`
   (not on iPhone/iPad). Gapless playback not done.
 - Your own channels: `plugins/my-channels` (schedule rules -> 24/7 live channels, ffmpeg concat -> MPEG-TS, loopback-only route).
-- Next: a Jellyfin-compatible API for Infuse, Streamyfin/Swiftfin and Finamp (needs real-device testing).
+- The Jellyfin-compatible API is built for Infuse only this round (Swiftfin/Streamyfin/Finamp not yet; see its section; needs real-device testing).
 
 ## Multi-DRM (v0.28, uncommitted)
 - Spec/plan: `docs/superpowers/specs|plans/2026-11-11-atomix-multi-drm*`. A channel can offer several key systems; the
