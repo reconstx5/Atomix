@@ -1,23 +1,19 @@
 // Live TV: the guide. Channels down the side, time across (2½ hours in view), arrows move programme by programme,
 // Enter opens the programme's details. On phones: one channel's day as a list.
-import { h, clear, icon } from '../dom.js';
-import { button, openDialog, emptyState, toast, announce } from '../components.js';
+// v0.30: a Preact screen; the keyboard and fetch decisions are in guide-rules.js. The programme sheet and the Record
+// series dialog stay dialogs with DOM bodies (openProgramme is also used by Live TV and search).
+import { html, useState, useRef, useLayoutEffect } from '../ui.js';
+import { Button, EmptyState, Icon } from '../ui/basics.js';
+import { ChannelLogo, LockBadge, RecDot } from '../ui/live.js';
+import { h } from '../dom.js';
+import { openDialog, toast, announce } from '../components.js';
 import { setTitle, canAdmin } from '../app.js';
 import { channels as fetchChannels, groups as fetchGroups, guide as fetchGuide, programme as fetchProgramme, programmeTimes, programmeState, clockTime, liveStatus, playChannel, recordProgramme, cancelRecording, stopRecording, stopSeries, recordingWords } from '../live.js';
-import { channelLogo, lockBadge, recDot } from '../live-bits.js';
+import { recDot } from '../live-bits.js';
 import { listable, deviceSoon } from '../dash/playable.js';
+import { HOUR, DAY, SPAN, STEP, PAGE, windowStart, dayStart, dayOptions, maxCatchupDays, rulerTicks, nowLine, pct, cellsInWindow, tabStop, cellAt, arrowMove, guideRequests, groupOptions, channelsForGroup, initialRows, encWords, latest } from '../guide-rules.js';
 
-const MIN = 60_000;
-const HOUR = 60 * MIN;
-const DAY = 24 * HOUR;
-const SPAN = 2.5 * HOUR; // what's in view
-const STEP = 2 * HOUR; // Earlier / Later
-const PAGE = 50; // rows drawn at a time
-// Spoken after an encrypted channel's name (v0.28: and one this device can't play, listed with the switch on).
-const enc = (c) => (c.drm ? ', encrypted' : '') + (c.unplayable ? ", can't play here" : '');
 const STATE_TEXT = { now: 'on now', aired: 'aired', upcoming: 'upcoming', catchup: 'catch-up available' };
-
-const floorHalf = (t) => Math.floor(t / (30 * MIN)) * 30 * MIN;
 const toWords = (p) => programmeTimes(p).replace(' – ', ' to ');
 
 /** The details sheet for a programme, with the buttons that apply now. Also used by search's "On TV". */
@@ -107,306 +103,310 @@ async function seriesChoices(p) {
   return { series: true, anyChannel: where.querySelector('input:checked')?.value === 'any', newOnly: newOnly.checked, keep: Number(keep.value) };
 }
 
-export async function render(el, params, query = {}) {
-  setTitle('Guide');
-  el.classList.add('guide-view');
-  const status = await liveStatus({ fresh: true });
-  if (!status.enabled) {
-    el.append(emptyState({ title: "Live TV isn't set up yet", text: canAdmin() ? 'Add a playlist in Settings → Plugins → IPTV Simple' : '', icon: 'live' }));
-    return;
+// ---- The page (v0.30: a Preact screen; the keyboard and fetch decisions are in guide-rules.js) ----
+
+/** A channel's programmes for one day (the phone list), in four 6-hour requests, without repeats, by start. */
+async function dayOf(c, start) {
+  const progs = [];
+  for (let t = start; t < start + DAY; t += 6 * HOUR) {
+    const g = await fetchGuide(t, t + 6 * HOUR, [c.id]);
+    progs.push(...(g.programmes[c.id] || []));
   }
+  const seen = new Set();
+  return progs.filter((p) => !seen.has(p.id) && seen.add(p.id)).sort((a, b) => a.start - b.start);
+}
+
+/** Fetch what the window at `from` still needs for `ids` into `cache`; resolves to the new record of what was fetched. */
+async function ensure(cache, fetched, ids, from) {
+  const { requests, record } = guideRequests(fetched, ids, from);
+  for (const r of requests) {
+    const g = await fetchGuide(r.from, r.to, r.ids);
+    for (const [cid, progs] of Object.entries(g.programmes)) {
+      if (!cache.has(Number(cid))) cache.set(Number(cid), new Map());
+      for (const p of progs) cache.get(Number(cid)).set(p.id, p);
+    }
+  }
+  return record;
+}
+
+export async function load(params, query = {}) {
+  setTitle('Guide');
+  const status = await liveStatus({ fresh: true });
+  if (!status.enabled) return { enabled: false };
   // v0.28: channels this device can't play are left out (unless the Live TV switch is on).
   const listed = await fetchChannels();
   const all = listable(listed, { device: await deviceSoon(listed) });
-  if (window.matchMedia('(max-width: 720px)').matches) return renderList(el, all, query);
-  return renderGrid(el, all, query);
+  const want = query.channel ? Number(query.channel) : null;
+  if (window.matchMedia('(max-width: 720px)').matches) {
+    const c = all.find((x) => x.id === want) || all[0] || null;
+    const day = dayStart(Date.now());
+    return { enabled: true, layout: 'phone', all, channel: c?.id ?? null, day, programmes: c ? await dayOf(c, day) : [] };
+  }
+  const names = await fetchGroups();
+  const from = windowStart(Date.now());
+  const drawn = initialRows(all, want);
+  const cache = new Map(); // channel id -> Map(programme id -> programme), for what has been fetched
+  const fetched = await ensure(cache, [], all.slice(0, drawn).map((c) => c.id), from);
+  return { enabled: true, layout: 'grid', all, names, cache, fetched, from, drawn, want };
+}
+
+export function Screen({ data, view }) {
+  useLayoutEffect(() => {
+    view?.classList.add('guide-view');
+  }, []);
+  if (!data.enabled) return html`<${EmptyState} title="Live TV isn't set up yet" text=${canAdmin() ? 'Add a playlist in Settings → Plugins → IPTV Simple' : ''} icon="live" />`;
+  return data.layout === 'phone' ? html`<${GuideList} data=${data} />` : html`<${GuideGrid} data=${data} />`;
 }
 
 // ---- TV and desktop: the grid ----
-async function renderGrid(el, all, query) {
-  const now = () => Date.now();
-  let from = floorHalf(now()) - 30 * MIN;
-  let group = 'All';
-  let shown = all;
-  let drawn = 0;
-  const cache = new Map(); // channel id -> Map(programme id -> programme), for what has been fetched
-  const fetched = []; // [from, to, idsKey] windows already asked for
-  const maxDays = Math.max(1, ...all.map((c) => c.catchupDays || 0));
 
-  const grid = h('div', { class: 'guide-grid', role: 'grid', 'aria-label': 'TV guide' });
-  const ruler = h('div', { class: 'guide-ruler', 'aria-hidden': 'true' });
-  const nowLine = h('div', { class: 'guide-now', 'aria-hidden': 'true' });
-  const day = h('select', { class: 'guide-day', 'aria-label': 'Day' });
-  const groupSel = h('select', { class: 'guide-group', 'aria-label': 'Channel group' });
-  const sentinel = h('div', { class: 'guide-more', 'aria-hidden': 'true' });
+const cellKey = (cell) => (cell.p ? cell.p.id : 'empty');
+/** One row as drawn: its cells with their state at `now` (states change only when the rows are drawn again). */
+function rowModel(c, cache, from, now) {
+  const cells = cellsInWindow([...(cache.get(c.id)?.values() || [])], from).map((x) => ({ ...x, start: x.p.start, end: x.p.end, state: programmeState(x.p, now, c) }));
+  return { c, channel: c.id, cells: cells.length ? cells : [{ p: null, empty: true, start: from, end: from, state: null }] };
+}
+/** The one tab stop: the cell covering `focus.at` in its channel's row (when drawn), else the usual one. */
+function stopFor(rows, focus) {
+  const row = focus && rows.find((r) => String(r.channel) === String(focus.channel));
+  if (row) {
+    const i = cellAt(row.cells, focus.at ?? Date.now());
+    if (i >= 0) return { stop: { channel: row.channel, key: cellKey(row.cells[i]) }, found: true };
+  }
+  const t = tabStop(rows);
+  return { stop: t && { channel: t.channel, key: cellKey(rows.find((r) => r.channel === t.channel).cells[t.index]) }, found: false };
+}
+// The cells' and ruler's style is written as an attribute, as before (a style property is read back respaced).
+const styled = (s) => (el) => el?.setAttribute('style', s);
+// Preact leaves out an option's value when it is the same as its text; the group options keep it, as before.
+const valueAttr = (v) => (el) => el?.setAttribute('value', v);
 
-  const names = await fetchGroups();
-  groupSel.append(...['All', ...(all.some((c) => c.favourite) ? ['Favourites'] : []), ...names].map((g) => h('option', { value: g }, g)));
-  groupSel.addEventListener('change', () => {
-    group = groupSel.value;
-    shown = group === 'All' ? all : group === 'Favourites' ? all.filter((c) => c.favourite) : all.filter((c) => c.groups.includes(group));
-    drawRows(true);
+function GuideGrid({ data }) {
+  const { all, names } = data;
+  const cache = useRef(data.cache);
+  const fetched = useRef(data.fetched);
+  const [g, setG] = useState(() => {
+    const shown = all.slice(0, data.drawn);
+    const rows = shown.map((c) => rowModel(c, data.cache, data.from, Date.now()));
+    return { from: data.from, group: 'All', drawn: data.drawn, rows, stop: stopFor(rows, data.want ? { channel: data.want, at: Date.now() } : null).stop, drawsN: 0, tick: 0 };
   });
-  const dayStart = (t) => new Date(new Date(t).setHours(0, 0, 0, 0)).getTime();
-  for (let d = -maxDays; d <= 7; d++) {
-    const t = dayStart(now()) + d * DAY;
-    day.append(h('option', { value: String(t) }, d === 0 ? 'Today' : d === -1 ? 'Yesterday' : d === 1 ? 'Tomorrow' : new Date(t).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' })));
+  const cur = useRef(g);
+  cur.current = g;
+  const fromRef = useRef(data.from); // the window last asked for (Earlier/Later count from it while it loads)
+  const gen = useRef(0); // bumped by every draw: an answer for an older one (or "more rows" for it) is dropped
+  const moving = useRef(false); // a window move is loading: arrows meanwhile are dropped (holding Left mustn't stack moves)
+  const more = useRef(false); // "more rows" is loading
+  const column = useRef(null); // the time Up/Down keep (set by the first Up/Down after a Left/Right, so Up undoes Down)
+  const focusNext = useRef(false); // focus the tab stop after the next render
+  const grid = useRef(null);
+  const sentinel = useRef(null);
+  const observer = useRef(null);
+  const alive = useRef(true);
+
+  /** Draw the rows again (a window move, a group, a changed recording); `focus` { channel, at } moves focus there. */
+  async function draw({ from = fromRef.current, group = cur.current.group, reset = false } = {}, focus = null) {
+    const mine = ++gen.current;
+    const shown = channelsForGroup(all, group);
+    const drawn = reset ? Math.min(PAGE, shown.length) : Math.max(cur.current.drawn, Math.min(PAGE, shown.length));
+    fetched.current = await ensure(cache.current, fetched.current, shown.slice(0, drawn).map((c) => c.id), from);
+    if (mine !== gen.current || !alive.current) return;
+    const now = Date.now();
+    const rows = shown.slice(0, drawn).map((c) => rowModel(c, cache.current, from, now));
+    const { stop, found } = stopFor(rows, focus);
+    focusNext.current = found;
+    setG((s) => ({ ...s, from, group, drawn, rows, stop, drawsN: s.drawsN + 1 }));
   }
-  day.value = String(dayStart(now()));
-  day.addEventListener('change', () => {
-    const t = Number(day.value);
-    const clockPart = from - dayStart(from);
-    moveTo(t + clockPart);
-  });
-
-  el.append(
-    h('header', { class: 'page-head' }, h('h1', {}, 'Guide'), h('div', { class: 'actions' }, button('Channels', { icon: 'live', variant: 'ghost', href: '#/live' }))),
-    h(
-      'div',
-      { class: 'guide-tools' },
-      button('Earlier', { icon: 'back', variant: 'ghost', onClick: () => moveTo(from - STEP) }),
-      button('Now', { icon: 'live', variant: 'ghost', onClick: () => moveTo(floorHalf(now()) - 30 * MIN) }),
-      button('Later', { icon: 'next', variant: 'ghost', onClick: () => moveTo(from + STEP) }),
-      h('label', { class: 'guide-pick' }, 'Day ', day),
-      h('label', { class: 'guide-pick' }, 'Group ', groupSel),
-    ),
-    h('div', { class: 'guide-body' }, ruler, grid, nowLine, sentinel),
-  );
-
-  const pct = (t) => `${((t - from) / SPAN) * 100}%`;
-
-  function drawRuler() {
-    clear(ruler);
-    for (let t = from; t < from + SPAN; t += 30 * MIN) ruler.append(h('span', { style: `left:${pct(t)}` }, clockTime(t)));
-    const n = now();
-    nowLine.hidden = !(n >= from && n < from + SPAN);
-    nowLine.style.setProperty('--x', String((n - from) / SPAN));
-    grid.dataset.from = String(from);
-    grid.dataset.to = String(from + SPAN);
-  }
-
-  async function ensure(ids) {
-    const lo = from - HOUR;
-    const hi = from + SPAN + HOUR;
-    const need = ids.filter((id) => !fetched.some(([a, b, set]) => a <= lo && b >= hi && set.has(id)));
-    if (!need.length) return;
-    // The guide route takes 6 hours and 200 channels at a time.
-    for (let i = 0; i < need.length; i += 200) {
-      const part = need.slice(i, i + 200);
-      for (let t = lo; t < hi; t += 6 * HOUR) {
-        const g = await fetchGuide(t, Math.min(hi, t + 6 * HOUR), part);
-        for (const [cid, progs] of Object.entries(g.programmes)) {
-          if (!cache.has(Number(cid))) cache.set(Number(cid), new Map());
-          for (const p of progs) cache.get(Number(cid)).set(p.id, p);
-        }
-      }
-      fetched.push([lo, hi, new Set(part)]);
-    }
-  }
-
-  function rowFor(c) {
-    const n = now();
-    const progs = [...(cache.get(c.id)?.values() || [])].filter((p) => p.end > from && p.start < from + SPAN).sort((a, b) => a.start - b.start);
-    const cells = progs.map((p) => {
-      const st = programmeState(p, n, c);
-      const left = Math.max(p.start, from);
-      const right = Math.min(p.end, from + SPAN);
-      return h(
-        'div',
-        { class: 'guide-cell', role: 'gridcell', style: `left:${pct(left)};width:calc(${((right - left) / SPAN) * 100}% - 4px)` },
-        h(
-          'button',
-          {
-            type: 'button',
-            class: `guide-prog is-${st}`,
-            'aria-label': `${c.name}${enc(c)}, ${toWords(p)}, ${p.title}, ${STATE_TEXT[st]}${recordingWords(p)}`,
-            dataset: { id: p.id, start: p.start, end: p.end },
-            tabindex: -1,
-            onClick: async () => {
-              if ((await openProgramme(p.id)) !== 'recordings-changed') return;
-              // The red dots changed (a series may span channels): the guide is asked again, focus stays here.
-              cache.clear();
-              fetched.length = 0;
-              drawRows(false, { focusChannel: c.id, focusAt: p.start });
-            },
-          },
-          st === 'catchup' ? h('span', { class: 'guide-badge', title: 'Catch-up available' }, icon('rewind', { size: 14 })) : null,
-          recDot(p),
-          h('span', { class: 'guide-title' }, p.title),
-          h('span', { class: 'guide-time' }, programmeTimes(p)),
-        ),
-      );
-    });
-    if (!cells.length) {
-      cells.push(h('div', { class: 'guide-cell guide-cell-empty', role: 'gridcell', style: 'left:0;width:calc(100% - 4px)' }, h('button', { type: 'button', class: 'guide-empty', tabindex: -1, 'aria-label': `${c.name}${enc(c)}, No guide information`, onClick: () => playChannel(c) }, 'No guide information')));
-    }
-    return h(
-      'div',
-      { class: c.unplayable ? 'guide-row is-unplayable' : 'guide-row', role: 'row', dataset: { channel: c.id } },
-      h('div', { class: 'guide-chan', role: 'rowheader' }, channelLogo(c, 'sm'), h('span', { class: 'live-num' }, c.number != null ? String(c.number) : ''), h('span', { class: 'guide-chan-name' }, c.name), lockBadge(c), c.unplayable ? h('span', { class: 'chip live-cant', 'aria-hidden': 'true' }, "Can't play here") : null),
-      h('div', { class: 'guide-track' }, cells),
-    );
-  }
-
-  let moreObserver = null;
-  let rowsGen = 0; // bumped whenever the rows are redrawn: "more rows" for an older window is dropped
-  async function drawRows(reset = false, { focusChannel = null, focusAt = null } = {}) {
-    rowsGen++;
-    if (reset) {
-      drawn = 0;
-      clear(grid);
-    }
-    const ids = shown.slice(0, Math.max(drawn, PAGE)).map((c) => c.id);
-    await ensure(ids);
-    clear(grid);
-    drawn = Math.max(drawn, Math.min(PAGE, shown.length));
-    grid.append(...shown.slice(0, drawn).map(rowFor));
-    drawRuler();
-    // One tab stop: the programme on now in the first row (or the first programme).
-    const first = grid.querySelector('button.guide-prog.is-now') || grid.querySelector('button.guide-prog, button.guide-empty');
-    if (first) first.tabIndex = 0;
-    if (focusChannel != null) focusCellAt(focusChannel, focusAt);
-    // Look at the sentinel again: a "more rows" dropped for an older window is asked for again if it's still in view.
-    if (moreObserver) {
-      moreObserver.unobserve(sentinel);
-      moreObserver.observe(sentinel);
-    }
-  }
+  const moveTo = (t, focus = null) => {
+    fromRef.current = t;
+    return draw({ from: t }, focus);
+  };
 
   async function moreRows() {
-    if (drawn >= shown.length) return;
-    const next = shown.slice(drawn, drawn + PAGE);
-    const gen = rowsGen;
-    await ensure(next.map((c) => c.id));
-    if (gen !== rowsGen) return; // the window moved (or the rows were redrawn) meanwhile
-    drawn += next.length;
-    grid.append(...next.map(rowFor));
-  }
-  moreObserver = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && moreRows().catch(() => {}), { rootMargin: '600px' });
-  moreObserver.observe(sentinel);
-
-  function cellsOf(row) {
-    return [...row.querySelectorAll('button.guide-prog, button.guide-empty')];
-  }
-  /** Focus the programme in `channel`'s row covering `at` (or the nearest to it). */
-  function focusCellAt(channel, at) {
-    const row = grid.querySelector(`.guide-row[data-channel="${channel}"]`);
-    if (!row) return false;
-    const cells = cellsOf(row);
-    const t = at ?? now();
-    const hit = cells.find((b) => Number(b.dataset.start) <= t && t < Number(b.dataset.end)) || cells.reduce((best, b) => (!best || Math.abs(Number(b.dataset.start) - t) < Math.abs(Number(best.dataset.start) - t) ? b : best), null);
-    if (!hit) return false;
-    for (const b of grid.querySelectorAll('[tabindex="0"]')) b.tabIndex = -1;
-    hit.tabIndex = 0;
-    hit.focus({ preventScroll: true });
-    hit.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    return true;
-  }
-
-  async function moveTo(t, keep = null) {
-    from = t;
-    day.value = String(dayStart(from));
-    await drawRows(false, keep || {});
-  }
-
-  let column = null; // the time Up/Down keep (set by the first Up/Down after a Left/Right, so Up undoes Down)
-  let moving = false; // a window move is loading: presses meanwhile are dropped (holding Left mustn't stack moves)
-  grid.addEventListener('keydown', async (e) => {
-    const b = e.target.closest('button.guide-prog, button.guide-empty');
-    if (!b || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
-    if (moving) {
-      e.preventDefault();
-      e.stopPropagation();
-      return;
-    }
-    const row = b.closest('.guide-row');
-    const channel = row.dataset.channel;
-    const start = Number(b.dataset.start || from);
-    const end = Number(b.dataset.end || from);
-    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-      const other = e.key === 'ArrowDown' ? row.nextElementSibling : row.previousElementSibling;
-      if (!other) return; // the page above (the tools) or nothing below: the usual navigation
-      e.preventDefault();
-      e.stopPropagation();
-      if (column == null || column < from || column >= from + SPAN) column = Math.max(start, from);
-      focusCellAt(other.dataset.channel, column);
-      return;
-    }
-    e.preventDefault();
-    e.stopPropagation();
-    column = null;
-    const cells = cellsOf(row);
-    const i = cells.indexOf(b);
-    const dir = e.key === 'ArrowRight' ? 1 : -1;
-    const next = cells[i + dir];
-    if (next) {
-      focusCellAt(channel, Number(next.dataset.start) + 1);
-      return;
-    }
-    // Off the edge of what's in view: move the window and stay on this channel.
-    moving = true;
+    const s = cur.current;
+    const shown = channelsForGroup(all, s.group);
+    if (more.current || s.drawn >= shown.length) return;
+    more.current = true;
+    const mine = gen.current;
     try {
-      if (dir < 0) await moveTo(from - STEP, { focusChannel: channel, focusAt: start - 1 });
-      else await moveTo(from + STEP, { focusChannel: channel, focusAt: Math.max(end, from + SPAN - STEP) });
+      const next = shown.slice(s.drawn, s.drawn + PAGE);
+      fetched.current = await ensure(cache.current, fetched.current, next.map((c) => c.id), s.from);
+      if (mine !== gen.current || !alive.current) return; // the window moved (or the rows were drawn again) meanwhile
+      const now = Date.now();
+      setG((x) => ({ ...x, drawn: x.drawn + next.length, rows: [...x.rows, ...next.map((c) => rowModel(c, cache.current, x.from, now))] }));
     } finally {
-      moving = false;
+      more.current = false;
     }
+  }
+
+  // The ruler and now line every 30 s; "more rows" when the sentinel comes near; both stop when the page is left.
+  useLayoutEffect(() => {
+    const tick = setInterval(() => setG((s) => ({ ...s, tick: s.tick + 1 })), 30_000);
+    observer.current = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && moreRows().catch(() => {}), { rootMargin: '600px' });
+    observer.current.observe(sentinel.current);
+    // A ?channel= link: its programme on now (or the usual tab stop) is focused and kept in view by the router.
+    if (data.want) grid.current.querySelector('[tabindex="0"]')?.setAttribute('data-focus-now', '');
+    return () => {
+      alive.current = false;
+      clearInterval(tick);
+      observer.current.disconnect();
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (g.drawsN && observer.current) {
+      // Look at the sentinel again: a "more rows" dropped for an older window is asked for again if it's still in view.
+      observer.current.unobserve(sentinel.current);
+      observer.current.observe(sentinel.current);
+    }
+  }, [g.drawsN]);
+
+  useLayoutEffect(() => {
+    if (!focusNext.current) return;
+    focusNext.current = false;
+    const b = grid.current?.querySelector('[tabindex="0"]');
+    if (!b) return;
+    b.focus({ preventScroll: true });
+    b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   });
 
-  const tick = setInterval(drawRuler, 30_000);
-  const want = query.channel ? Number(query.channel) : null;
-  if (want && shown.some((c) => c.id === want)) {
-    const idx = shown.findIndex((c) => c.id === want);
-    drawn = Math.min(shown.length, Math.ceil((idx + 1) / PAGE) * PAGE);
-  }
-  await drawRows(true, want ? { focusChannel: want, focusAt: now() } : {});
-  if (want) grid.querySelector('[tabindex="0"]')?.setAttribute('data-focus-now', '');
-  return () => clearInterval(tick);
+  const focusAt = (channel, at) => {
+    const row = cur.current.rows.find((r) => String(r.channel) === String(channel));
+    const i = row ? cellAt(row.cells, at) : -1;
+    if (i < 0) return;
+    focusNext.current = true;
+    setG((s) => ({ ...s, stop: { channel: row.channel, key: cellKey(row.cells[i]) } }));
+  };
+
+  const onKeyDown = async (e) => {
+    const b = e.target.closest('button.guide-prog, button.guide-empty');
+    if (!b || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+    if (moving.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    const { rows, from } = cur.current;
+    const rowIndex = rows.findIndex((r) => String(r.channel) === b.closest('.guide-row').dataset.channel);
+    const cellIndex = rowIndex < 0 ? -1 : rows[rowIndex].cells.findIndex((c) => (c.p ? String(c.p.id) === b.dataset.id : !b.dataset.id));
+    const res = arrowMove({ key: e.key, rows, rowIndex, cellIndex, from, column: column.current });
+    if (!res) return; // the page above (the tools) or nothing below: the usual navigation
+    e.preventDefault();
+    e.stopPropagation();
+    column.current = res.column;
+    if (res.moveWindow == null) return focusAt(res.focus.channel, res.focus.at);
+    // Off the edge of what's in view: move the window and stay on this channel.
+    moving.current = true;
+    try {
+      await moveTo(res.moveWindow, res.focus);
+    } finally {
+      moving.current = false;
+    }
+  };
+
+  const open = async (c, p) => {
+    if ((await openProgramme(p.id)) !== 'recordings-changed' || !alive.current) return;
+    // The red dots changed (a series may span channels): the guide is asked again, focus stays here.
+    cache.current.clear();
+    fetched.current = [];
+    draw({}, { channel: c.id, at: p.start });
+  };
+
+  const { from, rows, stop } = g;
+  const now = Date.now();
+  const line = nowLine(now, from);
+  const days = dayOptions(now, maxCatchupDays(all), 'long');
+  const cell = (c, x) => {
+    const tab = stop && stop.channel === c.id && stop.key === cellKey(x) ? 0 : -1;
+    if (x.empty) {
+      return html`<div class="guide-cell guide-cell-empty" role="gridcell" ref=${styled('left:0;width:calc(100% - 4px)')}><button type="button" class="guide-empty" tabindex=${tab} aria-label=${`${c.name}${encWords(c)}, No guide information`} onClick=${() => playChannel(c)}>No guide information</button></div>`;
+    }
+    const p = x.p;
+    const st = x.state;
+    return html`<div key=${p.id} class="guide-cell" role="gridcell" ref=${styled(`left:${x.left};width:${x.width}`)}>
+      <button type="button" class=${`guide-prog is-${st}`} aria-label=${`${c.name}${encWords(c)}, ${toWords(p)}, ${p.title}, ${STATE_TEXT[st]}${recordingWords(p)}`} data-id=${p.id} data-start=${p.start} data-end=${p.end} tabindex=${tab} onClick=${() => open(c, p)}>
+        ${st === 'catchup' ? html`<span class="guide-badge" title="Catch-up available"><${Icon} name="rewind" size=${14} /></span>` : null}
+        <${RecDot} p=${p} />
+        <span class="guide-title">${p.title}</span>
+        <span class="guide-time">${programmeTimes(p)}</span>
+      </button>
+    </div>`;
+  };
+  return html`
+    <header class="page-head"><h1>Guide</h1><div class="actions"><${Button} label="Channels" icon="live" variant="ghost" href="#/live" /></div></header>
+    <div class="guide-tools">
+      <${Button} label="Earlier" icon="back" variant="ghost" onClick=${() => moveTo(fromRef.current - STEP)} />
+      <${Button} label="Now" icon="live" variant="ghost" onClick=${() => moveTo(windowStart(Date.now()))} />
+      <${Button} label="Later" icon="next" variant="ghost" onClick=${() => moveTo(fromRef.current + STEP)} />
+      <label class="guide-pick">Day <select class="guide-day" aria-label="Day" value=${String(dayStart(from))} onChange=${(e) => moveTo(Number(e.target.value) + (fromRef.current - dayStart(fromRef.current)))}>${days.map((d) => html`<option value=${d.value}>${d.label}</option>`)}</select></label>
+      <label class="guide-pick">Group <select class="guide-group" aria-label="Channel group" value=${g.group} onChange=${(e) => draw({ group: e.target.value, reset: true })}>${groupOptions(all, names).map((n) => html`<option ref=${valueAttr(n)}>${n}</option>`)}</select></label>
+    </div>
+    <div class="guide-body">
+      <div class="guide-ruler" aria-hidden="true">${rulerTicks(from).map((t) => html`<span key=${t} ref=${styled(`left:${pct(t, from)}`)}>${clockTime(t)}</span>`)}</div>
+      <div ref=${grid} class="guide-grid" role="grid" aria-label="TV guide" data-from=${String(from)} data-to=${String(from + SPAN)} onKeyDown=${onKeyDown}>
+        ${rows.map(({ c, cells }) => html`<div key=${c.id} class=${c.unplayable ? 'guide-row is-unplayable' : 'guide-row'} role="row" data-channel=${c.id}>
+          <div class="guide-chan" role="rowheader"><${ChannelLogo} c=${c} size="sm" /><span class="live-num">${c.number != null ? String(c.number) : ''}</span><span class="guide-chan-name">${c.name}</span><${LockBadge} c=${c} />${c.unplayable ? html`<span class="chip live-cant" aria-hidden="true">Can't play here</span>` : null}</div>
+          <div class="guide-track">${cells.map((x) => cell(c, x))}</div>
+        </div>`)}
+      </div>
+      <div class="guide-now" aria-hidden="true" hidden=${line.hidden} style=${{ '--x': String(line.x) }} />
+      <div ref=${sentinel} class="guide-more" aria-hidden="true" />
+    </div>
+  `;
 }
 
 // ---- Phones: one channel's day as a list ----
-async function renderList(el, all, query) {
-  const chanSel = h('select', { class: 'guide-channel-select', 'aria-label': 'Channel' }, all.map((c) => h('option', { value: String(c.id) }, `${c.number != null ? `${c.number} ${c.name}` : c.name}${enc(c)}`)));
-  const daySel = h('select', { class: 'guide-day', 'aria-label': 'Day' });
-  const maxDays = Math.max(1, ...all.map((c) => c.catchupDays || 0));
-  const today = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
-  for (let d = -maxDays; d <= 7; d++) {
-    const t = today + d * DAY;
-    daySel.append(h('option', { value: String(t) }, d === 0 ? 'Today' : d === -1 ? 'Yesterday' : d === 1 ? 'Tomorrow' : new Date(t).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })));
-  }
-  daySel.value = String(today);
-  if (query.channel) chanSel.value = String(query.channel);
-  const listEl = h('ul', { class: 'guide-list', role: 'list' });
-  el.append(h('header', { class: 'page-head' }, h('h1', {}, 'Guide')), h('div', { class: 'guide-tools' }, chanSel, daySel), listEl);
 
-  async function draw() {
-    const c = all.find((x) => String(x.id) === chanSel.value) || all[0];
-    listEl.classList.toggle('is-unplayable', Boolean(c?.unplayable)); // v0.28: dimmed (the picker's name says why)
-    const start = Number(daySel.value);
-    const progs = [];
-    for (let t = start; t < start + DAY; t += 6 * HOUR) {
-      const g = await fetchGuide(t, t + 6 * HOUR, [c.id]);
-      progs.push(...(g.programmes[c.id] || []));
-    }
-    const seen = new Set();
-    const n = Date.now();
-    const rows = progs.filter((p) => !seen.has(p.id) && seen.add(p.id)).sort((a, b) => a.start - b.start);
-    clear(listEl).append(
-      ...(rows.length
-        ? rows.map((p) => {
-            const st = programmeState(p, n, c);
-            const open = async () => {
-              if ((await openProgramme(p.id)) !== 'recordings-changed') return;
-              await draw();
-              listEl.querySelector(`[data-id="${p.id}"]`)?.focus();
-            };
-            return h('li', {}, h('button', { type: 'button', class: `guide-prog is-${st}`, 'aria-label': `${c.name}${enc(c)}, ${toWords(p)}, ${p.title}, ${STATE_TEXT[st]}${recordingWords(p)}`, dataset: { id: p.id, start: p.start, end: p.end }, onClick: open }, h('span', { class: 'guide-time' }, clockTime(p.start)), h('span', { class: 'guide-title' }, p.title), recDot(p), st === 'catchup' ? h('span', { class: 'guide-badge' }, icon('rewind', { size: 14 })) : null));
-          })
-        : [h('li', { class: 'muted' }, 'No guide information')]),
-    );
-    listEl.querySelector('.is-now')?.scrollIntoView({ block: 'center' });
+function GuideList({ data }) {
+  const { all } = data;
+  const [l, setL] = useState({ channel: data.channel, day: data.day, programmes: data.programmes, n: 0 });
+  const pick = useRef(latest()).current;
+  const picked = useRef({ channel: data.channel, day: data.day }); // the pickers as last changed (an answer may still be loading)
+  const list = useRef(null);
+  const focusId = useRef(null);
+  const alive = useRef(true);
+  useLayoutEffect(() => () => (alive.current = false), []);
+  const c = all.find((x) => x.id === l.channel) || all[0];
+
+  /** Show `channel`'s `day`; a slower answer for an earlier pick is dropped (the last pick wins). */
+  async function show(change) {
+    const { channel, day } = Object.assign(picked.current, change);
+    const current = pick();
+    const ch = all.find((x) => x.id === channel) || all[0];
+    const programmes = ch ? await dayOf(ch, day) : [];
+    if (!current() || !alive.current) return false;
+    setL((s) => ({ channel, day, programmes, n: s.n + 1 }));
+    return true;
   }
-  chanSel.addEventListener('change', draw);
-  daySel.addEventListener('change', draw);
-  await draw();
+
+  useLayoutEffect(() => {
+    list.current?.querySelector('.is-now')?.scrollIntoView({ block: 'center' });
+    const id = focusId.current;
+    focusId.current = null;
+    if (id != null) list.current?.querySelector(`[data-id="${id}"]`)?.focus();
+  }, [l.n]);
+
+  const open = async (p) => {
+    if ((await openProgramme(p.id)) !== 'recordings-changed' || !alive.current) return;
+    focusId.current = p.id;
+    if (!(await show({}))) focusId.current = null;
+  };
+
+  const now = Date.now();
+  const days = dayOptions(now, maxCatchupDays(all), 'short');
+  const rows = l.programmes;
+  return html`
+    <header class="page-head"><h1>Guide</h1></header>
+    <div class="guide-tools">
+      <select class="guide-channel-select" aria-label="Channel" value=${c ? String(c.id) : ''} onChange=${(e) => show({ channel: Number(e.target.value) })}>${all.map((x) => html`<option value=${String(x.id)}>${`${x.number != null ? `${x.number} ${x.name}` : x.name}${encWords(x)}`}</option>`)}</select>
+      <select class="guide-day" aria-label="Day" value=${String(l.day)} onChange=${(e) => show({ day: Number(e.target.value) })}>${days.map((d) => html`<option value=${d.value}>${d.label}</option>`)}</select>
+    </div>
+    <ul ref=${list} class=${c?.unplayable ? 'guide-list is-unplayable' : 'guide-list'} role="list">
+      ${rows.length
+        ? rows.map((p) => {
+            const st = programmeState(p, now, c);
+            return html`<li key=${p.id}><button type="button" class=${`guide-prog is-${st}`} aria-label=${`${c.name}${encWords(c)}, ${toWords(p)}, ${p.title}, ${STATE_TEXT[st]}${recordingWords(p)}`} data-id=${p.id} data-start=${p.start} data-end=${p.end} onClick=${() => open(p)}><span class="guide-time">${clockTime(p.start)}</span><span class="guide-title">${p.title}</span><${RecDot} p=${p} />${st === 'catchup' ? html`<span class="guide-badge"><${Icon} name="rewind" size=${14} /></span>` : null}</button></li>`;
+          })
+        : html`<li class="muted">No guide information</li>`}
+    </ul>
+  `;
 }
