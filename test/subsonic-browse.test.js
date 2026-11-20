@@ -90,7 +90,9 @@ test('artists, albums and songs in JSON and XML', { skip }, async () => {
   assert.equal(s[0].path, 'The Band/First Record/01 Opening.mp3');
   assert.ok(!JSON.stringify(al).includes(media), 'no server paths');
   const x = await rest(nf.base, 'getAlbum', { ...auth(), id: `al-${ids.first}` }, { f: 'xml' });
-  assert.match(x.text, /<album [^>]*name="First Record"[^>]*><song [^>]*title="Opening"[^>]*\/><song [^>]*title="Closer"[^>]*\/><\/album>/);
+  // A song is <song …/>, or <song …><replayGain …/></song> once the background volume check (ffmpeg) has measured it.
+  const song = (title) => `<song [^>]*title="${title}"[^>]*(?:\\/>|>(?:<replayGain [^>]*\\/>)?<\\/song>)`;
+  assert.match(x.text, new RegExp(`<album [^>]*name="First Record"[^>]*>${song('Opening')}${song('Closer')}<\\/album>`));
   const one = await call('getSong', { id: `tr-${ids.Return}` });
   assert.equal(one.song.album, 'Second Record');
   assert.equal(await code('getSong', { id: 'tr-999999' }), 70);
