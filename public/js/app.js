@@ -20,6 +20,7 @@ import { mountView } from './screen.js';
 import { applyMotion } from './motion.js';
 import { glassMode, contrastMode, textScale, orderLibraries, movePinned, effectsReduced, oledMode } from './appearance-rules.js';
 import { historyStep } from './motion-rules.js';
+import { focusNowStep, focusMoved } from './focus-now-rules.js';
 import { noteStep, beginPageChange, initCapture } from './transitions.js';
 import { initCardMotion } from './card-motion.js';
 
@@ -521,6 +522,28 @@ function onBackKey() {
   } else goBack();
 }
 
+// The page's data-focus-now element, kept until it can take the focus ({ el, token, before }; see focus-now-rules.js).
+let focusNow = null;
+
+/** Focus the page's marked element if it can take the focus now; returns the step taken (focus-now-rules.js), or null. */
+function applyFocusNow() {
+  const p = focusNow;
+  if (!p) return null;
+  const step = focusNowStep({
+    current: p.token === renderToken,
+    connected: p.el.isConnected,
+    inert: Boolean(p.el.closest('[inert]')),
+    moved: focusMoved({ active: document.activeElement, before: p.before, body: document.body, main }),
+  });
+  if (step === 'wait') return step;
+  focusNow = null;
+  if (step === 'focus') {
+    p.el.focus({ preventScroll: true });
+    p.el.scrollIntoView({ block: 'center', inline: 'nearest' });
+  }
+  return step;
+}
+
 let announcedPath = null;
 async function render() {
   document.documentElement.classList.remove('pill-hidden'); // every page starts with the pill shown
@@ -609,12 +632,12 @@ async function render() {
     if (!route.fullscreen && announcedPath !== path) announce(document.title.split(' · ')[0] || document.title);
     announcedPath = path;
     // A page opened on one particular thing (a deep link such as the guide's ?channel=) marks it data-focus-now: it
-    // gets the focus and stays in view, keyboard or not.
+    // gets the focus and stays in view, keyboard or not. Behind the splash the page is inert: settleSplash() focuses it.
     const opened = !route.fullscreen && main.querySelector('[data-focus-now]');
     if (opened) {
       opened.removeAttribute('data-focus-now');
-      opened.focus({ preventScroll: true });
-      opened.scrollIntoView({ block: 'center', inline: 'nearest' });
+      focusNow = { el: opened, token, before: document.activeElement };
+      if (applyFocusNow() === 'wait') opened.scrollIntoView({ block: 'center', inline: 'nearest' }); // in view as the splash fades
     } else if (!change.restored) pageScroller().scrollTo(0, 0); // Back to a card: transitions.js put it back
     if (!route.fullscreen && !opened && !change.restored) {
       if (isKeyboardMode()) focusFirst(main);
@@ -701,7 +724,10 @@ async function settleSplash(splash) {
   pageReady();
   await splash;
   await endSplash();
-  // The page was inert while the splash showed, so its own autofocus was lost: focus it as render() would.
+  // The page was inert while the splash showed, so its own autofocus was lost: focus it as render() would — its
+  // data-focus-now element when it marked one (unless the person has moved the focus since).
+  const step = applyFocusNow();
+  if (step === 'focus' || step === 'keep') return;
   if (isKeyboardMode() || !state.profile) focusFirst(main);
   else main.focus({ preventScroll: true });
 }

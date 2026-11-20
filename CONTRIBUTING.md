@@ -71,7 +71,9 @@ Each draws exactly what the older helper in `components.js` draws, so the themes
 - **Give list items a key** (`key=${item.id}`). Preact then keeps each element when the list redraws, so the remote's focus stays on the same card.
 - **Spatial navigation (`nav.js`) works on whatever is on the page.** Arrow keys move to the nearest focusable element, so use real buttons and links.
   - `data-autofocus` marks the control that should get focus first.
-  - `data-focus-now` marks one that must be focused and scrolled into view when the page opens (a deep link).
+  - `data-focus-now` marks one that must be focused and scrolled into view when the page opens (a deep link). The
+    router does it, also behind the splash (it waits until the page is no longer inert) and never after the person has
+    moved the focus themselves (`focus-now-rules.js`).
 - **State that comes from the server** (the profile, the theme, the server's status) comes through `useAppState((s) => …)`. Don't keep your own copy.
 
 ### Looks

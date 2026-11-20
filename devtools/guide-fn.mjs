@@ -2,7 +2,7 @@
 // tab stop, ?channel=, arrows inside and off the edge of the window, a held arrow, Up/Down keeping the column, the
 // tools, groups, more rows on scroll, the phone list, the programme sheet, an empty channel list, an unknown channel and
 // nothing left running after the page is left. Prints PASS/FAIL lines; exit 1 on a FAIL.
-//   BASE=http://localhost:8797 node devtools/guide-fn.mjs [tabstop deeplink arrows edge held updown tools group more phone phone-race sheet empty unknown leaks]
+//   BASE=http://localhost:8797 node devtools/guide-fn.mjs [tabstop deeplink focus arrows edge held updown tools group more phone phone-race sheet empty unknown leaks]
 // SKIP=phone-race,... leaves legs out.
 // On the guide before its Preact move (v0.29) five legs fail on bugs the move removes: deeplink (a channel past row 50
 // isn't drawn or focused), group (a group change can draw its rows twice), phone-race (a slower answer for an earlier
@@ -14,7 +14,7 @@ if (!process.env.BASE || /:8787/.test(process.env.BASE)) {
   console.log('Set BASE to the dev Atomix (for example http://localhost:8797). This check changes the profile, so it will not run against the default or the live server on port 8787.');
   process.exit(2);
 }
-const ALL = ['tabstop', 'deeplink', 'arrows', 'edge', 'held', 'updown', 'tools', 'group', 'more', 'group-race', 'more-race', 'quiet', 'phone', 'phone-race', 'sheet', 'empty', 'unknown', 'leaks'];
+const ALL = ['tabstop', 'deeplink', 'focus', 'arrows', 'edge', 'held', 'updown', 'tools', 'group', 'more', 'group-race', 'more-race', 'quiet', 'phone', 'phone-race', 'sheet', 'empty', 'unknown', 'leaks'];
 const SKIP = (process.env.SKIP || '').split(',');
 const LEGS = (process.argv.slice(2).length ? process.argv.slice(2) : ALL).filter((l) => !SKIP.includes(l));
 const STEP = 2 * 3600_000;
@@ -74,8 +74,8 @@ if (LEGS.includes('tabstop')) {
 if (LEGS.includes('deeplink')) {
   const want = CHANNEL_IDS[56];
   const { browser, page, errors } = await start({ hash: `#/live/guide?channel=${want}` });
-  // What the guide decides: the programme it marks data-focus-now (the router focuses it; on an in-app move the page is
-  // still inert then, so the focus itself is the router's business, not the guide's) and the one tab stop.
+  // What the guide decides: the programme it marks data-focus-now (the router focuses it: the focus leg checks that)
+  // and the one tab stop.
   const marked = await page.evaluate(() => window.__focusNow);
   const stop = await page.$$eval('.guide-grid [tabindex="0"]', (els) => els.map((e) => ({ channel: e.closest('.guide-row')?.dataset.channel, start: Number(e.dataset.start), end: Number(e.dataset.end) })));
   const n = (await rows(page)).length;
@@ -92,6 +92,67 @@ if (LEGS.includes('deeplink')) {
   check(`deeplink: channel ${early} (first page) is marked and is the tab stop`, m2.length === 1 && m2[0].channel === String(early) && m2[0].tabStop && m2[0].start <= T_LIVE && T_LIVE < m2[0].end, JSON.stringify(m2));
   check('deeplink: first page: 50 rows', (await rows(page)).length === 50, `rows ${(await rows(page)).length}`);
   await browser.close();
+}
+
+// The router gives the marked programme the focus (document.activeElement), in view, after an in-app move and a full
+// load, with and without the splash up, under full and reduced motion. Behind the splash the page is inert: the router
+// keeps the mark and focuses it once the splash lets go (before that fix the moves made during the splash and the
+// full load ended on "Channels" or the page itself).
+if (LEGS.includes('focus')) {
+  const want = CHANNEL_IDS[56];
+  const early = CHANNEL_IDS[11];
+  const splashUp = (page) => page.waitForSelector('#splash:not([hidden])', { timeout: 6000 }).then(() => true, () => false);
+  const splashGone = (page) => page.waitForSelector('#splash', { state: 'hidden', timeout: 8000 }).catch(() => {});
+  const onIt = async (page, name, channel) => {
+    const f = await focused(page);
+    const seen = await page.evaluate(() => {
+      const r = document.activeElement.getBoundingClientRect();
+      return r.width > 0 && r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth;
+    });
+    check(`focus: ${name}: channel ${channel}'s programme on now has the focus`, f.channel === String(channel) && f.start <= T_LIVE && T_LIVE < f.end, JSON.stringify(f));
+    check(`focus: ${name}: it is in view`, seen);
+  };
+  for (const reducedMotion of ['no-preference', 'reduce']) {
+    const tier = reducedMotion === 'reduce' ? 'reduce' : 'full';
+    const session = async () => {
+      const s = await open({ theme: 'midnight', serviceWorkers: 'block', reducedMotion });
+      await s.page.clock.setFixedTime(T_LIVE);
+      await routeLive(s.page, {});
+      return s;
+    };
+    {
+      // An in-app move made while the splash is still up (the page behind it is inert).
+      const { browser, page, errors } = await session();
+      await page.goto(`${BASE}/#/live`);
+      const up = await splashUp(page);
+      check(`focus (${tier}): the splash is up for the move`, up);
+      await go(page, `#/live/guide?channel=${want}`, 0);
+      await splashGone(page);
+      await page.waitForTimeout(800);
+      await onIt(page, `${tier}, move during the splash`, want);
+      // Then a move after the splash: from Live TV to a channel on the first page of rows.
+      await go(page, '#/live', 600);
+      await go(page, `#/live/guide?channel=${early}`);
+      await onIt(page, `${tier}, move after the splash`, early);
+      // The person moves on: the focus is theirs (the router doesn't take it back).
+      await key(page, 'ArrowDown');
+      const after = await focused(page);
+      check(`focus (${tier}): an arrow after it moves the focus on and it stays there`, after.channel && after.channel !== String(early), JSON.stringify(after));
+      check(`focus (${tier}): no page errors`, !errors.length, errors.join(' | '));
+      await browser.close();
+    }
+    {
+      // A full load straight onto the link (the splash plays over it).
+      const { browser, page, errors } = await session();
+      await page.goto(`${BASE}/#/live/guide?channel=${want}`);
+      await splashUp(page);
+      await splashGone(page);
+      await page.waitForTimeout(800);
+      await onIt(page, `${tier}, full load`, want);
+      check(`focus (${tier}): full load: no page errors`, !errors.length, errors.join(' | '));
+      await browser.close();
+    }
+  }
 }
 
 if (LEGS.includes('arrows')) {
