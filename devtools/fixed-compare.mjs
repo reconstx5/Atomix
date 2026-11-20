@@ -8,12 +8,23 @@
 // answered here; the dev media has none), and the title page a backdrop: the pages are captured once every picture on
 // screen (and the backdrop) has loaded (card motion v2: older themes identical at rest after load).
 //   ART=1 PAGES='#/,#/library/1,#/item/1' THEMES=arctic,midnight node devtools/fixed-compare.mjs record <dir> …
+// LIVE=1 (the Guide and Recordings on Preact): every /api/live/ answer comes from the made-up data in live-fixtures.mjs
+// (nothing is recorded or replayed for Live TV, so record works for before and after alike); PAGES defaults to the
+// guide, the guide on the 57th channel and Recordings. RECORDINGS=kids|error|empty answers Recordings that way.
+// Whitespace inside style="…" is evened out before the markup is written (a style set as a string and one set by
+// Preact read back with different spaces; same values, same pixels).
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 const { chromium } = createRequire(import.meta.url)('playwright');
-const BASE = process.env.BASE || 'http://localhost:8787';
+const BASE = process.env.BASE;
 const [mode, dir, other] = process.argv.slice(2);
+if (mode !== 'diff' && (!BASE || /:8787/.test(BASE))) {
+  console.log('Set BASE to the dev Atomix (for example http://localhost:8797). This check changes the profile, so it will not run against the default or the live server on port 8787.');
+  process.exit(2);
+}
+const LIVE = process.env.LIVE === '1';
+const { routeLive, LIVE_PAGES } = LIVE ? await import('./live-fixtures.mjs') : {};
 if (mode === 'diff') {
   const { execFileSync } = await import('node:child_process');
   let bad = 0;
@@ -36,7 +47,7 @@ if (mode === 'diff') {
 }
 const fixDir = mode === 'record' ? dir : other;
 const T = Date.parse('2026-11-11T19:10:00+13:00');
-const PAGES = (process.env.PAGES || '#/live,#/live/guide,#/').split(',');
+const PAGES = process.env.PAGES ? process.env.PAGES.split(',') : LIVE ? LIVE_PAGES : ['#/live', '#/live/guide', '#/'];
 const THEMES = (process.env.THEMES || 'arctic,arctic-side,midnight,daylight,harbour,obsidian,orbit').split(',');
 // SIZES=desk,tv,phone picks sizes (default desk,phone, as before). desk here is 1440x900: at 1920x1080 landscape Atomix
 // is already in TV mode, so desk and tv must differ. The old default keeps the old 1917x992.
@@ -46,7 +57,7 @@ const SIZES = process.env.SIZES
   : { desk: [1917, 992], phone: [390, 844] };
 fs.mkdirSync(dir, { recursive: true });
 const fixFile = path.join(fixDir, 'fixtures.json');
-const fixtures = mode === 'replay' ? JSON.parse(fs.readFileSync(fixFile, 'utf8')) : {};
+const fixtures = mode === 'replay' && !LIVE ? JSON.parse(fs.readFileSync(fixFile, 'utf8')) : {};
 const ART = process.env.ART === '1';
 const artSvg = (w, h, hue) => `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="hsl(${hue} 60% 40%)"/><circle cx="50%" cy="40%" r="${Math.min(w, h) / 4}" fill="hsl(${hue + 40} 70% 60%)"/></svg>`;
 /** ART=1: the titles in an answer with a poster and tints (the answer is otherwise left as it is). */
@@ -71,6 +82,7 @@ for (const theme of THEMES) for (const [size, [w, h]] of Object.entries(SIZES)) 
     const [, type, id] = /(poster|backdrop)-(\d+)/.exec(route.request().url());
     route.fulfill({ contentType: 'image/svg+xml', body: type === 'poster' ? artSvg(300, 450, id * 40) : artSvg(1920, 1080, id * 40) });
   });
+  if (LIVE) await routeLive(page, { recordings: process.env.RECORDINGS || 'ok' });
   // A title page's own title also gets a backdrop (its card art travels into it; at rest it is behind the page).
   const dressPage = (key, data) => {
     data = dress(data);
@@ -79,6 +91,7 @@ for (const theme of THEMES) for (const [size, [w, h]] of Object.entries(SIZES)) 
   };
   await page.route(/\/api\/(live\/(channels|groups|status|guide|search)|home|libraries\/\d+\/items|items\/\d+)(\?|$)/, async (route) => {
     const key = route.request().url().replace(BASE, '');
+    if (LIVE && key.startsWith('/api/live/')) return route.fallback(); // live-fixtures.mjs answers these
     if (mode === 'replay' && fixtures[key]) return route.fulfill({ json: dressPage(key, structuredClone(fixtures[key])) });
     const res = await route.fetch();
     let data = await res.json();
@@ -95,7 +108,7 @@ for (const theme of THEMES) for (const [size, [w, h]] of Object.entries(SIZES)) 
     if (ART) await page.waitForFunction(() => [...document.querySelectorAll('main .art img')].filter((i) => { const r = i.getBoundingClientRect(); return r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth; }).every((i) => i.complete && i.closest('.art').classList.contains('loaded')), null, { timeout: 8000 }).catch(() => console.log('pictures still loading', theme, size, p));
     if (ART) await page.waitForFunction(() => { const b = document.querySelector('.backdrop'); const want = [...(b?.querySelectorAll('img') || [])].some((i) => /fake-art\/backdrop/.test(i.src)); return !want || [...b.querySelectorAll('img.is-on')].some((i) => i.complete && /fake-art\/backdrop/.test(i.src)); }, null, { timeout: 8000 }).catch(() => console.log('backdrop still loading', theme, size, p));
     if (ART) await page.waitForTimeout(800); // the last fades (pictures, the backdrop's cross-fade)
-    const html = await page.evaluate(() => document.querySelector('main').outerHTML.replace(/\?v=\d+/g, '?v=X').replace(/ style=""/g, ''));
+    const html = await page.evaluate(() => document.querySelector('main').outerHTML.replace(/\?v=\d+/g, '?v=X').replace(/ style=""/g, '').replace(/ style="([^"]*)"/g, (m, v) => ` style="${v.replace(/([:;])s+/g, '$1').replace(/;$/, '').trim()}"`));
     const f = `${theme}-${size}-${p.replace(/[#/?=&]+/g, '_')}`;
     fs.writeFileSync(path.join(dir, `${f}.html`), html.replace(/></g, '>\n<'));
     await page.screenshot({ path: path.join(dir, `${f}.png`), mask: [page.locator('.nav-clock, .orbit-clock, time')] });
@@ -103,4 +116,4 @@ for (const theme of THEMES) for (const [size, [w, h]] of Object.entries(SIZES)) 
   await ctx.close();
 }
 await browser.close();
-if (mode === 'record') fs.writeFileSync(fixFile, JSON.stringify(fixtures));
+if (mode === 'record' && !LIVE) fs.writeFileSync(fixFile, JSON.stringify(fixtures));

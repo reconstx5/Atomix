@@ -1,0 +1,26 @@
+{
+  "_note": "Made-up recordings for devtools/live-fixtures.mjs. start/end are minutes from T_LIVE (11 Nov 2026 19:10 NZ); the route turns them into times. Shapes as src/api/recordings.js shapeRecording/shapeRule.",
+  "recording": [
+    { "id": 501, "status": "recording", "saving": false, "profile": "Dallas", "channel": "Harbour One", "channelId": 101, "title": "Evening News", "episodeTitle": null, "season": null, "episode": null, "start": -10, "end": 20, "pre": 2, "post": 5, "part": null, "gapSeconds": 0, "error": null, "itemId": null, "ruleId": null, "clash": null, "canRetry": false },
+    { "id": 502, "status": "recording", "saving": false, "profile": "Sam", "channel": "Summit One", "channelId": 102, "title": "Coastal Rescue", "episodeTitle": "High Tide", "season": 3, "episode": 7, "start": -40, "end": 50, "pre": 2, "post": 5, "part": null, "gapSeconds": 0, "error": null, "itemId": null, "ruleId": 902, "clash": null, "canRetry": false }
+  ],
+  "scheduled": [
+    { "id": 511, "status": "scheduled", "saving": false, "profile": "Dallas", "channel": "Harbour One", "channelId": 101, "title": "Night Garden", "episodeTitle": null, "season": null, "episode": null, "start": 50, "end": 110, "pre": 2, "post": 5, "part": null, "gapSeconds": 0, "error": null, "itemId": null, "ruleId": null, "clash": null, "canRetry": false },
+    { "id": 512, "status": "scheduled", "saving": false, "profile": "Dallas", "channel": "Kauri One", "channelId": 104, "title": "Mountain Kitchen", "episodeTitle": "Smoke and Fire", "season": 1, "episode": 4, "start": 1430, "end": 1490, "pre": 2, "post": 5, "part": null, "gapSeconds": 0, "error": null, "itemId": null, "ruleId": 901, "clash": "Clashes with Coastal Rescue on Summit One: only two can record at once.", "canRetry": false },
+    { "id": 513, "status": "scheduled", "saving": false, "profile": "Sam", "channel": "Summit One", "channelId": 102, "title": "Coastal Rescue", "episodeTitle": "Low Tide", "season": 3, "episode": 8, "start": 10040, "end": 10130, "pre": 2, "post": 5, "part": null, "gapSeconds": 0, "error": null, "itemId": null, "ruleId": 902, "clash": null, "canRetry": false }
+  ],
+  "done": [
+    { "id": 521, "status": "done", "saving": false, "profile": "Dallas", "channel": "Harbour One", "channelId": 101, "title": "Weekend Football", "episodeTitle": null, "season": null, "episode": null, "start": -1500, "end": -1380, "pre": 2, "post": 5, "part": null, "gapSeconds": 0, "error": null, "itemId": 1, "ruleId": null, "clash": null, "canRetry": false },
+    { "id": 522, "status": "done", "saving": false, "profile": "Sam", "channel": "Summit One", "channelId": 102, "title": "Coastal Rescue", "episodeTitle": "Storm Warning", "season": 3, "episode": 6, "start": -2920, "end": -2830, "pre": 2, "post": 5, "part": null, "gapSeconds": 300, "error": null, "itemId": 2, "ruleId": 902, "clash": null, "canRetry": false },
+    { "id": 523, "status": "done", "saving": false, "profile": "Dallas", "channel": "Coastal One", "channelId": 103, "title": "Late Show", "episodeTitle": null, "season": null, "episode": null, "start": -4300, "end": -4240, "pre": 2, "post": 5, "part": null, "gapSeconds": 0, "error": "The last 2 minutes are missing: the channel stopped.", "itemId": 3, "ruleId": null, "clash": null, "canRetry": false },
+    { "id": 524, "status": "done", "saving": false, "profile": "Dallas", "channel": "Harbour One", "channelId": 101, "title": "Morning Market", "episodeTitle": null, "season": null, "episode": null, "start": -200, "end": -140, "pre": 2, "post": 5, "part": null, "gapSeconds": 0, "error": null, "itemId": null, "ruleId": null, "clash": null, "canRetry": false }
+  ],
+  "failed": [
+    { "id": 531, "status": "failed", "saving": false, "profile": "Dallas", "channel": "Summit One", "channelId": 102, "title": "Garden Rescue", "episodeTitle": null, "season": null, "episode": null, "start": -3000, "end": -2940, "pre": 2, "post": 5, "part": null, "gapSeconds": 0, "error": "The pieces couldn't be joined.", "itemId": null, "ruleId": null, "clash": null, "canRetry": true },
+    { "id": 532, "status": "failed", "saving": true, "profile": "Sam", "channel": "Harbour One", "channelId": 101, "title": "Quiz Night", "episodeTitle": null, "season": null, "episode": null, "start": -4400, "end": -4340, "pre": 2, "post": 5, "part": null, "gapSeconds": 0, "error": null, "itemId": null, "ruleId": null, "clash": null, "canRetry": true }
+  ],
+  "rules": [
+    { "id": 901, "profile": "Dallas", "title": "Mountain Kitchen", "channel": "Kauri One", "channelKey": "kauri-one", "newOnly": true, "keep": 5, "upcoming": 1, "channelOptions": [ { "key": "harbour-one", "name": "Harbour One" }, { "key": "summit-one", "name": "Summit One" }, { "key": "kauri-one", "name": "Kauri One" } ] },
+    { "id": 902, "profile": "Sam", "title": "Coastal Rescue", "channel": null, "channelKey": null, "newOnly": false, "keep": 0, "upcoming": 1, "channelOptions": [] }
+  ]
+}
