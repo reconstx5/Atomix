@@ -11,7 +11,8 @@ import { SONG_LIMIT, NOUN, sortsFor, request } from './library-data.js';
 export { SONG_LIMIT, SORTS, VIEWS, NOUN, sortsFor, request, startOpts, newEpisodes, collectionsFor } from './library-data.js';
 import { h, clear, debounce } from '../dom.js';
 import { toast, openDialog, field, spinner, TOASTS, cardItems } from '../components.js';
-import { music, trackList } from '../music.js';
+import { music } from '../music.js';
+import { TrackList } from '../ui/music.js';
 
 /**
  * The filters and the items they show. `set(patch)` changes filters, puts them in the address (so Back returns to
@@ -88,7 +89,7 @@ export function Results({ items, busy, opts, lib, isMusic, filtered, clearAction
     />`;
   }
   if (opts.view === 'tracks') {
-    return html`<${Island} class="song-list" make=${() => trackList(items, { showAlbum: true, numbers: false })} deps=${[items]} />${items.length >= SONG_LIMIT ? html`<p class="muted center small">${`Showing the first ${SONG_LIMIT} songs — use the filter to find others.`}</p>` : null}`;
+    return html`<div class="song-list"><${TrackList} tracks=${items} showAlbum=${true} numbers=${false} /></div>${items.length >= SONG_LIMIT ? html`<p class="muted center small">${`Showing the first ${SONG_LIMIT} songs — use the filter to find others.`}</p>` : null}`;
   }
   const spoken = lib.type === 'podcasts' || lib.type === 'audiobooks';
   return html`<${Grid} items=${items} style=${isMusic || spoken ? 'square' : 'poster'} />`;

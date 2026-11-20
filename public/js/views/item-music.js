@@ -1,13 +1,14 @@
 // The title page's music parts (v0.30): an album (its songs, by disc) and an artist (their albums). Same elements as
-// the older page; the songs are the music engine's trackList(), hosted as it is.
+// the older page; the songs are a TrackList (ui/music.js).
 import { html, useLayoutEffect, useRef } from '../ui.js';
-import { Button, Island } from '../ui/basics.js';
+import { Button } from '../ui/basics.js';
 import { Art, Grid } from '../ui/cards.js';
 import { TitleArt, Genres, RatingControl } from '../ui/detail.js';
 import { formatRuntime } from '../dom.js';
 import { isOrbit } from '../app.js';
 import { canRate } from '../rating.js';
-import { music, trackList } from '../music.js';
+import { music } from '../music.js';
+import { TrackList } from '../ui/music.js';
 
 const songCount = (n) => `${n} ${n === 1 ? 'song' : 'songs'}`;
 const totalTime = (sec) => (sec ? formatRuntime(sec / 60) : null);
@@ -69,15 +70,10 @@ export function AlbumPage({ data, query, more }) {
   return [
     html`<${MusicHeader} item=${item} eyebrow=${eyebrow} meta=${[item.year ? String(item.year) : null, songCount(tracks.length), totalTime(item.duration)]} actions=${[html`<${PlayButtons} tracks=${tracks} autofocus=${!focusId} />`, more]} />`,
     html`<div class="detail-body" ref=${body}>
-      <${Island}
-        tag="section"
-        class="detail-section"
-        deps=${[data]}
-        make=${() => [
-          Object.assign(document.createElement('h2'), { className: 'visually-hidden', textContent: 'Songs' }),
-          tracks.length ? trackList(tracks, { showArtist: artist?.title || true, discs: true, focusId }) : Object.assign(document.createElement('p'), { className: 'muted', textContent: 'No songs found.' }),
-        ]}
-      />
+      <section class="detail-section">
+        <h2 class="visually-hidden">Songs</h2>
+        ${tracks.length ? html`<${TrackList} tracks=${tracks} showArtist=${artist?.title || true} discs=${true} focusId=${focusId} />` : html`<p class="muted">No songs found.</p>`}
+      </section>
     </div>`,
   ];
 }

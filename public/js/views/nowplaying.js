@@ -5,7 +5,9 @@ import { h, icon, clear, formatClock } from '../dom.js';
 import { api } from '../api.js';
 import { setTitle, goBack, updatePrefs, navigate, refreshView } from '../app.js';
 import { button, emptyState, art, sliderText, percentSlider } from '../components.js';
-import { music, trackList, openQueue, openSpeed, openSleep } from '../music.js';
+import { music, openQueue, openSpeed, openSleep } from '../music.js';
+import { html, render as draw } from '../ui.js';
+import { TrackList } from '../ui/music.js';
 import { chapterAt, leftText } from '../spoken-time.js';
 import { setBackdrop } from '../backdrop.js';
 
@@ -143,7 +145,8 @@ export async function render(el, params, query = {}) {
   }
   function drawQueue() {
     const upcoming = music.queue.items.slice(music.queue.index + 1);
-    clear(queueEl).append(h('h2', {}, 'Queue'), upcoming.length ? trackList(upcoming, { numbers: false, showAlbum: true, queueOffset: music.queue.index + 1 }) : h('p', { class: 'muted' }, 'Nothing more queued.'));
+    // Until this page is a component (Task 6): the queue's contents are drawn by Preact, its song rows a TrackList.
+    draw(html`<h2>Queue</h2>${upcoming.length ? html`<${TrackList} tracks=${upcoming} numbers=${false} showAlbum=${true} queueOffset=${music.queue.index + 1} />` : html`<p class="muted">Nothing more queued.</p>`}`, queueEl);
   }
   function tick() {
     const pos = music.position;
@@ -230,6 +233,7 @@ export async function render(el, params, query = {}) {
       flushVolume(); // leaving straight after a change still keeps it
     }
     document.documentElement.classList.remove('nowplaying-open');
+    draw(null, queueEl); // its song rows stop listening to the engine
   };
 }
 
