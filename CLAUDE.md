@@ -120,7 +120,7 @@ Spec/plan: `docs/superpowers/specs|plans/2026-11-18-atomix-jellyfin-api*`. Infus
   (`views/item.js` + `item-show.js` + `item-music.js`, pieces in `ui/detail.js`, rules in `item-rules.js`; merged 18 Nov).
   Books, podcasts and audiobooks are still their older modules, handed the data by the title page's `load()`.
   The Live TV guide and Recordings (`views/guide.js`, `views/recordings.js`; rules in `guide-rules.js` and
-  `recordings-rules.js`; branch `Atomix/guide-preact-4012ac`, 20 Nov, not merged). The programme sheet and Record series
+  `recordings-rules.js`; merged into `main` 20 Nov, a fast-forward; not pushed). The programme sheet and Record series
   stay dialogs with DOM bodies (`openProgramme` is exported from `views/guide.js`); `live-bits.js` stays for the sheet.
   Fixed on the way: `?channel=` past row 50 draws and focuses that channel; a group change no longer draws rows twice; the
   phone list shows the last channel/day picked; an empty channel list on a phone no longer throws; the more-rows observer
