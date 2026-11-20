@@ -184,7 +184,7 @@ for (const theme of THEMES) {
         await until(page, (id) => !document.querySelector(`main .track-row[data-id="${id}"]`)?.classList.contains('is-playing'), t.harbourLight, 3000);
       }
 
-      // The up-next list on Now Playing: a click jumps to its place in the queue; whatever is marked is the playing song.
+      // The up-next list on Now Playing: a click jumps to its place in the queue.
       await act(page, 'stop');
       await go(page, '#/');
       await playAt(page, [t.harbourLight, t.slackTide, t.saltLine, t.lowerStill], 0, 2.5);
@@ -195,9 +195,23 @@ for (const theme of THEMES) {
       ok('up-next: a click jumps (queue.index = offset + i)', await until(page, () => window.__music.queue.index === 2, null));
       const s1 = await st(page);
       ok('up-next: the queue itself is unchanged by the jump', JSON.stringify(s1.items) === JSON.stringify([t.harbourLight, t.slackTide, t.saltLine, t.lowerStill]) && s1.id === t.saltLine);
+
+      // The playing song also later in the queue: that up-next row carries the playing marks (today's code marks by song id).
+      await act(page, 'stop');
+      await go(page, '#/');
+      await playAt(page, [t.harbourLight, t.slackTide, t.harbourLight], 0, 2.5);
+      await go(page, '#/now-playing', '.np-queue .track-row');
+      await until(page, () => document.querySelectorAll('.np-queue .track-row').length === 2, null);
+      const up = (r) => r.map((x) => ({ id: x.id, cur: x.cur, playing: x.playing, aria: x.aria }));
+      m = up(await marks('.np-queue .track-row'));
+      ok('up-next, paused: the playing song row is-current with aria-current, not is-playing; the other row bare', m.length === 2 && m[1].id === t.harbourLight && m[1].cur && m[1].aria === 'true' && !m[1].playing && !m[0].cur && !m[0].aria && !m[0].playing, JSON.stringify(m));
+      await act(page, 'play');
       await playedSome(page);
-      m = await marks('.np-queue .track-row');
-      ok('up-next: only the playing song\'s row can be marked, and the marks match (aria-current, is-playing)', m.every((r) => !r.cur || (r.id === t.saltLine && r.aria === 'true')) && m.every((r) => !r.playing || r.cur), JSON.stringify(m));
+      ok('up-next, playing: is-playing on that row', await until(page, () => document.querySelector('.np-queue .track-row:nth-child(2)')?.classList.contains('is-playing'), null, 4000), JSON.stringify(up(await marks('.np-queue .track-row'))));
+      await act(page, 'pause');
+      ok('up-next, paused again: is-playing goes, is-current stays', await until(page, () => { const r = document.querySelector('.np-queue .track-row:nth-child(2)'); return !r.classList.contains('is-playing') && r.classList.contains('is-current'); }, null, 4000));
+      await act(page, 'next'); // s plays: the h copy is no longer marked
+      ok('up-next, Next: the mark leaves that row', await until(page, () => !document.querySelector('.np-queue .track-row.is-current'), null, 4000), JSON.stringify(up(await marks('.np-queue .track-row'))));
       await act(page, 'stop');
     });
   }
@@ -481,10 +495,16 @@ for (const theme of THEMES) {
       });
       let w = await where();
       ok('focus stays on the second copy across a mark change', w.onButton && w.index === 3, JSON.stringify(w));
-      for (let i = 0; i < 3; i++) await act(page, 'repeat'); // each is a change that may redraw the list; back to off
+      await act(page, 'addToQueue', [t.lowerStill]); // a queue edit: the list is drawn again (a sixth row), the focused row is not moved
+      await until(page, () => document.querySelectorAll('.np-queue .track-row').length === 6, null);
       await sleep(400);
       w = await where();
-      ok('focus does not jump to the other copy across a redraw', !(w.onButton && w.index === 0), JSON.stringify(w));
+      // Today the list is rebuilt and the focus falls to the page (body); a keyed rewrite should keep it on the second
+      // copy (index 3). Either way it must never land on another row, the other copy included.
+      const kept = w.onButton && w.index === 3;
+      const lost = !w.onButton && w.index === -1 && (await page.evaluate(() => document.activeElement === document.body));
+      ok('after the list is drawn again (a sixth row) focus is on the second copy, or (today) fell to the page, never on another row', kept || lost, JSON.stringify(w));
+      console.log(`NOTE focus after the redraw: ${kept ? 'kept on the second copy' : 'lost to the page (today)'}`);
     });
 
     // 2: lyrics that answer 204, fail or are empty; synced lyrics that begin after the position.
