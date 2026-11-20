@@ -14,7 +14,7 @@ if (!process.env.BASE || /:8787/.test(process.env.BASE)) {
   console.log('Set BASE to the dev Atomix (for example http://localhost:8797). This check changes the profile, so it will not run against the default or the live server on port 8787.');
   process.exit(2);
 }
-const ALL = ['tabstop', 'deeplink', 'arrows', 'edge', 'held', 'updown', 'tools', 'group', 'more', 'phone', 'phone-race', 'sheet', 'empty', 'unknown', 'leaks'];
+const ALL = ['tabstop', 'deeplink', 'arrows', 'edge', 'held', 'updown', 'tools', 'group', 'more', 'group-race', 'more-race', 'quiet', 'phone', 'phone-race', 'sheet', 'empty', 'unknown', 'leaks'];
 const SKIP = (process.env.SKIP || '').split(',');
 const LEGS = (process.argv.slice(2).length ? process.argv.slice(2) : ALL).filter((l) => !SKIP.includes(l));
 const STEP = 2 * 3600_000;
@@ -222,6 +222,62 @@ if (LEGS.includes('more')) {
   check('more: scrolling down draws the rest (60)', r.length === 60, `rows ${r.length}`);
   check('more: no channel drawn twice', new Set(r).size === r.length, `unique ${new Set(r).size}`);
   check('more: no page errors', !errors.length, errors.join(' | '));
+  await browser.close();
+}
+
+if (LEGS.includes('group-race')) {
+  // A group picked, then Later pressed before the group's rows have arrived: Later keeps the group.
+  const { browser, page, errors, live } = await start();
+  const f0 = await from(page);
+  live.set({ delay: 600 });
+  await page.focus('.guide-group');
+  await page.selectOption('.guide-group', 'News');
+  await page.waitForTimeout(100);
+  await page.focus('.guide-tools button:has-text("Later")');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(3000);
+  const r = await rows(page);
+  check('group-race: Later keeps the group just picked', r.length === 20 && r.every((id) => (id - 100) % 3 === 0), JSON.stringify(r));
+  check('group-race: the picker still says News', (await page.$eval('.guide-group', (s) => s.value)) === 'News');
+  check('group-race: the window moved on', (await from(page)) === f0 + STEP, `${f0} -> ${await from(page)}`);
+  check('group-race: no page errors', !errors.length, errors.join(' | '));
+  await browser.close();
+}
+
+if (LEGS.includes('more-race')) {
+  // More rows asked for while a window move loads: every row drawn has the new window's programmes.
+  const { browser, page, errors, live } = await start();
+  live.set({ delay: 700 });
+  await page.focus('.guide-tools button:has-text("Later")');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(100);
+  await page.$eval('.guide-more', (s) => s.scrollIntoView());
+  await page.waitForTimeout(4000);
+  const bad = await page.$$eval('.guide-row', (rs) => {
+    const to = Number(document.querySelector('.guide-grid').dataset.to);
+    return rs.filter((r) => { const ends = [...r.querySelectorAll('.guide-prog')].map((x) => Number(x.dataset.end)); return ends.length && Math.max(...ends) < to; }).length;
+  });
+  check('more-race: no row is missing the end of the window', bad === 0, `rows short ${bad}`);
+  check('more-race: 60 rows, none twice', (await rows(page)).length === 60 && new Set(await rows(page)).size === 60, `rows ${(await rows(page)).length}`);
+  check('more-race: no page errors', !errors.length, errors.join(' | '));
+  await browser.close();
+}
+
+if (LEGS.includes('quiet')) {
+  // An arrow inside the window touches only the cells that change, not every cell's style.
+  const init = () => {
+    window.__styleWrites = 0;
+    const set = Element.prototype.setAttribute;
+    Element.prototype.setAttribute = function (n, v) { if (n === 'style') window.__styleWrites++; return set.call(this, n, v); };
+  };
+  const { browser, page, errors } = await start({ init });
+  await tabStop(page);
+  await page.evaluate(() => { window.__styleWrites = 0; });
+  await key(page, 'ArrowRight');
+  await key(page, 'ArrowDown');
+  const writes = await page.evaluate(() => window.__styleWrites);
+  check('quiet: two arrows write no more than a few styles', writes <= 10, `style writes ${writes}`);
+  check('quiet: no page errors', !errors.length, errors.join(' | '));
   await browser.close();
 }
 

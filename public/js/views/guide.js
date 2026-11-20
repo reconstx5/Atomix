@@ -176,10 +176,22 @@ function stopFor(rows, focus) {
   const t = tabStop(rows);
   return { stop: t && { channel: t.channel, key: cellKey(rows.find((r) => r.channel === t.channel).cells[t.index]) }, found: false };
 }
-// The cells' and ruler's style is written as an attribute, as before (a style property is read back respaced).
-const styled = (s) => (el) => el?.setAttribute('style', s);
+// The cells' and ruler's style is written as an attribute, as before (a style property is read back respaced). One
+// callback per string, so a render that doesn't change a style doesn't write it again.
+const once = (make) => {
+  const m = new Map();
+  return (s) => {
+    let f = m.get(s);
+    if (!f) {
+      if (m.size > 5000) m.clear();
+      m.set(s, (f = make(s)));
+    }
+    return f;
+  };
+};
+const styled = once((s) => (el) => el?.setAttribute('style', s));
 // Preact leaves out an option's value when it is the same as its text; the group options keep it, as before.
-const valueAttr = (v) => (el) => el?.setAttribute('value', v);
+const valueAttr = once((v) => (el) => el?.setAttribute('value', v));
 
 function GuideGrid({ data }) {
   const { all, names } = data;
@@ -193,6 +205,8 @@ function GuideGrid({ data }) {
   const cur = useRef(g);
   cur.current = g;
   const fromRef = useRef(data.from); // the window last asked for (Earlier/Later count from it while it loads)
+  const groupRef = useRef('All'); // the group last asked for (a move while it loads keeps it)
+  const drawnRows = useRef(new WeakMap()); // row model -> { tabKey, v }: a row is drawn again only when it changes
   const gen = useRef(0); // bumped by every draw: an answer for an older one (or "more rows" for it) is dropped
   const moving = useRef(false); // a window move is loading: arrows meanwhile are dropped (holding Left mustn't stack moves)
   const more = useRef(false); // "more rows" is loading
@@ -204,8 +218,10 @@ function GuideGrid({ data }) {
   const alive = useRef(true);
 
   /** Draw the rows again (a window move, a group, a changed recording); `focus` { channel, at } moves focus there. */
-  async function draw({ from = fromRef.current, group = cur.current.group, reset = false } = {}, focus = null) {
+  async function draw({ from = fromRef.current, group = groupRef.current, reset = false } = {}, focus = null) {
     const mine = ++gen.current;
+    groupRef.current = group;
+    if (group !== cur.current.group) reset = true;
     const shown = channelsForGroup(all, group);
     const drawn = reset ? Math.min(PAGE, shown.length) : Math.max(cur.current.drawn, Math.min(PAGE, shown.length));
     fetched.current = await ensure(cache.current, fetched.current, shown.slice(0, drawn).map((c) => c.id), from);
@@ -224,7 +240,8 @@ function GuideGrid({ data }) {
   async function moreRows() {
     const s = cur.current;
     const shown = channelsForGroup(all, s.group);
-    if (more.current || s.drawn >= shown.length) return;
+    // A window move or group change still loading: the rows wait for it (the sentinel is looked at again after it).
+    if (more.current || s.drawn >= shown.length || fromRef.current !== s.from || groupRef.current !== s.group) return;
     more.current = true;
     const mine = gen.current;
     try {
@@ -232,7 +249,7 @@ function GuideGrid({ data }) {
       fetched.current = await ensure(cache.current, fetched.current, next.map((c) => c.id), s.from);
       if (mine !== gen.current || !alive.current) return; // the window moved (or the rows were drawn again) meanwhile
       const now = Date.now();
-      setG((x) => ({ ...x, drawn: x.drawn + next.length, rows: [...x.rows, ...next.map((c) => rowModel(c, cache.current, x.from, now))] }));
+      setG((x) => (x.from !== s.from || x.group !== s.group || x.drawn !== s.drawn ? x : { ...x, drawn: x.drawn + next.length, rows: [...x.rows, ...next.map((c) => rowModel(c, cache.current, s.from, now))] }));
     } finally {
       more.current = false;
     }
@@ -331,6 +348,20 @@ function GuideGrid({ data }) {
       </button>
     </div>`;
   };
+  // A row's markup is kept until its model (a new draw) or its part of the tab stop changes: an arrow or a tick
+  // doesn't touch the other rows.
+  const row = (r) => {
+    const { c, cells } = r;
+    const tabKey = stop && stop.channel === c.id ? stop.key : null;
+    const hit = drawnRows.current.get(r);
+    if (hit && hit.tabKey === tabKey) return hit.v;
+    const v = html`<div key=${c.id} class=${c.unplayable ? 'guide-row is-unplayable' : 'guide-row'} role="row" data-channel=${c.id}>
+          <div class="guide-chan" role="rowheader"><${ChannelLogo} c=${c} size="sm" /><span class="live-num">${c.number != null ? String(c.number) : ''}</span><span class="guide-chan-name">${c.name}</span><${LockBadge} c=${c} />${c.unplayable ? html`<span class="chip live-cant" aria-hidden="true">Can't play here</span>` : null}</div>
+          <div class="guide-track">${cells.map((x) => cell(c, x))}</div>
+        </div>`;
+    drawnRows.current.set(r, { tabKey, v });
+    return v;
+  };
   return html`
     <header class="page-head"><h1>Guide</h1><div class="actions"><${Button} label="Channels" icon="live" variant="ghost" href="#/live" /></div></header>
     <div class="guide-tools">
@@ -343,10 +374,7 @@ function GuideGrid({ data }) {
     <div class="guide-body">
       <div class="guide-ruler" aria-hidden="true">${rulerTicks(from).map((t) => html`<span key=${t} ref=${styled(`left:${pct(t, from)}`)}>${clockTime(t)}</span>`)}</div>
       <div ref=${grid} class="guide-grid" role="grid" aria-label="TV guide" data-from=${String(from)} data-to=${String(from + SPAN)} onKeyDown=${onKeyDown}>
-        ${rows.map(({ c, cells }) => html`<div key=${c.id} class=${c.unplayable ? 'guide-row is-unplayable' : 'guide-row'} role="row" data-channel=${c.id}>
-          <div class="guide-chan" role="rowheader"><${ChannelLogo} c=${c} size="sm" /><span class="live-num">${c.number != null ? String(c.number) : ''}</span><span class="guide-chan-name">${c.name}</span><${LockBadge} c=${c} />${c.unplayable ? html`<span class="chip live-cant" aria-hidden="true">Can't play here</span>` : null}</div>
-          <div class="guide-track">${cells.map((x) => cell(c, x))}</div>
-        </div>`)}
+        ${rows.map(row)}
       </div>
       <div class="guide-now" aria-hidden="true" hidden=${line.hidden} style=${{ '--x': String(line.x) }} />
       <div ref=${sentinel} class="guide-more" aria-hidden="true" />
