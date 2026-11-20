@@ -7,3 +7,8 @@ nodeflix.config.json
 .DS_Store
 Thumbs.db
 devtools/out/
+
+# Working notes kept on this PC only (not on GitHub)
+CLAUDE.md
+docs/HANDOFF-2026-11.md
+docs/superpowers/
