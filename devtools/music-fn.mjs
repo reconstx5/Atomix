@@ -458,6 +458,15 @@ for (const theme of THEMES) {
       ok('Now Playing adds listeners while open (the count is meaningful)', peak > base, `${base} -> ${peak}`);
       ok('open and leave 20 times: the listeners are back to the starting count', after === base, `${base} -> ${after}`);
       ok('html.nowplaying-open is absent after leaving', await page.evaluate(() => !document.documentElement.classList.contains('nowplaying-open')));
+      // Left while the lyrics answer is still out (held 1.5 s): the late answer must not add listeners to a page that is gone.
+      await routeLyrics(page, (id) => (id === t.harbourLight ? { delay: 1500, json: { synced: true, lines: [{ at: 0, text: 'Held line' }], source: 'file' } } : null));
+      await hashTo(page, '#/now-playing');
+      await page.waitForSelector('html.nowplaying-open .np-looking', { timeout: 8000 });
+      await hashTo(page, '#/');
+      await page.waitForFunction(() => !document.documentElement.classList.contains('nowplaying-open'), null, { timeout: 8000 });
+      await sleep(2300);
+      const late = await page.evaluate(() => window.__listeners());
+      ok('left during a held lyrics answer: the listeners are back to the starting count once it lands', late === base, `${base} -> ${late}`);
     });
   }
 

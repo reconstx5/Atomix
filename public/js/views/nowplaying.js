@@ -233,6 +233,7 @@ export async function render(el, params, query = {}) {
       flushVolume(); // leaving straight after a change still keeps it
     }
     document.documentElement.classList.remove('nowplaying-open');
+    token++; // a lyrics answer still out is dropped (it would draw the queue again into the page that is gone)
     draw(null, queueEl); // its song rows stop listening to the engine
   };
 }
