@@ -119,9 +119,19 @@ Spec/plan: `docs/superpowers/specs|plans/2026-11-18-atomix-jellyfin-api*`. Infus
 - Done: Live TV, libraries, search, genre/person (v0.26); Home and Lists (`views/home.js`, `views/lists.js`, v0.28); the title page
   (`views/item.js` + `item-show.js` + `item-music.js`, pieces in `ui/detail.js`, rules in `item-rules.js`; merged 18 Nov).
   Books, podcasts and audiobooks are still their older modules, handed the data by the title page's `load()`.
-- Next: Guide/Recordings, music, books, Settings, the player.
+  The Live TV guide and Recordings (`views/guide.js`, `views/recordings.js`; rules in `guide-rules.js` and
+  `recordings-rules.js`; branch `Atomix/guide-preact-4012ac`, 20 Nov, not merged). The programme sheet and Record series
+  stay dialogs with DOM bodies (`openProgramme` is exported from `views/guide.js`); `live-bits.js` stays for the sheet.
+  Fixed on the way: `?channel=` past row 50 draws and focuses that channel; a group change no longer draws rows twice; the
+  phone list shows the last channel/day picked; an empty channel list on a phone no longer throws; the more-rows observer
+  is disconnected when the guide is left.
+- Next: music, books, Settings, the player.
 - Title-page checks (dev server, `BASE=http://localhost:8797`): `item-fn.mjs` (behaviour, made-up titles from
   `item-fixtures.mjs`; run `item-users.mjs` once for guest and its Kids profile), `item-blocks.mjs` (pieces vs older helpers).
+- Guide/Recordings checks (dev server, `BASE=...`): `guide-fn.mjs`, `recordings-fn.mjs` (made-up Live TV from
+  `live-fixtures.mjs`, clock 11 Nov 2026 19:10 NZ), and `LIVE=1 node devtools/fixed-compare.mjs record <dir>` (plus
+  `RECORDINGS=kids|error`) for before/after. Router note: on an in-app move to `?channel=` the page is still inert when
+  the router focuses the marked programme, so focus falls to the first control (not a guide issue; unchanged).
 - Check a move with `devtools/compare.mjs` (markup and pixels, every theme, desktop and phone).
 
 ## Browser checks
