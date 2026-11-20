@@ -1,16 +1,16 @@
 // The music screens' Preact parts: useMusic() (a value from the music engine, re-rendering when it changes), the song
 // rows (TrackList: album pages, the Songs view, search and Now Playing's up next) and a song's "…" menu. Same
 // elements, classes and attributes as the engine's older trackList(); each list marks the playing song itself.
-import { html, useState, useRef, useLayoutEffect } from '../ui.js';
+import { html, render, useState, useRef, useLayoutEffect } from '../ui.js';
 import { Icon } from './basics.js';
 import { Art } from './cards.js';
 import { formatClock } from '../dom.js';
-import { openSheet } from '../components.js';
+import { openSheet, openDialog } from '../components.js';
 import { addToPlaylistItems } from '../lists.js';
 import { openRating } from '../rating.js';
 import { downloadSheetItem } from '../offline/ui.js';
 import { music } from '../music.js';
-import { discRows, trackNumber, subLine } from '../nowplaying-rules.js';
+import { discRows, trackNumber, subLine, queueFocusAfter } from '../nowplaying-rules.js';
 
 const same = (a, b) => Object.is(a, b) || (Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => Object.is(v, b[i])));
 
@@ -66,6 +66,70 @@ export function TrackList({ tracks, showAlbum = false, showArtist = true, number
       </li>`;
     })}
   </ol>`;
+}
+
+/**
+ * The queue dialog's list: the songs still to come (the playing one is on the mini-player already). After a move or
+ * remove, focus stays on the same kind of button (queueFocusAfter); otherwise on whichever row control had it.
+ */
+export function QueueList({ list }) {
+  const pending = useRef(null); // the data-qkey to refocus after the next redraw
+  const want = useRef(null);
+  const [, length, index] = useMusic((m) => [m.queue.items.map((t) => t.id).join(','), m.queue.length, m.queue.index], ['change']);
+  const q = music.queue;
+  // Read while rendering, before the DOM changes: the keyed control that has focus now.
+  want.current = pending.current ?? document.activeElement?.dataset?.qkey ?? null;
+  useLayoutEffect(() => {
+    pending.current = null;
+    const keep = want.current;
+    const target = keep && list.querySelector(`[data-qkey="${keep}"]:not(:disabled)`);
+    if (target) target.focus({ preventScroll: false });
+  });
+  const act = (i, action, fn) => () => {
+    pending.current = queueFocusAfter(action, i, q.length);
+    fn();
+  };
+  const upcoming = q.items.map((t, i) => [t, i]).filter(([, i]) => i > q.index);
+  const body = !q.length
+    ? html`<li class="muted">Nothing queued.</li>`
+    : !upcoming.length
+      ? html`<li class="muted">Nothing more queued.</li>`
+      : upcoming.map(([t, i]) => html`<li key=${`${t.id}:${i}`} class="queue-row">
+          <button type="button" class="queue-main" data-qkey=${`${i}:main`} onClick=${() => { pending.current = `${i}:main`; music.jump(i); }}>
+            <${Art} key=${t.poster || ''} src=${t.poster} title=${t.albumTitle || t.title} kind="square" />
+            <span class="queue-text"><strong>${t.title}</strong><small>${[t.artist, t.albumTitle].filter(Boolean).join(' · ')}</small></span>
+            <span class="muted small">${t.duration ? formatClock(t.duration) : ''}</span>
+          </button>
+          <span class="queue-tools">
+            <button type="button" class="mbtn" aria-label=${`Move “${t.title}” up`} title="Move up" disabled=${i <= q.index + 1} data-qkey=${`${i}:up`} onClick=${act(i, 'up', () => music.move(i, i - 1))}><${Icon} name="up" size=${18} /></button>
+            <button type="button" class="mbtn" aria-label=${`Move “${t.title}” down`} title="Move down" disabled=${i === q.length - 1} data-qkey=${`${i}:down`} onClick=${act(i, 'down', () => music.move(i, i + 1))}><${Icon} name="chevronDown" size=${18} /></button>
+            <button type="button" class="mbtn" aria-label=${`Remove “${t.title}”`} title="Remove" data-qkey=${`${i}:remove`} onClick=${act(i, 'remove', () => music.remove(i))}><${Icon} name="close" size=${18} /></button>
+          </span>
+        </li>`);
+  return body;
+}
+
+/** The Queue dialog. Its list stops listening when the dialog closes. */
+export function openQueue() {
+  let list;
+  openDialog({
+    title: 'Queue',
+    wide: true,
+    body: () => {
+      list = document.createElement('ol');
+      list.className = 'queue-list';
+      list.setAttribute('role', 'list');
+      render(html`<${QueueList} list=${list} />`, list);
+      return list;
+    },
+    actions: [
+      { label: 'Clear queue', value: 'clear', variant: 'ghost' },
+      { label: 'Done', value: 'close', variant: 'primary' },
+    ],
+  }).then((v) => {
+    render(null, list);
+    if (v === 'clear') music.stop();
+  });
 }
 
 /** A song's "…" sheet. */

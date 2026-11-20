@@ -8,7 +8,7 @@ import { Queue } from './queue.js';
 import { ratingControl } from './rating.js';
 import { detectCaps, needsMediaLink } from './caps.js';
 import { markPlaying as gatePlaying } from './gate.js';
-import { art, toast, openDialog, openSheet, sliderText, percentSlider } from './components.js';
+import { art, toast, openSheet, sliderText, percentSlider } from './components.js';
 import { VOLUME_KEY, musicKey } from './storage.js';
 import { partAt, bookTime, chapterAt, leftText, fadeVolume, SPEEDS, FADE_MS } from './spoken-time.js';
 
@@ -1026,70 +1026,7 @@ function changed() {
 
 // ---- The queue dialog: the songs still to come (the playing one is on the mini-player already) ----
 export function openQueue() {
-  let list;
-  let focusKey = null; // e.g. "3:up" — refocused after the list redraws
-  const act = (key, fn) => () => {
-    focusKey = key;
-    fn();
-  };
-  const render = () => {
-    const keep = focusKey ?? document.activeElement?.dataset?.qkey ?? null;
-    focusKey = null;
-    clear(list);
-    if (!queue.length) {
-      list.append(h('li', { class: 'muted' }, 'Nothing queued.'));
-      return;
-    }
-    const upcoming = queue.items.map((t, i) => [t, i]).filter(([, i]) => i > queue.index);
-    if (!upcoming.length) {
-      list.append(h('li', { class: 'muted' }, 'Nothing more queued.'));
-      return;
-    }
-    upcoming.forEach(([t, i]) => {
-      const isCur = false;
-      list.append(
-        h(
-          'li',
-          { class: `queue-row${isCur ? ' is-current' : ''}${i < queue.index ? ' is-past' : ''}` },
-          h(
-            'button',
-            { type: 'button', class: 'queue-main', 'aria-current': isCur ? 'true' : null, dataset: { qkey: `${i}:main` }, onClick: act(`${i}:main`, () => music.jump(i)) },
-            art(t.poster, t.albumTitle || t.title, { kind: 'square' }),
-            h('span', { class: 'queue-text' }, h('strong', {}, t.title), h('small', {}, [t.artist, t.albumTitle].filter(Boolean).join(' · '))),
-            h('span', { class: 'muted small' }, t.duration ? formatClock(t.duration) : ''),
-          ),
-          h(
-            'span',
-            { class: 'queue-tools' },
-            h('button', { type: 'button', class: 'mbtn', 'aria-label': `Move “${t.title}” up`, title: 'Move up', disabled: i <= queue.index + 1, dataset: { qkey: `${i}:up` }, onClick: act(`${i - 1}:up`, () => music.move(i, i - 1)) }, icon('up', { size: 18 })),
-            h('button', { type: 'button', class: 'mbtn', 'aria-label': `Move “${t.title}” down`, title: 'Move down', disabled: i === queue.length - 1, dataset: { qkey: `${i}:down` }, onClick: act(`${i + 1}:down`, () => music.move(i, i + 1)) }, icon('chevronDown', { size: 18 })),
-            h('button', { type: 'button', class: 'mbtn', 'aria-label': `Remove “${t.title}”`, title: 'Remove', dataset: { qkey: `${i}:remove` }, onClick: act(`${Math.min(i, queue.length - 2)}:remove`, () => music.remove(i)) }, icon('close', { size: 18 })),
-          ),
-        ),
-      );
-    });
-    const target = keep && list.querySelector(`[data-qkey="${keep}"]:not(:disabled)`);
-    if (target) target.focus({ preventScroll: false });
-    else list.querySelector('.queue-row.is-current')?.scrollIntoView({ block: 'nearest' });
-  };
-  const onChange = () => render();
-  openDialog({
-    title: 'Queue',
-    wide: true,
-    body: () => {
-      list = h('ol', { class: 'queue-list', role: 'list' });
-      render();
-      events.addEventListener('change', onChange);
-      return list;
-    },
-    actions: [
-      { label: 'Clear queue', value: 'clear', variant: 'ghost' },
-      { label: 'Done', value: 'close', variant: 'primary' },
-    ],
-  }).then((v) => {
-    events.removeEventListener('change', onChange);
-    if (v === 'clear') music.stop();
-  });
+  import('./ui/music.js').then((m) => m.openQueue());
 }
 
 // ---- v0.22: the bar's second line for a book or an episode (the chapter, then who wrote or hosts it) ----
