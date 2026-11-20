@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { routeItems, FIXTURE_PAGES } from './item-fixtures.mjs';
+import { ids as musicIds, MUSIC_PAGES, routeMusicQuiet, stopMusic } from './music-fixtures.mjs';
 const { chromium } = createRequire(import.meta.url)('playwright');
 const BASE = process.env.BASE;
 const [mode, a, b] = process.argv.slice(2);
@@ -12,11 +13,17 @@ if (mode === 'capture' && (!BASE || /:8787/.test(BASE))) {
   console.log('Set BASE to the dev Atomix (for example http://localhost:8797). This check changes the profile, so it will not run against the default or the live server on port 8787.');
   process.exit(2);
 }
+// MUSIC=1: the made-up music (make-music.mjs, music-fixtures.mjs) instead: songs and albums, Now Playing in its states,
+// the queue dialog. Each page is started from Home with the music stopped, playback paused at 2.5 s.
+const MUSIC = process.env.MUSIC === '1';
 // Today's pages plus the made-up title pages (item-fixtures.mjs).
 const PAGES = (process.env.PAGES || ['#/', '#/item/1', '#/item/9', '#/item/10', '#/lists', '#/lists/1', '#/lists/2', ...FIXTURE_PAGES].join(',')).split(',');
 const T = new Date('2026-11-17T20:00:00').getTime(); // a fixed clock: "Ends at" reads the same in both runs
 const THEMES = (process.env.THEMES || 'orbit,arctic,arctic-side,midnight,daylight,harbour,obsidian').split(',');
 const SIZES = { desk: [1917, 992], phone: [390, 844] };
+let musicEntries = null; // MUSIC=1: { name, path, play, after }, once the ids are known
+// Whitespace inside style="..." is evened out (a style set as a string and one set from script differ only in spacing).
+const evenStyles = (html) => html.replace(/ style="([^"]*)"/g, (m, v) => ` style="${v.replace(/\s*([:;])\s*/g, '$1').replace(/;$/, '').trim()}"`);
 const name = (t, s, p) => `${t}-${s}-${p.replace(/[#/?=&]+/g, '_')}`;
 
 if (mode === 'capture') {
@@ -39,18 +46,40 @@ if (mode === 'capture') {
         await route.fulfill({ response: res, json: data });
       });
       await routeItems(page);
+      if (MUSIC) {
+        await routeMusicQuiet(page);
+        musicEntries ||= MUSIC_PAGES(await musicIds(ctx));
+      }
       const errors = [];
       page.on('pageerror', (e) => errors.push(String(e)));
-      for (const p of PAGES) {
-        await page.goto(`${BASE}/${p}`);
-        await page.keyboard.press('Escape').catch(() => {});
-        await page.waitForTimeout(1800);
-        const html = await page.evaluate(() => {
+      for (const entry of MUSIC ? musicEntries : PAGES.map((p) => ({ name: name(theme, size, p).slice(`${theme}-${size}-`.length), path: p }))) {
+        const p = entry.path;
+        if (MUSIC) {
+          // Home first, music stopped and the page's own playback set up; then move inside the app (as a click would).
+          await page.goto(`${BASE}/#/`);
+          await page.keyboard.press('Escape').catch(() => {});
+          await page.waitForTimeout(1200);
+          await stopMusic(page);
+          await entry.play?.(page);
+          await page.evaluate((h) => { location.hash = h; }, p);
+          await page.waitForTimeout(1800);
+          await entry.after?.(page);
+          if (/^search/.test(entry.name)) await page.evaluate(() => document.activeElement?.blur()); // the search box takes the focus late: sometimes before the picture, sometimes after
+          await page.waitForTimeout(entry.after ? 1200 : 400);
+          if (entry.play) await page.waitForTimeout(800); // lyrics are placed once the page has its layout
+        } else {
+          await page.goto(`${BASE}/${p}`);
+          await page.keyboard.press('Escape').catch(() => {});
+          await page.waitForTimeout(1800);
+        }
+        let html = await page.evaluate((withDialog) => {
           const m = document.querySelector('main').cloneNode(true);
           m.querySelectorAll('[data-row="random-picks/random"]').forEach((n) => n.remove());
-          return m.outerHTML.replace(/\?v=\d+/g, '?v=X').replace(/ style=""/g, '');
-        });
-        const file = name(theme, size, p);
+          const dlg = withDialog ? [...document.querySelectorAll('dialog[open]')].map((d) => d.outerHTML).join('') : '';
+          return m.outerHTML.replace(/\?v=\d+/g, '?v=X').replace(/ style=""/g, '') + dlg;
+        }, MUSIC);
+        if (MUSIC) html = evenStyles(html);
+        const file = MUSIC ? `${theme}-${size}-${entry.name}` : name(theme, size, p);
         fs.writeFileSync(path.join(a, `${file}.html`), html.replace(/></g, '>\n<'));
         await page.screenshot({ path: path.join(a, `${file}.png`), mask: [page.locator('[data-row="random-picks/random"]'), page.locator('.nav-clock, .orbit-clock, time, .ends-at')] });
       }
@@ -61,6 +90,7 @@ if (mode === 'capture') {
   await browser.close();
 } else if (mode === 'diff') {
   const { execSync } = await import('node:child_process');
+  if (MUSIC) process.env.TOLERANCE ||= '3'; // a blurred backdrop or a scaled cover can be a step or two off between two runs (a real change is far more)
   let bad = 0;
   // Whether a picture had finished loading when the page was read (loaded, is-instant) is timing, not markup.
   const settle = (t) => t.replace(/class="art art-(\w+)[^"]*"/g, 'class="art art-$1"');
