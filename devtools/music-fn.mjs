@@ -508,12 +508,8 @@ for (const theme of THEMES) {
       await until(page, () => document.querySelectorAll('.np-queue .track-row').length === 6, null);
       await sleep(400);
       w = await where();
-      // Today the list is rebuilt and the focus falls to the page (body); a keyed rewrite should keep it on the second
-      // copy (index 3). Either way it must never land on another row, the other copy included.
-      const kept = w.onButton && w.index === 3;
-      const lost = !w.onButton && w.index === -1 && (await page.evaluate(() => document.activeElement === document.body));
-      ok('after the list is drawn again (a sixth row) focus is on the second copy, or (today) fell to the page, never on another row', kept || lost, JSON.stringify(w));
-      console.log(`NOTE focus after the redraw: ${kept ? 'kept on the second copy' : 'lost to the page (today)'}`);
+      // The up-next rows are keyed: the focus stays on the second copy (index 3), never another row or the page.
+      ok('after the list is drawn again (a sixth row) focus stays on the second copy', w.onButton && w.index === 3, JSON.stringify(w));
     });
 
     // 2: lyrics that answer 204, fail or are empty; synced lyrics that begin after the position.
