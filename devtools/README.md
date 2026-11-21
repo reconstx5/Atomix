@@ -7,6 +7,8 @@ Small Playwright checks against a dev Atomix with made-up media. They need Node,
    `dallas` / `atomix-dev-1`.
 2. Run a check: `node devtools/home-fn.mjs` (each prints PASS/FAIL lines and exits 1 on a failure).
 
+**Music (Now Playing, song rows, queue list), a different dev server.** The music checks need music in the library, so they run on their own data: `make-music.mjs` into a media folder, a copy of the dev data with a Music and an Audiobooks library added, and a server from the checkout being tested (for example on :8798) with `ATOMIX_DATA_DIR` set to that copy, `ATOMIX_LRCLIB_BASE=http://127.0.0.1:9` and `ATOMIX_CAST_DISCOVERY=off`; the other checks above run on the plain dev data. Rerun `BASE=http://localhost:8798 node devtools/music-fn.mjs` and `BASE=http://localhost:8798 MUSIC=1 node devtools/compare.mjs capture <dir>` then `diff <a> <b>`. `gallery.mjs` reads only `fixed-compare.mjs` pictures, so the music before/after pictures are put side by side in a plain HTML page instead.
+
 | Check | What it covers |
 |---|---|
 | `home-fn.mjs` | Home: the spotlight follows the remote, the top area gets smaller past the first row, Enter and Back |
