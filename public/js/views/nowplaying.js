@@ -274,24 +274,29 @@ function SyncedLyrics({ lines, box, hold }) {
     const offset = li.offsetTop + li.offsetHeight / 2 - box.current.clientHeight / 2;
     list.current.style.transform = `translateY(${-Math.max(0, offset)}px)`;
   };
+  const lit = useRef(idx); // the line drawn lit: centring measures it only once its larger size is on the page
+  lit.current = idx;
+  const frame = useRef(0);
+  const follow = () => {
+    const i = currentLine(words.current, music.position);
+    if (i < 0 || i !== lit.current || Date.now() <= hold.current || !list.current) return; // a new line: its layout effect centres it
+    if (!list.current.isConnected) {
+      frame.current ||= requestAnimationFrame(() => ((frame.current = 0), follow())); // placed once the page is on screen
+      return;
+    }
+    centre(list.current.children[i].firstChild);
+  };
+  const followRef = useRef(follow);
+  followRef.current = follow;
   useLayoutEffect(() => {
-    let frame = 0;
-    const follow = () => {
-      const i = currentLine(words.current, music.position);
-      if (i < 0 || Date.now() <= hold.current || !list.current) return;
-      if (!list.current.isConnected) {
-        frame ||= requestAnimationFrame(() => ((frame = 0), follow())); // placed once the page is on screen
-        return;
-      }
-      centre(list.current.children[i].firstChild);
-    };
-    for (const k of ['time', 'change', 'state']) music.events.addEventListener(k, follow);
-    follow();
+    const onEvent = () => followRef.current();
+    for (const k of ['time', 'change', 'state']) music.events.addEventListener(k, onEvent);
     return () => {
-      cancelAnimationFrame(frame);
-      for (const k of ['time', 'change', 'state']) music.events.removeEventListener(k, follow);
+      cancelAnimationFrame(frame.current);
+      for (const k of ['time', 'change', 'state']) music.events.removeEventListener(k, onEvent);
     };
   }, []);
+  useLayoutEffect(() => follow(), [idx]); // after the lit line's class is committed
   // The remote walks the lines: the list moves to the focused line.
   const onFocus = (e) => {
     hold.current = Date.now() + HOLD_MS;

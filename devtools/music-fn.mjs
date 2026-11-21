@@ -296,10 +296,25 @@ for (const theme of THEMES) {
       await sleep(200);
       const moved = await tf();
       ok('the list moved to the current line (the test is meaningful)', /translateY\(-[1-9]/.test(moved), moved);
+      // Paused, a seek into a new line: the list is placed for the lit line's own size (the lit line is larger), within 2 px.
+      await act(page, 'pause');
+      await act(page, 'seek', 4.0);
+      await until(page, () => Number(document.querySelector('.lyric-line.is-current')?.dataset.i) > 60, null);
+      await sleep(400);
+      const fit = await page.evaluate(() => {
+        const li = document.querySelector('.lyric-line.is-current');
+        const box = document.querySelector('.np-lyrics');
+        const want = Math.max(0, li.offsetTop + li.offsetHeight / 2 - box.clientHeight / 2);
+        const got = -Number((document.querySelector('.lyrics-synced').style.transform.match(/-?[\d.]+/) || [0])[0]);
+        return { i: li.dataset.i, want: Math.round(want * 10) / 10, got, off: Math.abs(want - got) };
+      });
+      ok('paused, a seek into a new line: the list is centred on the lit line (within 2 px)', fit.off <= 2, JSON.stringify(fit));
+      await act(page, 'play');
+      const moved2 = await tf();
       await page.focus('.lyric-line[data-i="90"]');
       await sleep(250);
       const held = await tf();
-      ok('focusing a line moves the list to it', held !== moved && /translateY\(-[1-9]/.test(held), `${moved} -> ${held}`);
+      ok('focusing a line moves the list to it', held !== moved2 && /translateY\(-[1-9]/.test(held), `${moved2} -> ${held}`);
       ok('the box itself does not scroll (scrollTop 0)', (await page.$eval('.np-lyrics', (e) => e.scrollTop)) === 0);
       await act(page, 'seek', 1.0); // one second on (or back): the current line changes
       ok('the current line changes', await until(page, () => Number(document.querySelector('.lyric-line.is-current')?.dataset.i) < 40, null));
