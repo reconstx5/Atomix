@@ -55,7 +55,7 @@ export function TrackList({ tracks, showAlbum = false, showArtist = true, number
       const on = Number(t.id) === currentId;
       const sub = subLine(t, showArtist, showAlbum);
       const src = t.poster || t.albumPoster;
-      return html`<li key=${`${t.id}:${i}`} class=${`track-row${on ? ' is-current' : ''}${on && playing ? ' is-playing' : ''}`} data-id=${t.id} aria-current=${on ? 'true' : null}>
+      return html`<li key=${`${t.id}:${queueOffset != null ? queueOffset + i : i}`} class=${`track-row${on ? ' is-current' : ''}${on && playing ? ' is-playing' : ''}`} data-id=${t.id} aria-current=${on ? 'true' : null}>
         <button type="button" class="track-main" aria-label=${`Play ${t.title}${t.artist ? ` by ${t.artist}` : ''}`} data-autofocus=${focusId === t.id ? '' : null} onClick=${() => click(t, i)}>
           <span class="track-num"><span class="track-n">${trackNumber(t, i, numbers)}</span><span class="track-eq" aria-hidden="true"><i /><i /><i /></span><${Icon} name="play" size=${16} /></span>
           ${showAlbum ? html`<${Art} key=${src || ''} src=${src} title=${t.albumTitle || t.title} kind="square" />` : null}

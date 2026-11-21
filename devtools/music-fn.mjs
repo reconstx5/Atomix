@@ -151,6 +151,7 @@ for (const theme of THEMES) {
       ok('album: one row is-current, aria-current and is-playing, the playing song\'s', cur.length === 1 && cur[0].id === t.slackTide && cur[0].aria === 'true' && cur[0].playing && m.filter((r) => r.aria).length === 1 && m.filter((r) => r.playing).length === 1, JSON.stringify(m.filter((r) => r.cur || r.playing)));
       await page.click(`${row(t.slackTide)} .track-main`);
       ok('a click on the playing row pauses it', await until(page, () => !window.__music.playing, null));
+      await until(page, (id) => { const r = document.querySelector(`main .track-row[data-id="${id}"]`); return r?.classList.contains('is-current') && !r.classList.contains('is-playing'); }, t.slackTide, 3000);
       m = await marks('main .track-row');
       ok('album: paused: is-current stays, is-playing goes', m.find((r) => r.id === t.slackTide)?.cur === true && !m.some((r) => r.playing), JSON.stringify(m.filter((r) => r.cur || r.playing)));
       await page.click(`${row(t.slackTide)} .track-main`);
@@ -210,6 +211,21 @@ for (const theme of THEMES) {
       ok('up-next, playing: is-playing on that row', await until(page, () => document.querySelector('.np-queue .track-row:nth-child(2)')?.classList.contains('is-playing'), null, 4000), JSON.stringify(up(await marks('.np-queue .track-row'))));
       await act(page, 'pause');
       ok('up-next, paused again: is-playing goes, is-current stays', await until(page, () => { const r = document.querySelector('.np-queue .track-row:nth-child(2)'); return !r.classList.contains('is-playing') && r.classList.contains('is-current'); }, null, 4000));
+      // Focus on an up-next row stays through Next while that row stays in the list.
+      await act(page, 'stop');
+      await go(page, '#/');
+      await playAt(page, [t.harbourLight, t.slackTide, t.saltLine, t.lowerStill], 0, 2.5);
+      await go(page, '#/now-playing', '.np-queue .track-row');
+      await page.focus(`.np-queue .track-row[data-id="${t.lowerStill}"] .track-main`);
+      await act(page, 'next');
+      await until(page, (id) => window.__music.current?.id === id, t.slackTide);
+      await until(page, () => document.querySelectorAll('.np-queue .track-row').length === 2, null);
+      ok('up-next: focus stays on the same song row button when Next moves the list', await page.evaluate((id) => document.activeElement?.matches('.track-main') && document.activeElement.closest('.track-row')?.dataset.id === String(id), t.lowerStill));
+      await act(page, 'stop');
+      await go(page, '#/');
+      await playAt(page, [t.harbourLight, t.slackTide, t.harbourLight], 0, 2.5);
+      await go(page, '#/now-playing', '.np-queue .track-row');
+      await until(page, () => document.querySelectorAll('.np-queue .track-row').length === 2, null);
       await act(page, 'next'); // s plays: the h copy is no longer marked
       ok('up-next, Next: the mark leaves that row', await until(page, () => !document.querySelector('.np-queue .track-row.is-current'), null, 4000), JSON.stringify(up(await marks('.np-queue .track-row'))));
       await act(page, 'stop');
@@ -433,6 +449,7 @@ for (const theme of THEMES) {
         ok('the spoken face has no lyrics', !(await page.$('.np-lyrics')));
         await act(page, 'playTracks', [t.harbourLight]);
         ok('a song replaces the book while open: the song face (lyrics there, is-spoken gone)', await until(page, () => document.querySelector('.np-lyrics') && !document.querySelector('.nowplaying-view.is-spoken'), null));
+        ok('and html.nowplaying-open is present after the switch', await until(page, () => document.documentElement.classList.contains('nowplaying-open'), null));
         ok('and the song\'s title is shown', /Harbour Light/.test(await page.$eval('.np-title', (e) => e.textContent).catch(() => '')));
       }
     });
@@ -556,6 +573,20 @@ for (const theme of THEMES) {
       ok('the list is not moved', !tf || /translateY\(-?0(px)?\)/.test(tf), tf);
     });
 
+    // 2b: plain lyrics with an empty line: the live song face draws it as a no-break space (a line high), ?song= as a plain space.
+    await leg('review: plain lyrics blank line', theme, async ({ page, ids }, ok) => {
+      const t = ids.tracks;
+      await routeLyrics(page, () => ({ json: { synced: false, lines: [{ text: 'First verse' }, { text: '' }, { text: 'Second verse' }] } }));
+      await go(page, '#/');
+      await playAt(page, [t.harbourLight, t.slackTide], 0, 2.5);
+      await go(page, '#/now-playing', '.lyrics-plain p');
+      const lines = () => page.$$eval('.lyrics-plain p', (ps) => ps.map((p) => ({ text: p.textContent, h: p.getBoundingClientRect().height })));
+      let l = await lines();
+      ok('the live song face: the empty line is a no-break space with a height', l.length === 3 && l[1].text === '\u00a0' && l[1].h > 0, JSON.stringify(l));
+      await go(page, `#/now-playing?song=${t.nightFerry}`, '.lyrics-plain p');
+      l = await lines();
+      ok('?song=: the empty line is a plain space (as today)', l.length === 3 && l[1].text === ' ', JSON.stringify(l));
+    });
     // 3: leaving while the lyrics request is out.
     await leg('review: leave during lyrics', theme, async ({ page, ids, errors }, ok) => {
       const t = ids.tracks;

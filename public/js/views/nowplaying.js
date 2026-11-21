@@ -82,7 +82,8 @@ function useShell(view, { classes = [], open = false, keys = true, space = false
 const sub = (t) => [t.artist, t.albumTitle].filter(Boolean).join(' · ');
 const playIcon = (playing) => html`<${Icon} name=${playing ? 'pause' : 'play'} size=${22} />`;
 const noLyrics = html`<p class="muted np-none">No lyrics for this song</p>`;
-const plainLyrics = (lines) => html`<div class="lyrics-plain">${lines.map((l) => html`<p>${l.text || ' '}</p>`)}</div>`;
+// An empty line is a no-break space on the song face (it keeps its height: the verse break) and a plain space on ?song= (as before).
+const plainLyrics = (lines, blank = '\u00a0') => html`<div class="lyrics-plain">${lines.map((l) => html`<p>${l.text || blank}</p>`)}</div>`;
 
 /** Nothing playing, or no such song: Back. */
 function Empty({ view, missing }) {
@@ -336,7 +337,7 @@ function LyricsFace({ view, track: t, lyrics: r }) {
         <div class="np-cover"><${Art} src=${t.poster || t.albumPoster} title=${t.title} kind="square" eager=${true} /></div>
         <div class="np-text"><h1 class="np-title">${t.title}</h1><p class="np-sub muted">${sub(t)}</p></div>
       </div>
-      <div class="np-lyrics">${r?.lines?.length ? plainLyrics(r.lines) : noLyrics}</div>
+      <div class="np-lyrics">${r?.lines?.length ? plainLyrics(r.lines, ' ') : noLyrics}</div>
       <aside class="np-queue"></aside>
     </div>
     <div class="np-transport"><div class="np-buttons"><${Button} label="Play this song" icon="play" variant="primary" autofocus=${true} attrs=${{ class: 'btn btn-primary np-play-this' }} onClick=${play} /></div></div>`;
