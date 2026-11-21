@@ -1,384 +1,449 @@
 // Now Playing: the cover, the song, lyrics with the current line in the middle, the queue, and the transport.
 // A bigger window onto the same `music` object the mini-player drives; made for a TV across the room.
-import { ratingControl } from '../rating.js';
-import { h, icon, clear, formatClock } from '../dom.js';
+// Faces (nowplaying-rules.js faceFor): the playing song, another song's lyrics (?song=), a book or episode (spoken),
+// nothing playing, no such song. Only the seek rows and the lyric highlight follow the clock ('time').
+import { html, useState, useRef, useMemo, useLayoutEffect } from '../ui.js';
+import { Button, Icon, EmptyState } from '../ui/basics.js';
+import { Art } from '../ui/cards.js';
+import { RatingControl } from '../ui/detail.js';
+import { useMusic, TrackList, openQueue } from '../ui/music.js';
+import { currentLine, seekStep, volumeStep, faceFor, sleepLabel, HOLD_MS, VOLUME_SAVE_MS } from '../nowplaying-rules.js';
+import { music, openSpeed, openSleep } from '../music.js';
+import { formatClock } from '../dom.js';
 import { api } from '../api.js';
 import { setTitle, goBack, updatePrefs, navigate, refreshView } from '../app.js';
-import { button, emptyState, art, sliderText, percentSlider } from '../components.js';
-import { music, trackList, openQueue, openSpeed, openSleep } from '../music.js';
+import { sliderText, percentSlider, openSheet } from '../components.js';
 import { chapterAt, leftText } from '../spoken-time.js';
 import { setBackdrop } from '../backdrop.js';
 
-export async function render(el, params, query = {}) {
-  el.classList.add('nowplaying-view');
+/** Which face, and for ?song= the song and its lyrics (the page arrives with them). */
+export async function load(params, query = {}) {
   setTitle('Now playing');
-  // ?song=<id>: another song's lyrics, read-only, with "Play this song"; the queue plays on (or stays stopped).
-  if (query.song && Number(query.song) !== music.current?.id) return renderSong(el, Number(query.song));
-  if (!music.current) {
-    el.append(emptyState({ title: 'Nothing playing', text: 'Pick a song and it will show up here.', action: button('Back', { icon: 'back', autofocus: true, onClick: () => goBack('#/') }) }));
-    return;
-  }
-  if (music.spoken) return renderSpoken(el);
-  const cover = h('div', { class: 'np-cover' });
-  const title = h('h1', { class: 'np-title' });
-  const sub = h('p', { class: 'np-sub muted' });
-  const rateSlot = h('div', { class: 'np-rate' }); // the playing song's stars and heart
-  const lyricsEl = h('div', { class: 'np-lyrics' });
-  const queueEl = h('aside', { class: 'np-queue' });
-  const play = button('', { icon: 'pause', variant: 'primary', title: 'Pause', autofocus: true, onClick: () => music.toggle() });
-  const shuffleBtn = button('', { icon: 'shuffle', variant: 'ghost', title: 'Shuffle', onClick: () => music.setShuffle(!music.shuffle) });
-  const repeatBtn = button('', { icon: 'repeat', variant: 'ghost', title: 'Repeat', onClick: () => music.cycleRepeat() });
-  // In seconds, so the value a screen reader reads is a time; the spoken text says "1:12 of 3:40".
-  const seek = h('input', { type: 'range', class: 'np-seek-range', min: '0', max: '1', step: '1', value: '0', 'aria-label': 'Seek' });
-  // Left/Right on the bar seek 5 s (the native step would be a fraction of a second).
-  seek.addEventListener('keydown', (e) => {
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-    e.preventDefault();
-    e.stopPropagation();
-    const to = Math.max(0, Math.min(music.duration || 0, music.position + (e.key === 'ArrowRight' ? 5 : -5)));
-    music.seek(to);
-    seek.value = String(Math.round(to));
-    sliderText(seek, `${formatClock(to)} of ${formatClock(music.duration || 0)}`, { force: true });
-  });
-  // Volume: Up/Down on the bar change it by 5%; it is kept in the profile's prefs.
-  const volume = percentSlider(h('input', { type: 'range', class: 'np-volume', min: 0, max: 1, step: 0.05, value: String(music.volume), 'aria-label': 'Volume' }));
-  let saveVolume = null;
-  const setVolume = (v) => {
-    music.setVolume(v);
-    volume.value = String(music.volume);
-    clearTimeout(saveVolume);
-    saveVolume = setTimeout(flushVolume, 800);
-  };
+  const face = faceFor({ song: query.song, current: music.current });
+  if (face !== 'lyrics') return { face };
+  const id = Number(query.song);
+  const t = (await api.get(`/api/items/${id}`).catch(() => null))?.item;
+  if (!t || t.kind !== 'track') return { face: 'missing' };
+  setTitle(t.title);
+  const lyrics = await api.get(`/api/items/${id}/lyrics`).catch(() => null);
+  return { face: 'lyrics', track: t, lyrics };
+}
+
+export function Screen({ data, view }) {
+  // What plays may have changed between load() and now: the playing faces are decided again (as today's render did).
+  const [face] = useState(() => (data.face === 'lyrics' || data.face === 'missing' ? data.face : faceFor({ current: music.current })));
+  if (face === 'song') return html`<${SongFace} view=${view} />`;
+  if (face === 'spoken') return html`<${SpokenFace} view=${view} />`;
+  if (face === 'lyrics') return html`<${LyricsFace} view=${view} track=${data.track} lyrics=${data.lyrics} />`;
+  return html`<${Empty} view=${view} missing=${face === 'missing'} />`;
+}
+
+const back = () => goBack('#/');
+const GONE = Symbol('gone');
+const isSong = (m) => m.current;
+const isSpoken = (m) => m.current?.spoken;
+
+/** useMusic, holding the last value once the face no longer applies (stopped, or a book became a song): the page
+ * being left keeps what it showed. */
+function useNow(select, kinds, valid = isSong) {
+  const v = useMusic((m) => (valid(m) ? select(m) : GONE), kinds);
+  const last = useRef(v);
+  if (v !== GONE) last.current = v;
+  return last.current;
+}
+
+/** Outside the screen: the view's classes, html.nowplaying-open, and Escape (Space too on the song face). */
+function useShell(view, { classes = [], open = false, keys = true, space = false } = {}) {
+  useLayoutEffect(() => {
+    view.classList.add('nowplaying-view', ...classes);
+    if (!keys) return undefined;
+    const onKey = (e) => {
+      // Escape leaves, as Back and Backspace do.
+      if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('dialog[open]')) {
+        e.preventDefault();
+        back();
+        return;
+      }
+      if (!space || e.defaultPrevented || e.target.closest?.('dialog, button, a, input, textarea, select')) return;
+      if (e.key === ' ') {
+        e.preventDefault();
+        music.toggle();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    if (open) document.documentElement.classList.add('nowplaying-open');
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      if (open) document.documentElement.classList.remove('nowplaying-open');
+    };
+  }, []);
+}
+
+const sub = (t) => [t.artist, t.albumTitle].filter(Boolean).join(' · ');
+const playIcon = (playing) => html`<${Icon} name=${playing ? 'pause' : 'play'} size=${22} />`;
+const noLyrics = html`<p class="muted np-none">No lyrics for this song</p>`;
+// An empty line is a no-break space on the song face (it keeps its height: the verse break) and a plain space on ?song= (as before).
+const plainLyrics = (lines, blank = '\u00a0') => html`<div class="lyrics-plain">${lines.map((l) => html`<p>${l.text || blank}</p>`)}</div>`;
+
+/** Nothing playing, or no such song: Back. */
+function Empty({ view, missing }) {
+  useShell(view, { keys: false });
+  const action = html`<${Button} label="Back" icon="back" autofocus=${true} onClick=${back} />`;
+  return missing
+    ? html`<${EmptyState} title="No such song" text="" action=${action} />`
+    : html`<${EmptyState} title="Nothing playing" text="Pick a song and it will show up here." action=${action} />`;
+}
+
+// ---- the playing song ----
+
+function SongFace({ view }) {
+  useShell(view, { open: true, space: true });
+  const [now, nowTitle] = useNow((m) => [m.current, m.current.title], ['change', 'state']);
+  const [playing, shuffle, repeat] = useNow((m) => [m.playing, Boolean(m.shuffle), m.repeat], ['change', 'state']);
+  // Drawn again for a new song only; a station's programme changing renames it (as before).
+  const t = useMemo(() => now, [now.id]);
+  const live = Boolean(t.live);
+  const title = now.live ? nowTitle : t.title;
+  const volume = useRef(null);
+  const saveVolume = useRef(null);
+
+  // A radio station: the programme and the station, "Live" for the bar, no lyrics, no shuffle or repeat.
+  useLayoutEffect(() => {
+    view.classList.toggle('is-live', live);
+  }, [live]);
+  useLayoutEffect(() => {
+    setBackdrop(t.poster || t.albumPoster);
+  }, [t.id]);
+
+  // Volume: kept in the profile's prefs, 800 ms after the last change (and at once when the page is left).
   const flushVolume = () => {
-    saveVolume = null;
+    saveVolume.current = null;
     updatePrefs({ musicVolume: music.volume }).catch(() => {});
   };
-  volume.addEventListener('input', () => setVolume(Number(volume.value)));
-  volume.addEventListener('keydown', (e) => {
-    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+  const setVolume = (v) => {
+    music.setVolume(v);
+    volume.current.value = String(music.volume);
+    clearTimeout(saveVolume.current);
+    saveVolume.current = setTimeout(flushVolume, VOLUME_SAVE_MS);
+  };
+  useLayoutEffect(() => {
+    const vol = volume.current;
+    percentSlider(vol); // its spoken value is a percentage, however .value is set
+    vol.value = String(music.volume);
+    const sync = () => {
+      if (document.activeElement !== vol) vol.value = String(music.volume);
+    };
+    const onChange = () => {
+      if (!music.current) return back();
+      sync();
+    };
+    music.events.addEventListener('state', sync);
+    music.events.addEventListener('change', onChange);
+    return () => {
+      music.events.removeEventListener('state', sync);
+      music.events.removeEventListener('change', onChange);
+      if (saveVolume.current) {
+        clearTimeout(saveVolume.current);
+        flushVolume(); // leaving straight after a change still keeps it
+      }
+    };
+  }, []);
+  const onVolumeKey = (e) => {
+    const v = volumeStep(music.volume, e.key); // Up/Down: 5%
+    if (v == null) return;
     e.preventDefault();
     e.stopPropagation();
-    setVolume(Math.round((music.volume + (e.key === 'ArrowUp' ? 0.05 : -0.05)) * 100) / 100);
-  });
-  const liveEl = h('span', { class: 'np-live', hidden: true }, 'Live');
-  const cur = h('span', { class: 'np-time' }, '0:00');
-  const left = h('span', { class: 'np-time' }, '-0:00');
-  const transport = h(
-    'div',
-    { class: 'np-transport' },
-    h(
-      'div',
-      { class: 'np-buttons' },
-      shuffleBtn,
-      button('', { icon: 'prev', variant: 'ghost', title: 'Previous', onClick: () => music.prev() }),
-      play,
-      button('', { icon: 'next', variant: 'ghost', title: 'Next', onClick: () => music.next() }),
-      repeatBtn,
-      h('span', { class: 'np-phone-only' }, button('Queue', { icon: 'queue', variant: 'ghost', onClick: () => openQueue() })),
-      h('span', { class: 'np-volume-wrap' }, icon('volume', { size: 20 }), volume),
-    ),
-    h('div', { class: 'np-seek' }, liveEl, cur, seek, left),
-  );
-  el.append(h('div', { class: 'np-main' }, h('div', { class: 'np-side' }, cover, h('div', { class: 'np-text' }, title, sub, rateSlot)), lyricsEl, queueEl), transport);
+    setVolume(v);
+  };
 
-  let lines = [];
-  let synced = false;
-  let lineEls = [];
-  let list = null;
-  let userHold = 0;
-  let token = 0;
-  let loadedId = null;
-
-  async function load() {
-    const t = music.current;
-    loadedId = t.id;
-    const mine = ++token;
-    clear(cover).append(art(t.poster || t.albumPoster, t.title, { kind: 'square', eager: true }));
-    title.textContent = t.title;
-    sub.textContent = [t.artist, t.albumTitle].filter(Boolean).join(' · ');
-    rateSlot.replaceChildren(t.live ? '' : ratingControl(t));
-    setBackdrop(t.poster || t.albumPoster);
-    lines = [];
-    lineEls = [];
-    list = null;
-    synced = false;
-    // A radio station: the programme and the station, "Live" for the bar, no lyrics.
-    el.classList.toggle('is-live', Boolean(t.live));
-    liveEl.hidden = !t.live;
-    shuffleBtn.disabled = repeatBtn.disabled = Boolean(t.live);
-    if (t.live) {
-      clear(lyricsEl);
-      return;
-    }
-    clear(lyricsEl).append(h('p', { class: 'muted np-looking' }, 'Looking for lyrics…'));
-    const r = await api.get(`/api/items/${t.id}/lyrics`).catch(() => null);
-    if (mine !== token) return;
-    clear(lyricsEl);
-    lines = r?.lines || [];
-    synced = Boolean(r?.synced);
-    if (!r) lyricsEl.append(h('p', { class: 'muted np-none' }, 'No lyrics for this song'));
-    else if (!synced) lyricsEl.append(h('div', { class: 'lyrics-plain' }, lines.map((l) => h('p', {}, l.text || ' '))));
-    else {
-      list = h('ol', { class: 'lyrics-synced', role: 'list' });
-      lines.forEach((l, i) => {
-        // A real button (Enter and Space, announced as one) inside a plain list item; an empty line is just a gap.
-        const li = l.text
-          ? h('button', { type: 'button', class: 'lyric-line', 'aria-label': `Jump to: ${l.text}`, dataset: { at: String(l.at), i: String(i) }, onClick: () => music.seek(l.at) }, l.text)
-          : h('span', { class: 'lyric-line', dataset: { at: String(l.at), i: String(i) } }, '\u00a0');
-        // The remote walks the lines: the list moves to the focused line (the box itself never scrolls).
-        li.addEventListener('focus', () => {
-          userHold = Date.now() + 4000;
-          requestAnimationFrame(() => {
-            lyricsEl.scrollTop = 0;
-            centre(li);
-          });
-        });
-        lineEls.push(li);
-        list.append(h('li', {}, li));
-      });
-      lyricsEl.append(list);
-      tick();
-    }
-    drawQueue();
-  }
-  function drawQueue() {
-    const upcoming = music.queue.items.slice(music.queue.index + 1);
-    clear(queueEl).append(h('h2', {}, 'Queue'), upcoming.length ? trackList(upcoming, { numbers: false, showAlbum: true, queueOffset: music.queue.index + 1 }) : h('p', { class: 'muted' }, 'Nothing more queued.'));
-  }
-  function tick() {
-    const pos = music.position;
-    const dur = music.duration || 0;
-    cur.textContent = formatClock(pos);
-    left.textContent = `-${formatClock(Math.max(0, dur - pos))}`;
-    if (dur) {
-      seek.max = String(Math.max(1, Math.round(dur)));
-      if (document.activeElement !== seek) seek.value = String(Math.round(pos));
-      seek.style.setProperty('--pct', `${Math.min(100, (pos / dur) * 100)}%`);
-      sliderText(seek, `${formatClock(pos)} of ${formatClock(dur)}`);
-    }
-    if (!synced || !lineEls.length) return;
-    let idx = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].at <= pos + 0.3) idx = i;
-      else break;
-    }
-    lineEls.forEach((li, i) => li.classList.toggle('is-current', i === idx));
-    if (idx >= 0 && Date.now() > userHold) centre(lineEls[idx]);
-  }
-  function centre(li) {
-    if (!list) return;
-    const offset = li.offsetTop + li.offsetHeight / 2 - lyricsEl.clientHeight / 2;
-    list.style.transform = `translateY(${-Math.max(0, offset)}px)`;
-  }
-  function drawState() {
-    if (document.activeElement !== volume) volume.value = String(music.volume);
-    clear(play).append(icon(music.playing ? 'pause' : 'play', { size: 22 }));
-    play.title = music.playing ? 'Pause' : 'Play';
-    play.setAttribute('aria-label', play.title); // the name is what a screen reader says, not the tooltip
-    shuffleBtn.setAttribute('aria-pressed', String(Boolean(music.shuffle)));
-    repeatBtn.setAttribute('aria-pressed', String(music.repeat !== 'off'));
-    repeatBtn.setAttribute('aria-label', `Repeat: ${music.repeat || 'off'}`);
-    tick(); // paused (or not started yet): the bar and its spoken time still match the song
-  }
-  seek.addEventListener('input', () => {
-    music.seek(Number(seek.value));
-    sliderText(seek, `${formatClock(Number(seek.value))} of ${formatClock(music.duration || 0)}`, { force: true });
-  });
-  const onTime = () => tick();
-  const onState = () => drawState();
-  const onChange = () => {
-    if (!music.current) {
-      goBack('#/');
-      return;
-    }
-    drawState();
-    // Shuffle, repeat, a seek on a converted stream and queue edits all fire `change`: only a new song reloads the lyrics.
-    if (music.current.id !== loadedId) load();
-    else if (music.current.live) title.textContent = music.current.title; // the station's programme changed
-    else drawQueue();
-  };
-  const onKey = (e) => {
-    // Escape leaves, as Back and Backspace do.
-    if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('dialog[open]')) {
-      e.preventDefault();
-      goBack('#/');
-      return;
-    }
-    if (e.defaultPrevented || e.target.closest?.('dialog, button, a, input, textarea, select')) return;
-    if (e.key === ' ') {
-      e.preventDefault();
-      music.toggle();
-    }
-  };
-  music.events.addEventListener('time', onTime);
-  music.events.addEventListener('state', onState);
-  music.events.addEventListener('change', onChange);
-  window.addEventListener('keydown', onKey);
-  lyricsEl.addEventListener('wheel', () => (userHold = Date.now() + 4000), { passive: true });
-  lyricsEl.addEventListener('scroll', () => { lyricsEl.scrollTop = 0; }); // focus() may scroll the box; the transform does the moving
-  drawState();
-  drawQueue();
-  document.documentElement.classList.add('nowplaying-open');
-  load(); // not awaited: the page is usable while a slow lyrics service answers
-  return () => {
-    music.events.removeEventListener('time', onTime);
-    music.events.removeEventListener('state', onState);
-    music.events.removeEventListener('change', onChange);
-    window.removeEventListener('keydown', onKey);
-    if (saveVolume) {
-      clearTimeout(saveVolume);
-      flushVolume(); // leaving straight after a change still keeps it
-    }
-    document.documentElement.classList.remove('nowplaying-open');
-  };
+  const pressed = (on) => String(Boolean(on));
+  return html`<div class="np-main">
+      <div class="np-side">
+        <div class="np-cover"><${Art} key=${t.id} src=${t.poster || t.albumPoster} title=${t.title} kind="square" eager=${true} /></div>
+        <div class="np-text">
+          <h1 class="np-title">${title}</h1>
+          <p class="np-sub muted">${sub(t)}</p>
+          <div class="np-rate">${live ? null : html`<${RatingControl} key=${t.id} item=${t} />`}</div>
+        </div>
+      </div>
+      <${Lyrics} id=${t.id} live=${live} />
+      <aside class="np-queue"><${UpNext} /></aside>
+    </div>
+    <div class="np-transport">
+      <div class="np-buttons">
+        <${Button} label="" icon="shuffle" variant="ghost" title="Shuffle" onClick=${() => music.setShuffle(!music.shuffle)} attrs=${{ 'aria-pressed': pressed(shuffle), disabled: live }} />
+        <${Button} label="" icon="prev" variant="ghost" title="Previous" onClick=${() => music.prev()} />
+        <button class="btn btn-primary btn-icon" type="button" onClick=${() => music.toggle()} data-autofocus="" title=${playing ? 'Pause' : 'Play'} aria-label=${playing ? 'Pause' : 'Play'}>${playIcon(playing)}</button>
+        <${Button} label="" icon="next" variant="ghost" title="Next" onClick=${() => music.next()} />
+        <${Button} label="" icon="repeat" variant="ghost" title="Repeat" onClick=${() => music.cycleRepeat()} attrs=${{ 'aria-label': `Repeat: ${repeat || 'off'}`, 'aria-pressed': pressed(repeat !== 'off'), disabled: live }} />
+        <span class="np-phone-only"><${Button} label="Queue" icon="queue" variant="ghost" onClick=${() => openQueue()} /></span>
+        <span class="np-volume-wrap"><${Icon} name="volume" size=${20} /><input type="range" class="np-volume" min="0" max="1" step="0.05" aria-label="Volume" ref=${volume} onInput=${(e) => setVolume(Number(e.currentTarget.value))} onKeyDown=${onVolumeKey} /></span>
+      </div>
+      <${SeekRow} live=${live} />
+    </div>`;
 }
+
+/** The song's place: "Live" for a station, the times, and the seek bar (in seconds, spoken "1:12 of 3:40"). */
+function SeekRow({ live }) {
+  const [pos, dur] = useNow((m) => [m.position, m.duration || 0], ['time', 'change', 'state']);
+  const seek = useRef(null);
+  useLayoutEffect(() => {
+    seek.current.value = '0';
+  }, []);
+  useLayoutEffect(() => {
+    const s = seek.current;
+    if (!dur) return;
+    s.max = String(Math.max(1, Math.round(dur)));
+    if (document.activeElement !== s) s.value = String(Math.round(pos));
+    s.style.setProperty('--pct', `${Math.min(100, (pos / dur) * 100)}%`);
+    sliderText(s, `${formatClock(pos)} of ${formatClock(dur)}`);
+  });
+  const onKey = (e) => {
+    const to = seekStep(music.position, music.duration, e.key); // Left/Right: 5 s (the native step would be a fraction of a second)
+    if (to == null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    music.seek(to);
+    seek.current.value = String(Math.round(to));
+    sliderText(seek.current, `${formatClock(to)} of ${formatClock(music.duration || 0)}`, { force: true });
+  };
+  const onInput = (e) => {
+    const s = e.currentTarget;
+    music.seek(Number(s.value));
+    sliderText(s, `${formatClock(Number(s.value))} of ${formatClock(music.duration || 0)}`, { force: true });
+  };
+  return html`<div class="np-seek">
+    <span class="np-live" hidden=${!live}>Live</span>
+    <span class="np-time">${formatClock(pos)}</span>
+    <input type="range" class="np-seek-range" min="0" max="1" step="1" aria-label="Seek" ref=${seek} onKeyDown=${onKey} onInput=${onInput} />
+    <span class="np-time">${`-${formatClock(Math.max(0, dur - pos))}`}</span>
+  </div>`;
+}
+
+/** The songs after the playing one; a click jumps there. */
+function UpNext() {
+  const [, index] = useNow((m) => [m.queue.items.map((x) => x.id).join(','), m.queue.index], ['change', 'state']);
+  const upcoming = music.queue.items.slice(index + 1);
+  return html`<h2>Queue</h2>${upcoming.length
+    ? html`<${TrackList} tracks=${upcoming} numbers=${false} showAlbum=${true} queueOffset=${index + 1} />`
+    : html`<p class="muted">Nothing more queued.</p>`}`;
+}
+
+/** The lyrics box: fetched for each song (the page is usable meanwhile); an answer for an earlier song is dropped. */
+function Lyrics({ id, live }) {
+  const box = useRef(null);
+  const hold = useRef(0); // until when the automatic centring waits (a focused line, a wheel turn)
+  const [got, setGot] = useState(null); // { id, r }
+  useLayoutEffect(() => {
+    if (live) return undefined;
+    let mine = true;
+    api.get(`/api/items/${id}/lyrics`).catch(() => null).then((r) => mine && setGot({ id, r }));
+    return () => {
+      mine = false; // a new song, or the page left: this answer is dropped
+    };
+  }, [id, live]);
+  useLayoutEffect(() => {
+    const el = box.current;
+    const onWheel = () => (hold.current = Date.now() + HOLD_MS);
+    const onScroll = () => (el.scrollTop = 0); // focus() may scroll the box; the transform does the moving
+    el.addEventListener('wheel', onWheel, { passive: true });
+    el.addEventListener('scroll', onScroll);
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('scroll', onScroll);
+    };
+  }, []);
+  let body = null;
+  if (!live) {
+    const r = got?.id === id ? got.r : undefined;
+    if (r === undefined) body = html`<p class="muted np-looking">Looking for lyrics…</p>`;
+    else if (!r) body = noLyrics;
+    else if (!r.synced) body = plainLyrics(r.lines || []);
+    else body = html`<${SyncedLyrics} key=${id} lines=${r.lines || []} box=${box} hold=${hold} />`;
+  }
+  return html`<div class="np-lyrics" ref=${box}>${body}</div>`;
+}
+
+/** Synced lines, the current one lit and in the middle: the list moves (transform), the box never scrolls. */
+function SyncedLyrics({ lines, box, hold }) {
+  const list = useRef(null);
+  const words = useRef(lines);
+  words.current = lines;
+  const idx = useMusic((m) => currentLine(lines, m.position), ['time', 'change', 'state']);
+  const centre = (li) => {
+    if (!list.current || !box.current) return;
+    const offset = li.offsetTop + li.offsetHeight / 2 - box.current.clientHeight / 2;
+    list.current.style.transform = `translateY(${-Math.max(0, offset)}px)`;
+  };
+  const lit = useRef(idx); // the line drawn lit: centring measures it only once its larger size is on the page
+  lit.current = idx;
+  const frame = useRef(0);
+  const follow = () => {
+    const i = currentLine(words.current, music.position);
+    if (i < 0 || i !== lit.current || Date.now() <= hold.current || !list.current) return; // a new line: its layout effect centres it
+    if (!list.current.isConnected) {
+      frame.current ||= requestAnimationFrame(() => ((frame.current = 0), follow())); // placed once the page is on screen
+      return;
+    }
+    centre(list.current.children[i].firstChild);
+  };
+  const followRef = useRef(follow);
+  followRef.current = follow;
+  useLayoutEffect(() => {
+    const onEvent = () => followRef.current();
+    for (const k of ['time', 'change', 'state']) music.events.addEventListener(k, onEvent);
+    return () => {
+      cancelAnimationFrame(frame.current);
+      for (const k of ['time', 'change', 'state']) music.events.removeEventListener(k, onEvent);
+    };
+  }, []);
+  useLayoutEffect(() => follow(), [idx]); // after the lit line's class is committed
+  // The remote walks the lines: the list moves to the focused line.
+  const onFocus = (e) => {
+    hold.current = Date.now() + HOLD_MS;
+    const li = e.currentTarget;
+    requestAnimationFrame(() => {
+      if (!box.current) return;
+      box.current.scrollTop = 0;
+      centre(li);
+    });
+  };
+  return html`<ol class="lyrics-synced" role="list" ref=${list}>
+    ${lines.map((l, i) => {
+      const cls = `lyric-line${i === idx ? ' is-current' : ''}`;
+      // A real button (Enter and Space, announced as one) inside a plain list item; an empty line is just a gap.
+      return html`<li key=${i}>${l.text
+        ? html`<button type="button" class=${cls} aria-label=${`Jump to: ${l.text}`} data-at=${String(l.at)} data-i=${String(i)} onClick=${() => music.seek(l.at)} onFocus=${onFocus}>${l.text}</button>`
+        : html`<span class=${cls} data-at=${String(l.at)} data-i=${String(i)} onFocus=${onFocus}>${' '}</span>`}</li>`;
+    })}
+  </ol>`;
+}
+
+// ---- another song's lyrics (?song=) ----
 
 /** A song's lyrics without playing it: cover, title, the lines, and a Play this song button. */
-async function renderSong(el, id) {
-  const d = await api.get(`/api/items/${id}`).catch(() => null);
-  const t = d?.item;
-  if (!t || t.kind !== 'track') {
-    el.append(emptyState({ title: 'No such song', text: '', action: button('Back', { icon: 'back', autofocus: true, onClick: () => goBack('#/') }) }));
-    return;
-  }
-  setTitle(t.title);
-  const lyricsEl = h('div', { class: 'np-lyrics' }, h('p', { class: 'muted np-looking' }, 'Looking for lyrics…'));
-  const play = button('Play this song', { icon: 'play', variant: 'primary', autofocus: true, attrs: { class: 'btn btn-primary np-play-this' }, onClick: () => {
+function LyricsFace({ view, track: t, lyrics: r }) {
+  // Song mode is a page about a song, not the player: the mini-player (whatever is playing) stays on screen.
+  useShell(view);
+  useLayoutEffect(() => {
+    setBackdrop(t.poster || t.albumPoster);
+  }, []);
+  const play = () => {
     music.playTracks([{ ...t, poster: t.poster || t.albumPoster }], 0);
     navigate('#/now-playing', { replace: true }); // the live page takes over: transport, synced lyrics, the queue
-  } });
-  el.append(
-    h(
-      'div',
-      { class: 'np-main' },
-      h('div', { class: 'np-side' }, h('div', { class: 'np-cover' }, art(t.poster || t.albumPoster, t.title, { kind: 'square', eager: true })), h('div', { class: 'np-text' }, h('h1', { class: 'np-title' }, t.title), h('p', { class: 'np-sub muted' }, [t.artist, t.albumTitle].filter(Boolean).join(' · ')))),
-      lyricsEl,
-      h('aside', { class: 'np-queue' }),
-    ),
-    h('div', { class: 'np-transport' }, h('div', { class: 'np-buttons' }, play)),
-  );
-  setBackdrop(t.poster || t.albumPoster);
-  const r = await api.get(`/api/items/${id}/lyrics`).catch(() => null);
-  clear(lyricsEl);
-  if (!r?.lines?.length) lyricsEl.append(h('p', { class: 'muted np-none' }, 'No lyrics for this song'));
-  else lyricsEl.append(h('div', { class: 'lyrics-plain' }, r.lines.map((l) => h('p', {}, l.text || ' '))));
-  const onKey = (e) => {
-    if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('dialog[open]')) {
-      e.preventDefault();
-      goBack('#/');
-    }
   };
-  window.addEventListener('keydown', onKey);
-  // Song mode is a page about a song, not the player: the mini-player (whatever is playing) stays on screen.
-  return () => window.removeEventListener('keydown', onKey);
+  return html`<div class="np-main">
+      <div class="np-side">
+        <div class="np-cover"><${Art} src=${t.poster || t.albumPoster} title=${t.title} kind="square" eager=${true} /></div>
+        <div class="np-text"><h1 class="np-title">${t.title}</h1><p class="np-sub muted">${sub(t)}</p></div>
+      </div>
+      <div class="np-lyrics">${r?.lines?.length ? plainLyrics(r.lines, ' ') : noLyrics}</div>
+      <aside class="np-queue"></aside>
+    </div>
+    <div class="np-transport"><div class="np-buttons"><${Button} label="Play this song" icon="play" variant="primary" autofocus=${true} attrs=${{ class: 'btn btn-primary np-play-this' }} onClick=${play} /></div></div>`;
 }
+
+// ---- a book or a podcast episode ----
 
 /**
  * Now Playing for a book or a podcast episode (v0.22): the cover, the title, who wrote or hosts it, the chapter; the
  * book's timeline with its chapters marked; large skip buttons, play, speed, the sleep timer and the chapters list.
  */
-function renderSpoken(el) {
-  el.classList.add('is-spoken');
-  const cover = h('div', { class: 'np-cover' });
-  const title = h('h1', { class: 'np-title' });
-  const sub = h('p', { class: 'np-sub muted' });
-  const chapterEl = h('p', { class: 'np-chapter' });
-  const seek = h('input', { type: 'range', class: 'np-seek-range', min: '0', max: '1', step: '1', value: '0', 'aria-label': 'Seek' });
-  const ticks = h('div', { class: 'np-ticks', 'aria-hidden': 'true' });
-  const cur = h('span', { class: 'np-time' }, '0:00');
-  const left = h('span', { class: 'np-time' }, '');
-  const play = button('', { icon: 'pause', variant: 'primary', title: 'Pause', autofocus: true, onClick: () => music.toggle() });
-  const back = button('', { icon: 'rewind', variant: 'ghost', title: `Back ${music.skipBack} seconds`, attrs: { class: 'btn btn-ghost btn-icon np-skip' }, onClick: () => music.skip(-music.skipBack) });
-  const fwd = button('', { icon: 'skip', variant: 'ghost', title: `Forward ${music.skipForward} seconds`, attrs: { class: 'btn btn-ghost btn-icon np-skip' }, onClick: () => music.skip(music.skipForward) });
-  const speed = button(`${music.speed}×`, { variant: 'ghost', attrs: { class: 'btn btn-ghost np-speed', 'aria-label': `Speed ${music.speed}×` }, onClick: () => openSpeed() });
-  const sleepBtn = button('Sleep timer', { icon: 'moon', variant: 'ghost', attrs: { class: 'btn btn-ghost np-sleep' }, onClick: () => openSleep() });
-  const chaptersBtn = button('Chapters', { icon: 'list', variant: 'ghost', attrs: { class: 'btn btn-ghost np-chapters' }, onClick: () => openChapters() });
-  seek.addEventListener('keydown', (e) => {
+function SpokenFace({ view }) {
+  useShell(view, { classes: ['is-spoken'], open: true });
+  // The sleep label is read on change/state only (as before), so "N min left" can lag between them.
+  const [t, playing, speed, sleep, total] = useNow((m) => [m.current, m.playing, m.speed, sleepLabel(m.sleep), m.bookDuration || 0], ['change', 'state'], isSpoken);
+  const sp = t.spoken;
+  const bookId = sp.bookId ?? t.id;
+  const shown = useMemo(() => t, [bookId]); // the cover and names change with the book, not with its parts
+  const [skips] = useState(() => [music.skipBack, music.skipForward]);
+  useLayoutEffect(() => {
+    setTitle(shown.spoken.title);
+    setBackdrop(shown.poster);
+  }, [bookId]);
+  useLayoutEffect(() => {
+    const onChange = () => {
+      if (!music.current) return back();
+      if (!music.spoken) return refreshView(); // a song now: the song layout
+      return undefined;
+    };
+    music.events.addEventListener('change', onChange);
+    music.events.addEventListener('state', onChange);
+    return () => {
+      music.events.removeEventListener('change', onChange);
+      music.events.removeEventListener('state', onChange);
+    };
+  }, []);
+  const openChapters = () => {
+    const s = music.spoken;
+    if (!s?.chapters?.length) return;
+    const now = chapterAt(s.chapters, music.bookPosition)?.index;
+    openSheet('Chapters', s.chapters.map((c, i) => ({ label: `${c.title || `Chapter ${i + 1}`} · ${formatClock(c.start)}`, icon: i === now ? 'play' : 'list', onSelect: () => music.seekBook(c.start) })));
+  };
+  const ticks = total ? (sp.chapters || []).slice(1).map((c) => html`<span class="np-tick" style=${{ left: `${(c.start / total) * 100}%` }} />`) : null;
+  return html`<div class="np-main">
+      <div class="np-side">
+        <div class="np-cover"><${Art} key=${bookId} src=${shown.poster} title=${shown.spoken.title} kind="square" eager=${true} /></div>
+        <div class="np-text"><h1 class="np-title">${shown.spoken.title}</h1><p class="np-sub muted">${shown.spoken.author || ''}</p><${ChapterLine} /></div>
+      </div>
+    </div>
+    <div class="np-transport">
+      <div class="np-buttons np-spoken-buttons">
+        <${Button} label="" icon="rewind" variant="ghost" title=${`Back ${skips[0]} seconds`} attrs=${{ class: 'btn btn-ghost btn-icon np-skip' }} onClick=${() => music.skip(-music.skipBack)} />
+        <button class="btn btn-primary btn-icon" type="button" onClick=${() => music.toggle()} data-autofocus="" title=${playing ? 'Pause' : 'Play'} aria-label=${playing ? 'Pause' : 'Play'}>${playIcon(playing)}</button>
+        <${Button} label="" icon="skip" variant="ghost" title=${`Forward ${skips[1]} seconds`} attrs=${{ class: 'btn btn-ghost btn-icon np-skip' }} onClick=${() => music.skip(music.skipForward)} />
+      </div>
+      <div class="np-buttons np-spoken-more">
+        <${Button} label=${`${speed}×`} variant="ghost" attrs=${{ class: 'btn btn-ghost np-speed', 'aria-label': `Speed ${speed}×` }} onClick=${() => openSpeed()} />
+        <${Button} label="Sleep timer" icon="moon" variant="ghost" attrs=${{ class: 'btn btn-ghost np-sleep', 'aria-label': sleep }} onClick=${() => openSleep()} />
+        <${Button} label="Chapters" icon="list" variant="ghost" attrs=${{ class: 'btn btn-ghost np-chapters', hidden: !(sp.chapters?.length > 1) }} onClick=${openChapters} />
+      </div>
+      <div class="np-seek">
+        <${BookTime} />
+        <div class="np-seek-wrap"><${BookSeek} /><div class="np-ticks" aria-hidden="true">${ticks}</div></div>
+        <${BookLeft} />
+      </div>
+    </div>`;
+}
+
+/** Where the book is and its whole length, following the clock. */
+const useBookClock = () => useNow((m) => [m.bookPosition, m.bookDuration || 0], ['time', 'change', 'state'], isSpoken);
+
+function ChapterLine() {
+  const title = useNow((m) => chapterAt(m.spoken.chapters, m.bookPosition)?.title || '', ['time', 'change', 'state'], isSpoken);
+  return html`<p class="np-chapter">${title}</p>`;
+}
+
+function BookTime() {
+  const [pos] = useBookClock();
+  return html`<span class="np-time">${formatClock(pos)}</span>`;
+}
+
+function BookLeft() {
+  const [pos, total] = useBookClock();
+  return html`<span class="np-time">${total ? leftText(total - pos) : ''}</span>`;
+}
+
+/** The book's timeline: Left/Right skip by the profile's lengths, a drag seeks within the book. */
+function BookSeek() {
+  const [pos, total] = useBookClock();
+  const seek = useRef(null);
+  useLayoutEffect(() => {
+    seek.current.value = '0';
+  }, []);
+  useLayoutEffect(() => {
+    const s = seek.current;
+    if (!total) return;
+    s.max = String(Math.max(1, Math.round(total)));
+    if (document.activeElement !== s) s.value = String(Math.round(pos));
+    s.style.setProperty('--pct', `${Math.min(100, (pos / total) * 100)}%`);
+    sliderText(s, `${formatClock(pos)} of ${formatClock(total)}`);
+  });
+  const onKey = (e) => {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     e.preventDefault();
     e.stopPropagation();
     music.skip(e.key === 'ArrowRight' ? music.skipForward : -music.skipBack);
-  });
-  seek.addEventListener('change', () => music.seekBook(Number(seek.value)));
-  el.append(
-    h('div', { class: 'np-main' }, h('div', { class: 'np-side' }, cover, h('div', { class: 'np-text' }, title, sub, chapterEl))),
-    h(
-      'div',
-      { class: 'np-transport' },
-      h('div', { class: 'np-buttons np-spoken-buttons' }, back, play, fwd),
-      h('div', { class: 'np-buttons np-spoken-more' }, speed, sleepBtn, chaptersBtn),
-      h('div', { class: 'np-seek' }, cur, h('div', { class: 'np-seek-wrap' }, seek, ticks), left),
-    ),
-  );
-  let shownId = null;
-  function draw() {
-    const t = music.current;
-    if (!t?.spoken) return;
-    const sp = t.spoken;
-    if (shownId !== (sp.bookId ?? t.id)) {
-      shownId = sp.bookId ?? t.id;
-      clear(cover).append(art(t.poster, sp.title, { kind: 'square', eager: true }));
-      title.textContent = sp.title;
-      sub.textContent = sp.author || '';
-      setTitle(sp.title);
-      setBackdrop(t.poster);
-    }
-    const total = music.bookDuration || 0;
-    clear(ticks).append(...(total ? (sp.chapters || []).slice(1).map((c) => h('span', { class: 'np-tick', style: { left: `${(c.start / total) * 100}%` } })) : []));
-    chaptersBtn.hidden = !(sp.chapters?.length > 1);
-    speed.querySelector('span').textContent = `${music.speed}×`;
-    speed.setAttribute('aria-label', `Speed ${music.speed}×`);
-    const m = music.sleep.mode;
-    sleepBtn.setAttribute('aria-label', m ? `Sleep timer: ${m === 'chapter' ? 'end of chapter' : `${Math.ceil((music.sleep.remaining || 0) / 60000)} min left`}` : 'Sleep timer');
-    tick();
-  }
-  function tick() {
-    const pos = music.bookPosition;
-    const total = music.bookDuration || 0;
-    cur.textContent = formatClock(pos);
-    left.textContent = total ? leftText(total - pos) : '';
-    chapterEl.textContent = chapterAt(music.spoken?.chapters, pos)?.title || '';
-    if (total) {
-      seek.max = String(Math.max(1, Math.round(total)));
-      if (document.activeElement !== seek) seek.value = String(Math.round(pos));
-      seek.style.setProperty('--pct', `${Math.min(100, (pos / total) * 100)}%`);
-      sliderText(seek, `${formatClock(pos)} of ${formatClock(total)}`);
-    }
-    clear(play).append(icon(music.playing ? 'pause' : 'play', { size: 22 }));
-    play.setAttribute('aria-label', music.playing ? 'Pause' : 'Play');
-    play.title = play.getAttribute('aria-label');
-  }
-  function openChapters() {
-    const sp = music.spoken;
-    if (!sp?.chapters?.length) return;
-    const now = chapterAt(sp.chapters, music.bookPosition)?.index;
-    import('../components.js').then(({ openSheet }) =>
-      openSheet('Chapters', sp.chapters.map((c, i) => ({ label: `${c.title || `Chapter ${i + 1}`} · ${formatClock(c.start)}`, icon: i === now ? 'play' : 'list', onSelect: () => music.seekBook(c.start) }))),
-    );
-  }
-  const onChange = () => {
-    if (!music.current) return goBack('#/');
-    if (!music.spoken) return refreshView(); // a song now: the song layout
-    draw();
   };
-  const onTime = () => tick();
-  const onKey = (e) => {
-    if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('dialog[open]')) {
-      e.preventDefault();
-      goBack('#/');
-    }
-  };
-  music.events.addEventListener('change', onChange);
-  music.events.addEventListener('state', onChange);
-  music.events.addEventListener('time', onTime);
-  window.addEventListener('keydown', onKey);
-  document.documentElement.classList.add('nowplaying-open');
-  draw();
-  return () => {
-    music.events.removeEventListener('change', onChange);
-    music.events.removeEventListener('state', onChange);
-    music.events.removeEventListener('time', onTime);
-    window.removeEventListener('keydown', onKey);
-    document.documentElement.classList.remove('nowplaying-open');
-  };
+  return html`<input type="range" class="np-seek-range" min="0" max="1" step="1" aria-label="Seek" ref=${seek} onKeyDown=${onKey} onChange=${(e) => music.seekBook(Number(e.currentTarget.value))} />`;
 }

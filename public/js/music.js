@@ -5,12 +5,10 @@
 import { api } from './api.js';
 import { h, icon, clear, formatClock } from './dom.js';
 import { Queue } from './queue.js';
-import { addToPlaylistItems } from './lists.js';
-import { ratingControl, openRating } from './rating.js';
-import { downloadSheetItem } from './offline/ui.js';
+import { ratingControl } from './rating.js';
 import { detectCaps, needsMediaLink } from './caps.js';
 import { markPlaying as gatePlaying } from './gate.js';
-import { art, toast, openDialog, openSheet, sliderText, percentSlider } from './components.js';
+import { art, toast, openSheet, sliderText, percentSlider } from './components.js';
 import { VOLUME_KEY, musicKey } from './storage.js';
 import { partAt, bookTime, chapterAt, leftText, fadeVolume, SPEEDS, FADE_MS } from './spoken-time.js';
 
@@ -65,6 +63,10 @@ export const music = {
   },
   get shuffle() {
     return queue.shuffle;
+  },
+  /** The current song has been loaded (a song list's click on it pauses or resumes rather than starting it again). */
+  get started() {
+    return session != null;
   },
   /** 0–1 (Now Playing's slider and the mini-player's share it). */
   get volume() {
@@ -954,7 +956,6 @@ function updateState() {
   playBtn.title = paused ? 'Play' : 'Pause';
   if (paused) miniPlayer.classList.remove('is-busy');
   if ('mediaSession' in navigator && !suspended && queue.current) navigator.mediaSession.playbackState = paused ? 'paused' : 'playing';
-  markPlaying();
   emit('state');
 }
 
@@ -1023,148 +1024,9 @@ function changed() {
   emit('change');
 }
 
-/** Highlight the playing song in any track list on the page. */
-export function markPlaying(root = document) {
-  const id = queue.current?.id;
-  for (const row of root.querySelectorAll('.track-row')) {
-    const on = Number(row.dataset.id) === id;
-    row.classList.toggle('is-current', on);
-    row.classList.toggle('is-playing', on && !audio.paused);
-    if (on) row.setAttribute('aria-current', 'true');
-    else row.removeAttribute('aria-current');
-  }
-}
-
 // ---- The queue dialog: the songs still to come (the playing one is on the mini-player already) ----
 export function openQueue() {
-  let list;
-  let focusKey = null; // e.g. "3:up" — refocused after the list redraws
-  const act = (key, fn) => () => {
-    focusKey = key;
-    fn();
-  };
-  const render = () => {
-    const keep = focusKey ?? document.activeElement?.dataset?.qkey ?? null;
-    focusKey = null;
-    clear(list);
-    if (!queue.length) {
-      list.append(h('li', { class: 'muted' }, 'Nothing queued.'));
-      return;
-    }
-    const upcoming = queue.items.map((t, i) => [t, i]).filter(([, i]) => i > queue.index);
-    if (!upcoming.length) {
-      list.append(h('li', { class: 'muted' }, 'Nothing more queued.'));
-      return;
-    }
-    upcoming.forEach(([t, i]) => {
-      const isCur = false;
-      list.append(
-        h(
-          'li',
-          { class: `queue-row${isCur ? ' is-current' : ''}${i < queue.index ? ' is-past' : ''}` },
-          h(
-            'button',
-            { type: 'button', class: 'queue-main', 'aria-current': isCur ? 'true' : null, dataset: { qkey: `${i}:main` }, onClick: act(`${i}:main`, () => music.jump(i)) },
-            art(t.poster, t.albumTitle || t.title, { kind: 'square' }),
-            h('span', { class: 'queue-text' }, h('strong', {}, t.title), h('small', {}, [t.artist, t.albumTitle].filter(Boolean).join(' · '))),
-            h('span', { class: 'muted small' }, t.duration ? formatClock(t.duration) : ''),
-          ),
-          h(
-            'span',
-            { class: 'queue-tools' },
-            h('button', { type: 'button', class: 'mbtn', 'aria-label': `Move “${t.title}” up`, title: 'Move up', disabled: i <= queue.index + 1, dataset: { qkey: `${i}:up` }, onClick: act(`${i - 1}:up`, () => music.move(i, i - 1)) }, icon('up', { size: 18 })),
-            h('button', { type: 'button', class: 'mbtn', 'aria-label': `Move “${t.title}” down`, title: 'Move down', disabled: i === queue.length - 1, dataset: { qkey: `${i}:down` }, onClick: act(`${i + 1}:down`, () => music.move(i, i + 1)) }, icon('chevronDown', { size: 18 })),
-            h('button', { type: 'button', class: 'mbtn', 'aria-label': `Remove “${t.title}”`, title: 'Remove', dataset: { qkey: `${i}:remove` }, onClick: act(`${Math.min(i, queue.length - 2)}:remove`, () => music.remove(i)) }, icon('close', { size: 18 })),
-          ),
-        ),
-      );
-    });
-    const target = keep && list.querySelector(`[data-qkey="${keep}"]:not(:disabled)`);
-    if (target) target.focus({ preventScroll: false });
-    else list.querySelector('.queue-row.is-current')?.scrollIntoView({ block: 'nearest' });
-  };
-  const onChange = () => render();
-  openDialog({
-    title: 'Queue',
-    wide: true,
-    body: () => {
-      list = h('ol', { class: 'queue-list', role: 'list' });
-      render();
-      events.addEventListener('change', onChange);
-      return list;
-    },
-    actions: [
-      { label: 'Clear queue', value: 'clear', variant: 'ghost' },
-      { label: 'Done', value: 'close', variant: 'primary' },
-    ],
-  }).then((v) => {
-    events.removeEventListener('change', onChange);
-    if (v === 'clear') music.stop();
-  });
-}
-
-// ---- Track lists (album pages, songs view, search) ----
-/**
- * @param {object[]} tracks
- * @param {{ showAlbum?: boolean, showArtist?: boolean|string, numbers?: boolean, discs?: boolean, focusId?: number }} [opts]
- *   showArtist: true = always, a string = only when the song's artist differs from it
- */
-/** `queueOffset`: the rows are the live queue from that index on — a click jumps there instead of rebuilding the queue. */
-export function trackList(tracks, { showAlbum = false, showArtist = true, numbers = true, discs = false, focusId = null, queueOffset = null } = {}) {
-  const multiDisc = discs && new Set(tracks.map((t) => t.season || 1)).size > 1;
-  const list = h('ol', { class: `tracks${showAlbum ? ' with-album' : ''}`, role: 'list' });
-  let disc = null;
-  tracks.forEach((t, i) => {
-    if (multiDisc && (t.season || 1) !== disc) {
-      disc = t.season || 1;
-      list.append(h('li', { class: 'disc-head', 'aria-hidden': 'true' }, icon('album', { size: 16 }), `Disc ${disc}`));
-    }
-    const artistText = showArtist === true ? t.artist : typeof showArtist === 'string' && t.artist && t.artist !== showArtist ? t.artist : null;
-    const num = numbers ? (t.episode ?? i + 1) : null;
-    list.append(
-      h(
-        'li',
-        { class: 'track-row', dataset: { id: t.id } },
-        h(
-          'button',
-          {
-            type: 'button',
-            class: 'track-main',
-            'aria-label': `Play ${t.title}${t.artist ? ` by ${t.artist}` : ''}`,
-            'data-autofocus': focusId === t.id || null,
-            onClick: () => {
-              if (queue.current?.id === t.id && session) music.toggle();
-              else if (queueOffset != null) music.jump(queueOffset + i);
-              else music.playTracks(tracks, i, { shuffle: queue.shuffle });
-            },
-          },
-          h('span', { class: 'track-num' }, h('span', { class: 'track-n' }, num != null ? String(num) : ''), h('span', { class: 'track-eq', 'aria-hidden': 'true' }, h('i'), h('i'), h('i')), icon('play', { size: 16 })),
-          showAlbum ? art(t.poster || t.albumPoster, t.albumTitle || t.title, { kind: 'square' }) : null,
-          h('span', { class: 'track-text' }, h('span', { class: 'track-title' }, t.title), artistText || (showAlbum && t.albumTitle) ? h('span', { class: 'track-sub' }, [artistText, showAlbum ? t.albumTitle : null].filter(Boolean).join(' · ')) : null),
-          h('span', { class: 'track-time' }, t.duration ? formatClock(t.duration) : ''),
-        ),
-        h('button', { type: 'button', class: 'mbtn track-more', 'aria-label': `More for ${t.title}`, title: 'More', onClick: () => trackMenu(t) }, icon('more', { size: 20 })),
-      ),
-    );
-  });
-  markPlaying(list);
-  return list;
-}
-
-function trackMenu(t) {
-  openSheet(t.title, [
-    { label: 'Play now', icon: 'play', onSelect: () => music.playTracks([t], 0) },
-    { label: 'Play next', icon: 'queue', onSelect: () => music.playNext([t]) },
-    { label: 'Add to queue', icon: 'queue', onSelect: () => music.addToQueue([t]) },
-    // Lyrics for a song that isn't playing: its own page, with the queue left as it is.
-    { label: 'Lyrics', icon: 'list', onSelect: () => { location.hash = music.current?.id === t.id ? '#/now-playing' : `#/now-playing?song=${t.id}`; } },
-    addToPlaylistItems({ itemId: t.id }, { kind: 'music' }),
-    { label: 'Rate…', icon: 'star', onSelect: () => openRating(t) },
-    downloadSheetItem(t), // v0.21: into the app
-    { label: 'Cast to…', icon: 'cast', onSelect: async () => (await import('./cast.js')).openCastPicker({ queue: { itemIds: [t.id], index: 0 } }) },
-    t.parentId ? { label: 'Go to album', icon: 'album', onSelect: () => (location.hash = `#/item/${t.parentId}?track=${t.id}`) } : null,
-    t.showId ? { label: 'Go to artist', icon: 'user', onSelect: () => (location.hash = `#/item/${t.showId}`) } : null,
-  ]);
+  import('./ui/music.js').then((m) => m.openQueue());
 }
 
 // ---- v0.22: the bar's second line for a book or an episode (the chapter, then who wrote or hosts it) ----

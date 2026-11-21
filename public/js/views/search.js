@@ -1,14 +1,14 @@
 // Search across every library. Orbit (v0.24) adds recent searches, genre and library tiles before typing, and
 // suggestions from the first letter. v0.26: a Preact screen.
 import { html, useState, useRef, useLayoutEffect, useAppState } from '../ui.js';
-import { Icon, Button, EmptyState, Spinner, Island } from '../ui/basics.js';
+import { Icon, Button, EmptyState, Spinner } from '../ui/basics.js';
 import { Grid } from '../ui/cards.js';
 import { api, qs } from '../api.js';
 import { browseTarget, cardItems } from '../components.js';
 import { setTitle, canAdmin, liveAllowed, isOrbit, state as appState } from '../app.js';
 import { orbitLibraryIcon } from '../orbit-rules.js';
 import { search as liveSearch, onTvHere, clockTime, playChannel, channelLabel } from '../live.js';
-import { trackList } from '../music.js';
+import { TrackList } from '../ui/music.js';
 import { followFocus } from '../backdrop.js';
 import { followFocus as followBackdrop } from '../focus-backdrop.js';
 
@@ -62,7 +62,7 @@ function Results({ found, libraries }) {
   return html`${sections.map(
     ([title, items, style]) => html`<section key=${title} class="search-section">
       <h2>${`${title} `}<span class="muted">${String(items.length)}</span></h2>
-      ${style === 'tracks' ? html`<${Island} class="song-list" make=${() => trackList(items, { showAlbum: true, numbers: false })} deps=${[items]} />` : html`<${Grid} items=${items} style=${style} />`}
+      ${style === 'tracks' ? html`<div class="song-list"><${TrackList} tracks=${items} showAlbum=${true} numbers=${false} /></div>` : html`<${Grid} items=${items} style=${style} />`}
     </section>`,
   )}${tvCount ? html`<${OnTv} tv=${tv} />` : null}`;
 }
