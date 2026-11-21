@@ -50,7 +50,7 @@ Add its route to the `routes` list in `public/js/app.js`:
 { pattern: /^\/recent\/(\d+)$/, keys: ['id'], view: lazyView('views/recent.js') },
 ```
 
-The smallest real screen is `public/js/views/genre.js`; Live TV (`views/live.js`), the libraries (`views/library.js`), the title page (`views/item.js`, with `item-show.js` and `item-music.js`) the Live TV guide (`views/guide.js`, its keyboard rules in `guide-rules.js`) and Now Playing (`views/nowplaying.js`, its rules in `nowplaying-rules.js`) are the larger ones. The song rows (`TrackList`) and the queue dialog's list (`QueueList`) live in `ui/music.js`; the music engine (`music.js`) stays plain code and exposes `music.started` and the song's state to them. The title page also shows how to hand a kind of page to an older module that hasn't moved yet: `load()` renders it into a detached element and the screen adopts its nodes.
+The smallest real screen is `public/js/views/genre.js`; Live TV (`views/live.js`), the libraries (`views/library.js`), the title page (`views/item.js`, with `item-show.js` and `item-music.js`), the Live TV guide (`views/guide.js`, its keyboard rules in `guide-rules.js`) and Now Playing (`views/nowplaying.js`, its rules in `nowplaying-rules.js`) are the larger ones. The song rows (`TrackList`) and the queue dialog's list (`QueueList`) live in `ui/music.js`; the music engine (`music.js`) stays plain code and exposes `music.started` and the song's state to them. The title page also shows how to hand a kind of page to an older module that hasn't moved yet: `load()` renders it into a detached element and the screen adopts its nodes.
 
 Older screens still export `render(el, params, query)`. The router mounts both kinds, so a screen can move over on its own.
 
